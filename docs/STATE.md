@@ -10,7 +10,21 @@ alwaysApply: true
 > todo. Diferente do **ADR** (decisão durável e imutável). Decisão estrutural → ADR; estado do
 > trabalho → aqui. Atualize ao **pausar/encerrar**; leia ao **retomar**. Use a skill `/handoff`.
 
-**Última atualização:** 2026-07-21 por Claude (MOBILE "virar app" — fatia 2: pílula bottom-nav + isMobile reativo + fontes OP; DEPLOYADO)
+**Última atualização:** 2026-07-21 por Claude (Tailwind+shadcn ADITIVO instalado — ADR-0007; build+testes verdes; NÃO deployado)
+
+> **2026-07-21 (5): TAILWIND + shadcn/ui ADOTADO (aditivo) — ADR-0007. Build via CRACO exit 0 + 19
+> suítes/142 testes verdes. NÃO deployado ainda (mudança de build+CSS global no app inteiro — precisa
+> validação visual do Andre antes do deploy).** Andre: "coloque o shadcn no projeto pra usar". Caminho:
+> **CRACO** (CRA não lê tailwind.config sozinho) + **Tailwind v3** + **preflight OFF** (crítico — o reset
+> global quebraria o app inline-styled; `@layer base` escopado a `border`/`box-border` restaura só o
+> essencial dos componentes shadcn). Tokens **`--sh-*`** (não colidem com `--purple`/`--gold`). Alias
+> `@`→src no CRACO+jsconfig. Arquivos novos: `craco.config.js`, `tailwind.config.js`, `jsconfig.json`,
+> `components.json`, `src/tailwind.css`, `src/lib/utils.js` (cn), `src/components/ui/button.jsx` (prova).
+> `src/index.js` importa o CSS; scripts npm → `craco`. **PENDENTE Andre:** (1) rodar `npm start` local e
+> conferir que NADA do visual atual mudou (o preflight-off deve garantir; CSS emitido = só 354B); depois
+> **deploy**. (2) **restart do Claude Code + aprovar o MCP shadcn** (já em `../.mcp.json`) para puxar mais
+> componentes via `npx shadcn@latest add <x>` ou MCP. **DÍVIDA registrada no ADR:** migrar CRA→Vite um dia
+> (tira o CRACO, shadcn no caminho oficial). Regra nova: legado = inline styles; **telas novas = shadcn**.
 
 > **2026-07-21 (4): MOBILE "virar app" — FATIA 2 FEITA + DEPLOYADA (commit `baae1b3`, build exit 0,
 > 19 suítes/142 testes).** (1) **Pílula deslizante na bottom-nav** — portada a shared-layout do desktop

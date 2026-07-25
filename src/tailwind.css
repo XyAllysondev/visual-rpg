@@ -1,0 +1,39 @@
+/* Tailwind + tokens do shadcn (ADR-0007). preflight está OFF no tailwind.config.js,
+ * então @tailwind base NÃO emite o reset global — só registra as bases das utilities.
+ * Os tokens ficam namespaced em --sh-* para não colidir com os --purple/--gold do app. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* preflight OFF: restaura só o essencial que as utilities do Tailwind assumem, SEM
+   * reset global. Escopado a classes que contêm "border"/box → atinge apenas os
+   * componentes shadcn (o app usa style inline, não classNames com esses nomes),
+   * então nada do visual existente é alterado. */
+  [class*="border"] { border-style: solid; }
+  [class~="box-border"] { box-sizing: border-box; }
+}
+
+:root {
+  /* paleta gótica do NEXUS (tema escuro por padrão) */
+  --sh-background: 0 0% 2%;
+  --sh-foreground: 40 20% 90%;
+  --sh-card: 240 24% 9%;
+  --sh-card-foreground: 40 20% 90%;
+  --sh-popover: 240 24% 9%;
+  --sh-popover-foreground: 40 20% 90%;
+  --sh-primary: 45 54% 54%;            /* dourado NEXUS #c9a84c */
+  --sh-primary-foreground: 0 0% 4%;
+  --sh-secondary: 240 14% 16%;
+  --sh-secondary-foreground: 40 20% 90%;
+  --sh-muted: 240 12% 14%;
+  --sh-muted-foreground: 240 8% 62%;
+  --sh-accent: 271 76% 53%;            /* roxo NEXUS #a855f7 */
+  --sh-accent-foreground: 40 20% 96%;
+  --sh-destructive: 0 62% 50%;
+  --sh-destructive-foreground: 40 20% 96%;
+  --sh-border: 240 10% 18%;
+  --sh-input: 240 10% 20%;
+  --sh-ring: 45 54% 54%;
+  --sh-radius: 0.6rem;
+}
