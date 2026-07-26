@@ -50,6 +50,34 @@ const ANEIS = [
   { id: "conhecim", nome: "Conhecimento", cor: "#f0c040" },
 ];
 
+/* Tons de pele aplicados ao MOLDE via multiply — a arte é branca com linhas
+ * escuras, então a cor tinge o corpo e preserva o traço. */
+const PELES = [
+  { id: "original", nome: "Original",  cor: null },
+  { id: "clara",    nome: "Clara",     cor: "#f7e3cf" },
+  { id: "media",    nome: "Média",     cor: "#eec39a" },
+  { id: "morena",   nome: "Morena",    cor: "#c98f5e" },
+  { id: "escura",   nome: "Escura",    cor: "#8d5a3b" },
+  { id: "retinta",  nome: "Retinta",   cor: "#5a3a28" },
+  { id: "palida",   nome: "Pálida",    cor: "#cfd2dd" },
+  { id: "cadaver",  nome: "Cadavérica",cor: "#aebfae" },
+  { id: "sangue",   nome: "Sangue",    cor: "#c96a6a" },
+  { id: "paranormal",nome:"Paranormal",cor: "#a882c9" },
+];
+
+/* Tinge uma imagem carregada: multiply da cor + restaura o alpha original. */
+const tingir = (img, cor) => {
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth || img.width; c.height = img.naturalHeight || img.height;
+  const x = c.getContext("2d");
+  x.drawImage(img, 0, 0);
+  x.globalCompositeOperation = "multiply";
+  x.fillStyle = cor; x.fillRect(0, 0, c.width, c.height);
+  x.globalCompositeOperation = "destination-in";
+  x.drawImage(img, 0, 0);
+  return c;
+};
+
 const FUNDOS = [
   { id: "transp", nome: "Transparente", cor: null },
   { id: "escuro", nome: "Escuro",       cor: "#14121c" },
@@ -67,6 +95,8 @@ export default function TokenBuilder({ onSalvar, onFechar, nomeInicial = "" }) {
   const [catFiltro, setCat]      = useState("Todas");
   const [anel, setAnel]          = useState("ordem");
   const [fundo, setFundo]        = useState("escuro");
+  const [pele, setPele]          = useState("original");
+  const [moldeTingido, setMoldeTingido] = useState(null);   // dataURL do molde com a pele aplicada
   const [nome, setNome]          = useState(nomeInicial);
   const [salvando, setSalvando]  = useState(false);
   const canvasRef  = useRef(null);
@@ -76,6 +106,19 @@ export default function TokenBuilder({ onSalvar, onFechar, nomeInicial = "" }) {
   const camada   = CAMADAS.find((c) => c.id === camadaAtiva) || CAMADAS[0];
   const anelCor  = ANEIS.find((a) => a.id === anel)?.cor;
   const fundoCor = FUNDOS.find((f) => f.id === fundo)?.cor;
+  const peleCor  = PELES.find((p) => p.id === pele)?.cor;
+
+  /* pré-tinge o molde para o preview sempre que a peça ou a pele mudar */
+  const moldeSrc = sel.molde?.peca.src;
+  React.useEffect(() => {
+    if (!moldeSrc || !peleCor) { setMoldeTingido(null); return; }
+    let vivo = true;
+    const im = new Image();
+    im.onload = () => { if (vivo) try { setMoldeTingido(tingir(im, peleCor).toDataURL("image/png")); } catch (_) { setMoldeTingido(null); } };
+    im.onerror = () => vivo && setMoldeTingido(null);
+    im.src = moldeSrc;
+    return () => { vivo = false; };
+  }, [moldeSrc, peleCor]);
 
   const cats = useMemo(
     () => (camada ? ["Todas", ...Array.from(new Set(camada.pecas.map((p) => p.cat).filter(Boolean)))] : []),
@@ -160,11 +203,14 @@ export default function TokenBuilder({ onSalvar, onFechar, nomeInicial = "" }) {
 
     ctx.save();
     ctx.beginPath(); ctx.arc(SIZE / 2, SIZE / 2, SIZE / 2 - 6, 0, Math.PI * 2); ctx.closePath(); ctx.clip();
-    for (const { item } of empilhadas) {
-      const img = await new Promise((res, rej) => {
+    for (const { camada: cam, item } of empilhadas) {
+      let img = await new Promise((res, rej) => {
         const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = item.peca.src;
       }).catch(() => null);
       if (!img) continue;
+      if (cam.id === "molde" && peleCor) {
+        try { img = tingir(img, peleCor); } catch (_) {}
+      }
       const box = item.s * SIZE;
       const escala = Math.min(box / img.width, box / img.height);
       const w = img.width * escala, h = img.height * escala;
@@ -184,7 +230,7 @@ export default function TokenBuilder({ onSalvar, onFechar, nomeInicial = "" }) {
       ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,0.45)"; ctx.stroke();
     }
     return cv.toDataURL("image/png");
-  }, [empilhadas, anelCor, fundoCor]);
+  }, [empilhadas, anelCor, fundoCor, peleCor]);
 
   const baixar = async () => {
     const url = await renderizar();
@@ -252,7 +298,7 @@ export default function TokenBuilder({ onSalvar, onFechar, nomeInicial = "" }) {
               cursor: ativa ? "grab" : "default", touchAction: "none", userSelect: "none",
             }}>
             {empilhadas.map(({ camada: c, item }) => (
-              <img key={c.id} src={item.peca.src} alt={item.peca.nome} draggable={false}
+              <img key={c.id} src={c.id === "molde" && moldeTingido ? moldeTingido : item.peca.src} alt={item.peca.nome} draggable={false}
                 style={{
                   position: "absolute",
                   left: `${(item.x - item.s / 2) * 100}%`, top: `${(item.y - item.s / 2) * 100}%`,
@@ -288,6 +334,21 @@ export default function TokenBuilder({ onSalvar, onFechar, nomeInicial = "" }) {
           <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome do token…"
             style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)",
               padding: "9px 12px", fontFamily: "Crimson Pro,serif", fontSize: 15, outline: "none", width: "100%", boxSizing: "border-box" }} />
+
+          <div>
+            <div style={{ ...L, marginBottom: 5 }}>Pele</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+              {PELES.map((p) => (
+                <button key={p.id} onClick={() => setPele(p.id)} title={p.nome}
+                  style={{ width: 26, height: 26, borderRadius: "50%", cursor: "pointer",
+                    background: p.cor || "#ffffff",
+                    border: pele === p.id ? "2px solid #fff" : "1px solid var(--border)",
+                    boxShadow: pele === p.id ? `0 0 10px ${p.cor || "#fff"}99` : "none" }}>
+                  {!p.cor && <span style={{ color: "#333", fontSize: 11, lineHeight: 1, fontWeight: 700 }}>○</span>}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div>
             <div style={{ ...L, marginBottom: 5 }}>Anel</div>
