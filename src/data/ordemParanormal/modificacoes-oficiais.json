@@ -1,0 +1,29 @@
+[
+  { "id": "certeira", "aplica": "armas", "nome": "Certeira", "efeito": "Fabricada para ser mais precisa e balanceada: +2 nos testes de ataque." },
+  { "id": "cruel", "aplica": "armas", "nome": "Cruel", "efeito": "Lâmina especialmente afiada ou materiais mais densos: +2 nas rolagens de dano." },
+  { "id": "discreta", "aplica": "armas", "nome": "Discreta", "efeito": "Desmontável, retrátil ou disfarçada: +5 em testes de Crime para ser ocultada (mesmo sem treino) e ocupa 1 espaço a menos." },
+  { "id": "perigosa", "aplica": "armas", "nome": "Perigosa", "efeito": "Golpes de impacto terrível: +2 na margem de ameaça." },
+  { "id": "tatica", "aplica": "armas", "nome": "Tática", "efeito": "Cabo texturizado, bandoleira e acessórios de manuseio: pode ser sacada como ação livre." },
+
+  { "id": "alongada", "aplica": "armas_fogo", "nome": "Alongada", "efeito": "Cano mais longo e preciso: +2 nos testes de ataque." },
+  { "id": "calibre_grosso", "aplica": "armas_fogo", "nome": "Calibre Grosso", "efeito": "Dispara munição de maior calibre: +1 dado de dano do mesmo tipo. Exige munição específica de calibre grosso." },
+  { "id": "compensador", "aplica": "armas_fogo", "nome": "Compensador", "efeito": "Apenas armas automáticas: o amortecimento do coice anula a penalidade nos testes de ataque por disparar rajadas." },
+  { "id": "ferrolho_automatico", "aplica": "armas_fogo", "nome": "Ferrolho Automático", "efeito": "Mecanismo modificado para disparos em sequência: a arma se torna automática." },
+  { "id": "mira_laser", "aplica": "armas_fogo", "nome": "Mira Laser", "efeito": "Retículo luminoso que guia disparos letais: +2 na margem de ameaça." },
+  { "id": "mira_telescopica", "aplica": "armas_fogo", "nome": "Mira Telescópica", "efeito": "Luneta com marcações: aumenta o alcance da arma em uma categoria e permite usar Ataque Furtivo em qualquer alcance." },
+  { "id": "silenciador", "aplica": "armas_fogo", "nome": "Silenciador", "efeito": "Reduz em 2 dados a penalidade em Furtividade para se esconder no turno em que atacou com a arma." },
+  { "id": "visao_calor", "aplica": "armas_fogo", "nome": "Visão de Calor", "efeito": "Mira com infravermelho: ao disparar, você ignora qualquer camuflagem do alvo." },
+
+  { "id": "explosiva", "aplica": "municao", "nome": "Explosiva", "efeito": "Balas com gota de mercúrio ou glicerina que explodem no impacto: +2d6 de dano. Apenas balas curtas e longas." },
+  { "id": "dum_dum", "aplica": "municao", "nome": "Dum Dum", "efeito": "Balas que se expandem no impacto: +1 no multiplicador de crítico. Apenas balas curtas e longas." },
+
+  { "id": "antibombas", "aplica": "protecao", "nome": "Antibombas", "efeito": "+5 em testes de resistência contra efeitos de área." },
+  { "id": "blindada", "aplica": "protecao", "nome": "Blindada", "efeito": "Aumenta a redução de dano para 5 e o espaço ocupado em +1." },
+  { "id": "discreta_protecao", "aplica": "protecao", "nome": "Discreta", "efeito": "+5 em testes para ser ocultada e ocupa 1 espaço a menos." },
+  { "id": "reforcada", "aplica": "protecao", "nome": "Reforçada", "efeito": "Aumenta a Defesa em +2 e o espaço ocupado em +1." },
+
+  { "id": "aprimorado", "aplica": "acessorio", "nome": "Aprimorado", "efeito": "O bônus em perícia do acessório aumenta para +5 (pode ser aplicado de novo a uma função adicional)." },
+  { "id": "discreto_acessorio", "aplica": "acessorio", "nome": "Discreto", "efeito": "Miniaturizado ou disfarçado: ocupa 1 espaço a menos e dá +5 em Crime para ser ocultado (mesmo sem treino)." },
+  { "id": "funcao_adicional", "aplica": "acessorio", "nome": "Função Adicional", "efeito": "O acessório concede +2 em uma perícia adicional à sua escolha (aprovação do mestre)." },
+  { "id": "instrumental", "aplica": "acessorio", "nome": "Instrumental", "efeito": "O acessório funciona como um kit de perícia específico, escolhido ao aplicar a modificação." }
+]

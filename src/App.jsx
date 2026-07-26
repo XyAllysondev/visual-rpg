@@ -1,8 +1,9 @@
-import { useState, useEffect, useLayoutEffect, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
 import { ThemeStyles } from "./themes/ThemeProvider";
 import { SYSTEM_THEMES, getCardAccent } from "./themes";
-import { EASE_HOVER, DUR_ENTER } from "./themes/motion";
+import { useSlidingPill } from "./hooks/useSlidingPill";
+import SlidingTabPill from "./components/SlidingTabPill";
 import { ELEMENTOS, getElementTheme } from "./components/systems/OrdemParanormal/elementos";
 import ElementoSymbol from "./components/systems/OrdemParanormal/ElementoSymbol";
 import DossierCard from "./components/systems/OrdemParanormal/DossierCard";
@@ -15,6 +16,7 @@ import {
   signInWithPopup, GoogleAuthProvider, reauthenticateWithPopup,
   sendPasswordResetEmail, updateProfile,
   setPersistence, browserLocalPersistence, browserSessionPersistence,
+  onAuthStateChanged,
 } from "firebase/auth";
 import { doc, setDoc, getDoc, updateDoc, deleteField, collection, addDoc, query, orderBy, limit, onSnapshot, getDocs, serverTimestamp, arrayUnion, arrayRemove, where, deleteDoc, startAfter, writeBatch, Timestamp } from "firebase/firestore";
 import { roadmapData } from './roadmapData';
@@ -22,6 +24,11 @@ import { useLocale } from "./i18n/useLocale";
 import MapEditor from './components/MapEditor';
 import LicencaOP, { TEXTO_IA } from "./components/LicencaOP";
 import { getActiveAvatar } from "./domain/character";
+import REGRAS_OFICIAIS from "./data/ordemParanormal/regras-oficiais.json";
+import RITUAIS_LIB from "./data/ordemParanormal/rituais-oficiais.json";
+import ITENS_LIB from "./data/ordemParanormal/itens-oficiais.json";
+import MODS_LIB from "./data/ordemParanormal/modificacoes-oficiais.json";
+import TOKENS_LIB from "./data/ordemParanormal/tokens-oficiais.json";
 
 // System-specific sheets are code-split (Phase 3 theming architecture).
 const OrdemParanormalSheet = lazy(() => import("./components/systems/OrdemParanormal/OrdemParanormalSheet"));
@@ -210,8 +217,8 @@ function CoverPreviewModal({ image: initialImage, onConfirm, onClose }) {
   };
 
   return createPortal(
-    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",zIndex:10000,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px"}}>
-      <div onClick={e=>e.stopPropagation()} style={{background:"#111",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,width:"100%",maxWidth:600,overflow:"hidden",boxShadow:"0 24px 64px rgba(0,0,0,0.8)"}}>
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.62)",zIndex:10000,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"var(--card2)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:12,width:"100%",maxWidth:600,overflow:"hidden",boxShadow:"0 24px 64px rgba(0,0,0,0.55)"}}>
 
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 20px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
           <span style={{fontFamily:"Cinzel,serif",fontSize:11,letterSpacing:"0.12em",color:"#ccc",textTransform:"uppercase"}}>Ajustar Imagem de Capa</span>
@@ -321,20 +328,24 @@ const G = () => (
     @import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700;900&family=Cinzel:wght@400;500;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap');
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     html{-webkit-text-size-adjust:100%}
+    /* Fallback de boot (spec 0023). O registry (themes/index.js, via <ThemeStyles/>)
+       vence por especificidade — :root[data-nexus-system] é (0,2,0) contra (0,1,0).
+       Estes valores espelham a escala grafite do sistema padrão (op) para que o
+       primeiro frame e a IntroScreen (que não monta este bloco) não pisquem escuro. */
     :root{
-      --bg:#0d0d0d;
-      --surface:#131313;
-      --card:#1a1a1a;
-      --card2:#202020;
+      --bg:#14141c;
+      --surface:#1c1c26;
+      --card:#24242f;
+      --card2:#2c2c39;
       --border:rgba(201,168,76,0.18);
-      --border2:rgba(201,168,76,0.32);
+      --border2:rgba(201,168,76,0.34);
       --gold:#c9a84c;
       --gold2:#e8c96d;
       --gold3:#a07830;
       --gold-glow:rgba(201,168,76,0.22);
       --gold-dim:rgba(201,168,76,0.09);
-      --text:#f0e8d4;
-      --muted:#9c8e70;
+      --text:#e8e4d9;
+      --muted:#a89a7c;
       --muted2:#c8b48e;
       --danger:#8b2020;
       --purple:#8e6dbf;
@@ -363,9 +374,12 @@ const G = () => (
     @keyframes live-dot{0%,49%{opacity:1;text-shadow:0 0 6px #4ade80}50%,100%{opacity:0;text-shadow:none}}
     @keyframes live-badge-glow{0%,100%{box-shadow:0 0 0 rgba(74,222,128,0)}50%{box-shadow:0 0 10px rgba(74,222,128,0.5),0 0 20px rgba(74,222,128,0.15)}}
     .logo-float{animation:float 4s ease-in-out infinite}
-    .stat-card{cursor:pointer;transition:all 0.2s ease}
-    .stat-card:hover{box-shadow:0 0 18px rgba(142,109,191,0.28),0 4px 14px rgba(0,0,0,0.35);border-color:rgba(142,109,191,0.45)!important}
-    .skeleton{background:linear-gradient(90deg,rgba(255,255,255,0.04) 25%,rgba(255,255,255,0.08) 50%,rgba(255,255,255,0.04) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:4px}
+    .stat-card{cursor:pointer;transition:transform 0.2s ease,box-shadow 0.2s ease,border-color 0.2s ease}
+    .stat-card:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,0.4);border-color:rgba(255,255,255,0.22)!important}
+    .stat-card:hover span[aria-hidden]{opacity:0.9}
+    .stat-card:active{transform:translateY(0)}
+    .stat-card:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+    .skeleton{background:linear-gradient(90deg,rgba(255,255,255,0.05) 25%,rgba(255,255,255,0.10) 50%,rgba(255,255,255,0.05) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:4px}
     [role="button"]:focus-visible{outline:2px solid rgba(201,168,76,0.8);outline-offset:3px;border-radius:10px}
     a:focus-visible{outline:2px solid rgba(201,168,76,0.8);outline-offset:2px;border-radius:3px}
 
@@ -396,7 +410,7 @@ const G = () => (
       padding:8px 14px;border-radius:3px;cursor:pointer;border:none;
       background:transparent;color:var(--muted2);transition:all 0.2s;display:flex;align-items:center;gap:7px;
     }
-    .nav-item:hover{background:rgba(255,255,255,0.05);color:var(--text)}
+    .nav-item:hover{background:rgba(255,255,255,0.06);color:var(--text)}
     .nav-item.active{color:var(--purple2);background:var(--purple-dim)}
     input,textarea{
       font-family:'Crimson Pro',serif;font-size:16px;
@@ -413,7 +427,7 @@ const G = () => (
 
     /* ── RESPONSIVE LAYOUTS ── */
     .sheet-grid{display:grid;grid-template-columns:300px 1fr 1fr;gap:14px;align-items:start}
-    .dash-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+    .dash-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
     .dash-sessions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .creator-attrs{display:grid;grid-template-columns:1fr 1fr;gap:32px;align-items:start}
     .creator-classes{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
@@ -426,12 +440,14 @@ const G = () => (
 
     @media(max-width:768px){
       .sidebar-desktop{display:none !important}
+      /* hero da campanha: no mobile os botões overlay viram só ícone */
+      .camp-hero-btn-label{display:none}
       .bottomnav{
         display:flex;position:fixed;bottom:0;left:0;right:0;z-index:200;
-        background:rgba(5,5,8,0.97);border-top:1px solid var(--border);
+        background:rgba(26,26,35,0.94);border-top:1px solid var(--border);
         backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
         padding:0 0 env(safe-area-inset-bottom,0);
-        box-shadow:0 -4px 20px rgba(0,0,0,0.5);
+        box-shadow:0 -4px 20px rgba(0,0,0,0.35);
       }
       .bottomnav button{
         flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -444,7 +460,7 @@ const G = () => (
       .bottomnav button.active svg{opacity:1;filter:drop-shadow(0 0 5px var(--gold))}
       .bottomnav button:active{background:rgba(255,255,255,0.05)}
       .sheet-grid{grid-template-columns:1fr !important}
-      .dash-stats{grid-template-columns:repeat(2,1fr)}
+      .dash-stats{grid-template-columns:1fr}
       .dash-sessions{grid-template-columns:1fr}
       .creator-attrs{grid-template-columns:1fr}
       .creator-classes{grid-template-columns:1fr}
@@ -463,7 +479,7 @@ const G = () => (
     }
 
     @media(max-width:480px){
-      .dash-stats{grid-template-columns:repeat(2,1fr)}
+      .dash-stats{grid-template-columns:1fr}
       .char-meta{grid-template-columns:1fr 1fr}
     }
 
@@ -557,6 +573,13 @@ const G = () => (
     }
   `}</style>
 );
+
+/* Estilos base de TODA tela (spec 0023 AC-2): o bloco global + as CSS vars do
+   sistema ativo. Antes o <ThemeStyles/> só era montado no shell logado, então
+   login/seleção/criadores rodavam numa escala de luminância diferente do resto
+   do app. Fica em escopo de módulo de propósito — declarar dentro de App()
+   criaria um tipo de componente novo a cada render e remontaria as <style>. */
+const Shell = () => (<><G/><ThemeStyles/></>);
 
 /* Reactive prefers-reduced-motion hook (spec 0017 AC-5). Guards JS-driven
    effects (video autoplay, tilt) that CSS @media alone can't stop. */
@@ -877,7 +900,7 @@ function Login({ onLogin }) {
             width:"100%", maxWidth:440,
             background:"var(--card)", border:"1px solid var(--border2)",
             borderRadius:12, padding:"44px 48px", position:"relative", zIndex:1,
-            boxShadow:"0 0 60px rgba(201,168,76,0.08), 0 40px 80px rgba(0,0,0,0.8)",
+            boxShadow:"0 0 60px rgba(201,168,76,0.08), 0 40px 80px rgba(0,0,0,0.55)",
             animation:"borderGlow 4s ease-in-out infinite",
           }}>
             {/* Logo block — hidden on desktop */}
@@ -1121,35 +1144,44 @@ function useViewportWidth() {
 }
 function useIsMobile(bp = 768) { return useViewportWidth() < bp; }
 
+/* Abas do modal de Ajustes (spec 0022 AC-1). O sublinhado roxo virou um único
+   elemento que corre entre as abas; as bordas transparentes ficam nos botões só
+   para o box-model não mudar de altura. */
+function SettingsTabs({ active, onPick, label }) {
+  const { containerRef, setItemRef, pill } = useSlidingPill(active);
+  return (
+    <div ref={containerRef} style={{ display:"flex", gap:0, padding:"12px 24px 0", borderBottom:"1px solid var(--border)", marginTop:8, position:"relative" }}>
+      <SlidingTabPill pill={pill} underline="#8b5cf6" />
+      {["ficha","stream","idioma"].map(tabId => (
+        <button key={tabId} ref={setItemRef(tabId)} onClick={()=>onPick(tabId)} style={{
+          background:"none", border:"none", cursor:"pointer",
+          fontFamily:"Cinzel,serif", fontSize:12, letterSpacing:1,
+          color: active===tabId ? "#fff" : "#666",
+          borderBottom:"2px solid transparent",
+          padding:"0 4px 10px", marginRight:20, marginBottom:-1,
+          transition:"color 0.2s", position:"relative", zIndex:1,
+        }}>{label("settings.tabs."+tabId)}</button>
+      ))}
+    </div>
+  );
+}
+
 function MobileBottomNav({ active, onNav }) {
   const { t } = useLocale();
   const items = navItems.slice(0, 6);
   // Shared-layout pill (paridade com o Sidebar desktop, spec 0017 AC-4): um único
   // realce desliza horizontalmente até o item ativo, em vez de cada botão acender/
-  // apagar de golpe. Re-mede na troca de aba E no resize/rotação (viewportW).
-  const itemRefs = useRef({});
-  const [pill, setPill] = useState(null);
+  // apagar de golpe. O hook re-mede sozinho (ResizeObserver + fonts.ready); o
+  // viewportW cobre browsers sem ResizeObserver ao girar o device.
   const viewportW = useViewportWidth();
-  useLayoutEffect(() => {
-    const el = itemRefs.current[active];
-    if (el) setPill({ left: el.offsetLeft, top: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight, visible: true });
-    else setPill(prev => (prev ? { ...prev, visible: false } : null));
-  }, [active, viewportW]);
+  const { containerRef, setItemRef, pill } = useSlidingPill(active, String(viewportW));
   return (
-    <div className="bottomnav" style={{ position: "fixed", isolation: "isolate" }}>
-      {pill && (
-        <div aria-hidden="true" style={{
-          position: "absolute", top: 0, left: 0, zIndex: 0, pointerEvents: "none",
-          width: pill.width, height: pill.height, borderRadius: 12,
-          transform: `translate(${pill.left}px, ${pill.top}px)`,
-          opacity: pill.visible ? 1 : 0,
-          background: "rgba(201,168,76,0.12)",
-          boxShadow: "inset 0 0 0 1px rgba(201,168,76,0.3)",
-          transition: `transform ${DUR_ENTER}ms ${EASE_HOVER}, opacity 0.18s ease`,
-        }}/>
-      )}
+    <div ref={containerRef} className="bottomnav" style={{ position: "fixed", isolation: "isolate" }}>
+      <SlidingTabPill pill={pill} radius={12}
+        background="rgba(201,168,76,0.12)"
+        boxShadow="inset 0 0 0 1px rgba(201,168,76,0.3)" />
       {items.map(item => (
-        <button key={item.id} ref={el => { itemRefs.current[item.id] = el; }}
+        <button key={item.id} ref={setItemRef(item.id)}
           className={active === item.id ? "active" : ""} onClick={() => onNav(item.id)}
           style={{ position: "relative", zIndex: 1 }}>
           <span style={{display:"flex",alignItems:"center",justifyContent:"center"}}>{item.svg}</span>
@@ -1191,18 +1223,10 @@ function Sidebar({ active, onNav, collapsed, setCollapsed, system, onChangeSyste
   // Shared-layout nav indicator (spec 0017 AC-4): a single pill that glides to
   // the active item instead of each button snapping its own background on/off.
   // Measured from the live DOM so it survives collapse/lang-driven size changes;
-  // the global @media(prefers-reduced-motion) neutralizes the transform slide.
-  const navRef = useRef(null);
-  const itemRefs = useRef({});
-  const [pill, setPill] = useState(null);
-  useLayoutEffect(() => {
-    const el = itemRefs.current[active];
-    if (el) {
-      setPill({ top: el.offsetTop, left: el.offsetLeft, width: el.offsetWidth, height: el.offsetHeight, visible: true });
-    } else {
-      setPill(prev => (prev ? { ...prev, visible: false } : null));
-    }
-  }, [active, collapsed, lang]);
+  // the hook re-measures while the 300ms collapse transition runs (ResizeObserver)
+  // and after the webfonts land. The global @media(prefers-reduced-motion)
+  // neutralizes the transform slide.
+  const { containerRef: navRef, setItemRef, pill } = useSlidingPill(active, `${collapsed}|${lang}`);
 
   return (
     <div className="sidebar-desktop" style={{
@@ -1279,21 +1303,13 @@ function Sidebar({ active, onNav, collapsed, setCollapsed, system, onChangeSyste
       {/* Nav */}
       <nav ref={navRef} style={{flex:1, padding:"8px 8px", display:"flex", flexDirection:"column", gap:1, position:"relative"}}>
         {/* Sliding active-indicator pill (AC-4) — glides behind the buttons */}
-        {pill && (
-          <div aria-hidden="true" style={{
-            position:"absolute", top:0, left:0, zIndex:0, pointerEvents:"none",
-            width: pill.width, height: pill.height, borderRadius:8,
-            transform:`translate(${pill.left}px, ${pill.top}px)`,
-            opacity: pill.visible ? 1 : 0,
-            background: system?.accent ? `${system.accent}18` : "var(--purple-dim)",
-            boxShadow:`inset 0 0 0 1px ${system?.accent ? system.accent+"40" : "var(--purple-glow)"}`,
-            transition:`transform ${DUR_ENTER}ms ${EASE_HOVER}, opacity 0.18s ease`,
-          }}/>
-        )}
+        <SlidingTabPill pill={pill} radius={8}
+          background={system?.accent ? `${system.accent}18` : "var(--purple-dim)"}
+          boxShadow={`inset 0 0 0 1px ${system?.accent ? system.accent + "40" : "var(--purple-glow)"}`} />
         {navItems.map(item => {
           const isActive = active === item.id;
           return (
-            <button key={item.id} ref={el=>{ itemRefs.current[item.id] = el; }} onClick={()=>onNav(item.id)}
+            <button key={item.id} ref={setItemRef(item.id)} onClick={()=>onNav(item.id)}
               title={collapsed ? t("nav."+item.id) : ""}
               style={{
                 display:"flex", alignItems:"center",
@@ -1455,14 +1471,14 @@ function Sidebar({ active, onNav, collapsed, setCollapsed, system, onChangeSyste
       {/* Profile edit modal */}
       {editingProfile && createPortal(
         <div onClick={closeEdit} style={{
-          position:"fixed", inset:0, background:"rgba(0,0,0,0.7)", zIndex:9999,
+          position:"fixed", inset:0, background:"rgba(0,0,0,0.48)", zIndex:9999,
           display:"flex", alignItems:"center", justifyContent:"center",
         }}>
           <div onClick={e=>e.stopPropagation()} style={{
             background:"var(--surface)", border:"1px solid var(--border2)",
             borderRadius:12, padding:"28px 28px 24px", width:300,
             display:"flex", flexDirection:"column", alignItems:"center", gap:20,
-            boxShadow:"0 20px 60px rgba(0,0,0,0.6)",
+            boxShadow:"0 20px 60px rgba(0,0,0,0.42)",
           }}>
             <div style={{fontFamily:"Cinzel,serif", fontSize:13, letterSpacing:2, color:"var(--muted)", textTransform:"uppercase"}}>Editar Perfil</div>
 
@@ -1568,7 +1584,7 @@ function CreateCampaignModal({ onClose, onCreate }) {
     {coverPreview && <CoverPreviewModal image={coverPreview} onConfirm={(img)=>{setCoverImage(img);setCoverPreview(null);}} onClose={()=>setCoverPreview(null)}/>}
     {createPortal(
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.78)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px"}}>
-      <div onClick={e=>e.stopPropagation()} style={{background:"var(--surface)",border:"1px solid var(--border2)",borderRadius:12,padding:"28px",width:"100%",maxWidth:440,display:"flex",flexDirection:"column",gap:20,boxShadow:"0 24px 64px rgba(0,0,0,0.7)"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"var(--surface)",border:"1px solid var(--border2)",borderRadius:12,padding:"28px",width:"100%",maxWidth:440,display:"flex",flexDirection:"column",gap:20,boxShadow:"0 24px 64px rgba(0,0,0,0.48)"}}>
         <div style={{fontFamily:"'Cinzel Decorative',serif",fontSize:18,background:"linear-gradient(135deg,#b030d8,#c8a8f0)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
           Nova Campanha
         </div>
@@ -1652,7 +1668,7 @@ function JoinCampaignModal({ onClose, onJoin }) {
 
   return createPortal(
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.78)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px"}}>
-      <div onClick={e=>e.stopPropagation()} style={{background:"var(--surface)",border:"1px solid var(--border2)",borderRadius:12,padding:"28px",width:"100%",maxWidth:360,display:"flex",flexDirection:"column",gap:20,boxShadow:"0 24px 64px rgba(0,0,0,0.7)"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"var(--surface)",border:"1px solid var(--border2)",borderRadius:12,padding:"28px",width:"100%",maxWidth:360,display:"flex",flexDirection:"column",gap:20,boxShadow:"0 24px 64px rgba(0,0,0,0.48)"}}>
         <div style={{fontFamily:"'Cinzel Decorative',serif",fontSize:18,background:"linear-gradient(135deg,#b030d8,#c8a8f0)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
           Entrar em Campanha
         </div>
@@ -1714,7 +1730,7 @@ function CampaignCard({ campaign, uid, onClick }) {
           )}
           {/* Title over image */}
           <div style={{position:"absolute",bottom:0,left:0,right:0,padding:"10px 14px 12px"}}>
-            <div style={{fontFamily:"Cinzel,serif",fontSize:14,fontWeight:700,color:"#fff",lineHeight:1.3,textShadow:"0 1px 4px rgba(0,0,0,0.8)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            <div style={{fontFamily:"Cinzel,serif",fontSize:14,fontWeight:700,color:"#fff",lineHeight:1.3,textShadow:"0 1px 4px rgba(0,0,0,0.55)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
               {campaign.name}
             </div>
             {campaign.system && (
@@ -2166,18 +2182,22 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
             boxShadow:input.trim()?"0 2px 10px rgba(140,40,220,0.3)":"none",
           }}>➤</button>
         </div>
-        {isMaster && (
-          <button onClick={clearAllMessages} disabled={clearing || messages.length===0}
-            style={{
-              width:"100%",padding:"6px",borderRadius:7,
-              border:"1px solid rgba(220,50,50,0.25)",
-              background:"rgba(220,50,50,0.06)",
-              color:messages.length>0?"rgba(230,110,110,0.85)":"rgba(255,255,255,0.18)",
-              fontFamily:"Cinzel,serif",fontSize:9,letterSpacing:"0.12em",textTransform:"uppercase",
-              cursor:messages.length>0?"pointer":"default",transition:"all 0.2s",
-            }}>
-            {clearing ? "Limpando…" : "🗑 Apagar todo o histórico do chat"}
-          </button>
+        {/* ação destrutiva rebaixada a link discreto (só aparece quando há o que apagar) —
+            a barra vermelha full-width gritava mais que o próprio input de mensagem */}
+        {isMaster && messages.length>0 && (
+          <div style={{display:"flex",justifyContent:"flex-end"}}>
+            <button onClick={clearAllMessages} disabled={clearing}
+              style={{
+                background:"transparent",border:"none",padding:"2px 4px",
+                color:"rgba(230,110,110,0.55)",
+                fontFamily:"Cinzel,serif",fontSize:8.5,letterSpacing:"0.1em",textTransform:"uppercase",
+                cursor:clearing?"default":"pointer",transition:"color 0.2s",
+              }}
+              onMouseEnter={e=>{if(!clearing)e.currentTarget.style.color="rgba(230,110,110,0.95)";}}
+              onMouseLeave={e=>{e.currentTarget.style.color="rgba(230,110,110,0.55)";}}>
+              {clearing ? "Limpando…" : "🗑 Apagar histórico"}
+            </button>
+          </div>
         )}
       </div>
     </div>
@@ -2674,7 +2694,7 @@ function SheetRollPanel({ campaigns, uid, userName, userPhoto, onRollReady }) {
         {active.length > 1 ? (
           <select value={selId??""} onChange={e=>setSelId(e.target.value)}
             style={{background:"transparent",border:"none",color:"var(--text)",fontFamily:"Cinzel,serif",fontSize:11,outline:"none",width:"100%",cursor:"pointer",appearance:"none"}}>
-            {active.map(c=><option key={c.id} value={c.id} style={{background:"#111"}}>{c.name}</option>)}
+            {active.map(c=><option key={c.id} value={c.id} style={{background:"#2c2c39"}}>{c.name}</option>)}
           </select>
         ) : (
           <div style={{fontFamily:"Cinzel,serif",fontSize:11,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
@@ -2931,113 +2951,6 @@ function rollDiceStr(notation) {
   return { total:sum, rolls, notation };
 }
 
-const OP_RITUAIS = [
-  // Círculo 1 — Conhecimento
-  { nome:'Amaldiçoar Arma', elemento:'Conhecimento', circulo:1, execucao:'padrão', alcance:'toque', alvo:'1 arma corpo a corpo ou munição', duracao:'cena', resistencia:'-', custo:2, descricao:'Imbui a arma com o elemento, causando +1d6 de dano elemental. (Discente +2PE: +2d6 / Verdadeiro +5PE: +4d6)' },
-  { nome:'Compreensão Paranormal', elemento:'Conhecimento', circulo:1, execucao:'padrão', alcance:'toque', alvo:'1 ser ou objeto', duracao:'cena', resistencia:'Vontade anula', custo:2, descricao:'Entende qualquer idioma humano. Tocando um ser, comunica-se como se falem o mesmo idioma. Tocando animal, percebe sentimentos básicos.' },
-  { nome:'Enfeitiçar', elemento:'Conhecimento', circulo:1, execucao:'padrão', alcance:'médio', alvo:'1 ser', duracao:'cena', resistencia:'Vontade anula', custo:2, descricao:'O alvo se torna prestativo, obedecendo ordens que não coloquem sua vida em risco.' },
-  { nome:'Perturbação', elemento:'Conhecimento', circulo:1, execucao:'padrão', alcance:'médio', alvo:'1 ser', duracao:'instantânea', resistencia:'Vontade anula', custo:2, descricao:'Força o alvo a obedecer uma ordem simples e imediata.' },
-  { nome:'Ouvir os Sussurros', elemento:'Conhecimento', circulo:1, execucao:'padrão', alcance:'pessoal', alvo:'você', duracao:'cena', resistencia:'-', custo:2, descricao:'Você se comunica com vozes do Outro Lado para receber informações sobre a área ou situação atual.' },
-  { nome:'Tecer Ilusão', elemento:'Conhecimento', circulo:1, execucao:'padrão', alcance:'curto', alvo:'área', duracao:'cena', resistencia:'Vontade desacredita', custo:2, descricao:'Cria uma ilusão visual ou sonora realista que pode enganar os sentidos dos alvos.' },
-  { nome:'Terceiro Olho', elemento:'Conhecimento', circulo:1, execucao:'padrão', alcance:'pessoal', alvo:'você', duracao:'cena', resistencia:'-', custo:2, descricao:'Você enxerga manifestações paranormais, auras e o elemento de seres.' },
-  // Círculo 1 — Energia
-  { nome:'Amaldiçoar Arma', elemento:'Energia', circulo:1, execucao:'padrão', alcance:'toque', alvo:'1 arma corpo a corpo ou munição', duracao:'cena', resistencia:'-', custo:2, descricao:'Imbui a arma com Energia, causando +1d6 de dano de Energia. (Discente +2PE: +2d6 / Verdadeiro +5PE: +4d6)' },
-  { nome:'Amaldiçoar Tecnologia', elemento:'Energia', circulo:1, execucao:'padrão', alcance:'toque', alvo:'1 acessório ou arma de fogo', duracao:'cena', resistencia:'-', custo:2, descricao:'Imbui o item com Energia, fazendo-o funcionar acima da capacidade. Recebe uma modificação à sua escolha. (Discente +2PE: duas modificações / Verdadeiro +5PE: três modificações)' },
-  { nome:'Coincidência Forçada', elemento:'Energia', circulo:1, execucao:'padrão', alcance:'curto', alvo:'1 ser', duracao:'cena', resistencia:'-', custo:2, descricao:'Manipula os caminhos do caos para que o alvo tenha mais sorte. O alvo recebe +2 em testes de perícias. (Discente +2PE: aliados à escolha / Verdadeiro +5PE: aliados à escolha, bônus +5)' },
-  { nome:'Eletrocussão', elemento:'Energia', circulo:1, execucao:'padrão', alcance:'médio', alvo:'1 ser', duracao:'instantânea', resistencia:'Reflexos reduz à metade', custo:2, descricao:'Uma corrente voltaica eletrocuta o alvo, causando dano de Energia.' },
-  { nome:'Embaralhar', elemento:'Energia', circulo:1, execucao:'padrão', alcance:'pessoal', alvo:'você', duracao:'cena', resistencia:'-', custo:2, descricao:'Cria duplicatas ilusórias para confundir inimigos, concedendo bônus na Defesa.' },
-  { nome:'Luz', elemento:'Energia', circulo:1, execucao:'padrão', alcance:'toque', alvo:'1 objeto', duracao:'cena', resistencia:'-', custo:1, descricao:'O objeto tocado brilha como uma lâmpada, iluminando a área ao redor.' },
-  { nome:'Polarização Caótica', elemento:'Energia', circulo:1, execucao:'padrão', alcance:'médio', alvo:'objetos metálicos', duracao:'cena', resistencia:'Vontade anula', custo:2, descricao:'Objetos metálicos são atraídos ou repelidos conforme sua vontade.' },
-  // Círculo 1 — Morte
-  { nome:'Amaldiçoar Arma', elemento:'Morte', circulo:1, execucao:'padrão', alcance:'toque', alvo:'1 arma corpo a corpo ou munição', duracao:'cena', resistencia:'-', custo:2, descricao:'Imbui a arma com Morte, causando +1d6 de dano de Morte. (Discente +2PE: +2d6 / Verdadeiro +5PE: +4d6)' },
-  { nome:'Cicatrização', elemento:'Morte', circulo:1, execucao:'padrão', alcance:'toque', alvo:'1 ser', duracao:'instantânea', resistencia:'-', custo:2, descricao:'Acelera o tempo ao redor das feridas, que cicatrizam instantaneamente. Recupera 3d8+3 PV, mas o alvo envelhece 1 ano. (Discente +2PE: 5d8+5 / Verdadeiro +9PE: 7d8+7, alcance curto, vários alvos)' },
-  { nome:'Consumir Manancial', elemento:'Morte', circulo:1, execucao:'padrão', alcance:'pessoal', alvo:'você', duracao:'instantânea', resistencia:'-', custo:2, descricao:'Suga o tempo de vida de plantas e insetos ao redor, gerando Lodo e recebendo 3d6 PV temporários (desaparecem ao fim da cena). (Discente +2PE: 6d6 / Verdadeiro +5PE: área 6m, afeta seres vivos, causa 3d6 dano)' },
-  { nome:'Decadência', elemento:'Morte', circulo:1, execucao:'padrão', alcance:'toque', alvo:'1 ser', duracao:'instantânea', resistencia:'Fortitude reduz à metade', custo:2, descricao:'Espirais de trevas envolvem sua mão e definha o alvo: 2d8+2 dano de Morte. (Discente +2PE: 3d8+3, sem resistência, ataque como parte da execução / Verdadeiro +5PE: área explosão 6m, 8d8+8)' },
-  { nome:'Definhar', elemento:'Morte', circulo:1, execucao:'padrão', alcance:'curto', alvo:'1 ser', duracao:'cena', resistencia:'Fortitude parcial', custo:2, descricao:'Lufada de cinzas drena as forças: alvo fica fatigado (ou vulnerável se passar no teste). (Discente +2PE: exausto / Verdadeiro +5PE: até 5 seres)' },
-  { nome:'Espirais da Perdição', elemento:'Morte', circulo:1, execucao:'padrão', alcance:'médio', alvo:'área', duracao:'cena', resistencia:'-', custo:2, descricao:'Inimigos na área sofrem penalidade em seus testes de ataque.' },
-  { nome:'Nuvem de Cinzas', elemento:'Morte', circulo:1, execucao:'padrão', alcance:'curto', alvo:'área', duracao:'cena', resistencia:'-', custo:2, descricao:'Uma nuvem de cinzas fornece camuflagem para você e seus aliados.' },
-  // Círculo 1 — Sangue
-  { nome:'Amaldiçoar Arma', elemento:'Sangue', circulo:1, execucao:'padrão', alcance:'toque', alvo:'1 arma corpo a corpo ou munição', duracao:'cena', resistencia:'-', custo:2, descricao:'Imbui a arma com Sangue, causando +1d6 de dano de Sangue. (Discente +2PE: +2d6 / Verdadeiro +5PE: +4d6)' },
-  { nome:'Arma Atroz', elemento:'Sangue', circulo:1, execucao:'padrão', alcance:'toque', alvo:'1 arma corpo a corpo', duracao:'sustentada', resistencia:'-', custo:2, descricao:'A arma recebe +2 em testes de ataque e +1 na margem de ameaça. (Discente +2PE: +5 em testes / Verdadeiro +5PE: +5 testes e +2 margem/multiplicador)' },
-  { nome:'Armadura de Sangue', elemento:'Sangue', circulo:1, execucao:'padrão', alcance:'pessoal', alvo:'você', duracao:'cena', resistencia:'-', custo:2, descricao:'Sangue cobre seu corpo como carapaça: +5 em Defesa (não cumulativo com equipamento). (Discente +5PE: +10 Defesa e RD 5 balistico/corte/impacto/perf. / Verdadeiro +9PE: +15 e RD 10)' },
-  { nome:'Corpo Adaptado', elemento:'Sangue', circulo:1, execucao:'padrão', alcance:'toque', alvo:'1 pessoa ou animal', duracao:'cena', resistencia:'-', custo:2, descricao:'Modifica a biologia do alvo: imune a calor e frio extremos, pode respirar na água. (Discente +2PE: duração 1 dia / Verdadeiro +5PE: alcance curto, alvos escolhidos)' },
-  { nome:'Distorcer Aparência', elemento:'Sangue', circulo:1, execucao:'padrão', alcance:'pessoal', alvo:'você', duracao:'cena', resistencia:'Vontade desacredita', custo:2, descricao:'Modifica sua aparência (altura, peso, pele, cabelo, voz, digital, córnea). Recebe +10 em Enganação.' },
-  { nome:'Fortalecimento Sensorial', elemento:'Sangue', circulo:1, execucao:'padrão', alcance:'toque', alvo:'1 ser', duracao:'cena', resistencia:'-', custo:2, descricao:'Aprimora os sentidos e percepção do alvo, concedendo bônus em testes de Percepção.' },
-  { nome:'Ódio Incontrolável', elemento:'Sangue', circulo:1, execucao:'padrão', alcance:'toque', alvo:'1 ser', duracao:'cena', resistencia:'-', custo:2, descricao:'Aumenta dano corpo a corpo e perícias físicas do alvo, mas penaliza perícias mentais.' },
-  // Círculo 1 — Medo
-  { nome:'Cinerária', elemento:'Medo', circulo:1, execucao:'padrão', alcance:'curto', alvo:'área: nuvem 6m de raio', duracao:'cena', resistencia:'-', custo:2, descricao:'Névoa carregada de essência paranormal: rituais conjurados dentro têm DT +5. (Discente +2PE: rituais custam -2PE / Verdadeiro +5PE: rituais causam dano maximizado)' },
-  // Círculo 2 — Conhecimento
-  { nome:'Aprimorar Mente', elemento:'Conhecimento', circulo:2, execucao:'padrão', alcance:'toque', alvo:'1 ser', duracao:'cena', resistencia:'-', custo:3, descricao:'O alvo recebe +1 em Intelecto ou Presença (à escolha; não fornece PE nem perícias). (Discente +3PE: +2 / Verdadeiro +7PE: +3)' },
-  { nome:'Detecção de Ameaças', elemento:'Conhecimento', circulo:2, execucao:'padrão', alcance:'pessoal', alvo:'esfera 18m de raio', duracao:'cena', resistencia:'-', custo:3, descricao:'Percepção aguçada sobre perigos. Quando ser hostil entra na área, você sente e pode testar Percepção DT 20 para localizar. (Discente +3PE: não fica desprevenido / Verdadeiro +5PE: duração 1 dia)' },
-  { nome:'Esconder dos Olhos', elemento:'Conhecimento', circulo:2, execucao:'padrão', alcance:'pessoal', alvo:'você', duracao:'cena', resistencia:'-', custo:3, descricao:'Torna você invisível aos olhos comuns durante a cena.' },
-  { nome:'Invadir Mente', elemento:'Conhecimento', circulo:2, execucao:'padrão', alcance:'médio', alvo:'1 ser', duracao:'instantânea/sustentada', resistencia:'Vontade parcial', custo:3, descricao:'Gera uma rajada mental causando dano, ou se conecta telepaticamente ao alvo.' },
-  { nome:'Localização', elemento:'Conhecimento', circulo:2, execucao:'padrão', alcance:'ilimitado', alvo:'1 objeto ou ser marcado', duracao:'cena', resistencia:'-', custo:3, descricao:'Determina a direção de um objeto ou ser marcado à sua escolha, independente da distância.' },
-  // Círculo 2 — Energia
-  { nome:'Chamas do Caos', elemento:'Energia', circulo:2, execucao:'padrão', alcance:'curto', alvo:'veja texto', duracao:'cena', resistencia:'-', custo:3, descricao:'Manipula fogo (escolha 1): Chamejar (arma +1d6 fogo), Esquentar (objeto 1d6/rodada), Extinguir (chama Grande ou menor), ou Modelar (move chama 9m, 3d6 a quem atravessa). (Discente +3PE: projeta labareda 4d6 / Verdadeiro +7PE: 8d6)' },
-  { nome:'Contenção Fantasmagórica', elemento:'Energia', circulo:2, execucao:'padrão', alcance:'médio', alvo:'1 ser', duracao:'cena', resistencia:'Reflexos anula', custo:3, descricao:'Três laços de Energia surgem e deixam o alvo agarrado. O alvo pode gastar ação padrão: Atletismo DT ritual para destruir laços. Afeta criaturas incorpóreas. (Discente +3PE: 6 laços, múltiplos alvos / Verdadeiro +5PE: laços destruídos liberam 2d6+2 dano)' },
-  { nome:'Dissonância Acústica', elemento:'Energia', circulo:2, execucao:'padrão', alcance:'médio', alvo:'esfera 6m de raio', duracao:'sustentada', resistencia:'-', custo:2, descricao:'Área de dissonância sonora: todos ficam surdos e não podem conjurar rituais dentro. (Verdadeiro +3PE: nenhum som sai da área, mas internos podem se comunicar e conjurar normalmente)' },
-  { nome:'Sopro do Caos', elemento:'Energia', circulo:2, execucao:'padrão', alcance:'curto', alvo:'área', duracao:'cena', resistencia:'-', custo:3, descricao:'Move o ar de formas impossíveis: pode empurrar seres, criar correntes de ar e obstáculos.' },
-  { nome:'Tela de Ruído', elemento:'Energia', circulo:2, execucao:'padrão', alcance:'pessoal', alvo:'você', duracao:'cena', resistencia:'-', custo:3, descricao:'Cria uma película protetora de energia que absorve parte do dano recebido.' },
-  // Círculo 2 — Morte
-  { nome:'Desacelerar Impacto', elemento:'Morte', circulo:2, execucao:'reação', alcance:'curto', alvo:'1 ser ou objetos até 10 espaços', duracao:'até chegar ao solo ou cena', resistencia:'-', custo:3, descricao:'O alvo cai lentamente (18m/rodada, sem dano de queda). Projéteis causam metade do dano. (Discente +3PE: objetos até 100 espaços)' },
-  { nome:'Eco Espiral', elemento:'Morte', circulo:2, execucao:'padrão', alcance:'curto', alvo:'1 ser', duracao:'sustentada', resistencia:'-', custo:3, descricao:'Repete concentrado o dano que o alvo sofreu ao longo das rodadas.' },
-  { nome:'Miasma Entrópico', elemento:'Morte', circulo:2, execucao:'padrão', alcance:'médio', alvo:'área', duracao:'cena', resistencia:'Fortitude parcial', custo:3, descricao:'Nuvem tóxica: alvos ficam enjoados e sufocando.' },
-  { nome:'Paradoxo', elemento:'Morte', circulo:2, execucao:'padrão', alcance:'curto', alvo:'área', duracao:'cena', resistencia:'Fortitude parcial', custo:3, descricao:'Área de tempo paradoxal que envelhece corpo e alma dos que estão nela.' },
-  { nome:'Velocidade Mortal', elemento:'Morte', circulo:2, execucao:'padrão', alcance:'toque', alvo:'1 ser', duracao:'cena', resistencia:'-', custo:3, descricao:'O alvo acelera no tempo, realizando ações adicionais em seu turno.' },
-  // Círculo 2 — Sangue
-  { nome:'Aprimorar Físico', elemento:'Sangue', circulo:2, execucao:'padrão', alcance:'toque', alvo:'1 ser', duracao:'cena', resistencia:'-', custo:3, descricao:'Músculos tonificados e ligamentos reforçados: +1 em Agilidade ou Força. (Discente +3PE: +2 / Verdadeiro +7PE: +3)' },
-  { nome:'Descarnar', elemento:'Sangue', circulo:2, execucao:'padrão', alcance:'toque', alvo:'1 ser', duracao:'instantânea', resistencia:'Fortitude parcial', custo:3, descricao:'Lacerações se manifestam na pele: 6d8 dano (corte + Sangue) e hemorragia severa (2d8/turno, Fortitude para estancar). (Discente +3PE: 10d8 / 4d8 hemorragia / Verdadeiro +7PE: seus ataques causam +4d8 Sangue e hemorragia)' },
-  { nome:'Flagelo de Sangue', elemento:'Sangue', circulo:2, execucao:'padrão', alcance:'curto', alvo:'1 pessoa', duracao:'cena', resistencia:'Vontade anula', custo:3, descricao:'O alvo deve obedecer uma ordem, agindo para cumpri-la no próximo turno.' },
-  { nome:'Hemofagia', elemento:'Sangue', circulo:2, execucao:'padrão', alcance:'toque', alvo:'1 ser', duracao:'instantânea', resistencia:'Fortitude parcial', custo:3, descricao:'Absorve o sangue do alvo, causando dano e recuperando PV iguais ao dano causado.' },
-  { nome:'Transfusão Vital', elemento:'Sangue', circulo:2, execucao:'padrão', alcance:'toque', alvo:'seres tocados', duracao:'instantânea', resistencia:'-', custo:3, descricao:'Transfere vida do conjurador para vários alvos, curando-os instantaneamente.' },
-  // Círculo 2 — Medo
-  { nome:'Proteção contra Rituais', elemento:'Medo', circulo:2, execucao:'padrão', alcance:'toque', alvo:'1 ser', duracao:'cena', resistencia:'-', custo:3, descricao:'O alvo recebe resistência contra efeitos e criaturas paranormais.' },
-  { nome:'Rejeitar Névoa', elemento:'Medo', circulo:2, execucao:'padrão', alcance:'toque', alvo:'1 ser', duracao:'cena', resistencia:'-', custo:2, descricao:'Concede bônus em testes de resistência contra rituais.' },
-  // Círculo 3 — Conhecimento
-  { nome:'Alterar Memória', elemento:'Conhecimento', circulo:3, execucao:'padrão', alcance:'toque', alvo:'1 pessoa', duracao:'instantânea', resistencia:'Vontade anula', custo:4, descricao:'Invade a mente e altera ou apaga memórias de até 1 hora atrás. O alvo recupera as memórias após 1d4 dias. (Verdadeiro +4PE: até 24h de memórias; requer 4° círculo)' },
-  { nome:'Contato Paranormal', elemento:'Conhecimento', circulo:3, execucao:'completa', alcance:'pessoal', alvo:'você', duracao:'1 dia', resistencia:'-', custo:4, descricao:'Barganha com a entidade de Conhecimento: recebe 6d6 para adicionar em testes de perícia, mas rolar 6 em qualquer dado custa 2 SAN. (Discente +4PE: d8, perda 3 SAN / Verdadeiro +9PE: d12, perda 5 SAN)' },
-  { nome:'Mergulho Mental', elemento:'Conhecimento', circulo:3, execucao:'padrão', alcance:'toque', alvo:'1 ser', duracao:'sustentada', resistencia:'Vontade anula', custo:4, descricao:'Você se infiltra na mente do alvo e vasculha seus pensamentos, descobrindo memórias e segredos.' },
-  { nome:'Vidência', elemento:'Conhecimento', circulo:3, execucao:'padrão', alcance:'longo', alvo:'1 ser ou local marcado', duracao:'sustentada', resistencia:'-', custo:4, descricao:'Você pode observar e ouvir um alvo marcado à distância, como se estivesse presente.' },
-  // Círculo 3 — Energia
-  { nome:'Convocação Instantânea', elemento:'Energia', circulo:3, execucao:'padrão', alcance:'ilimitado', alvo:'1 objeto de até 2 espaços', duracao:'instantânea', resistencia:'Vontade anula (se empunhado)', custo:4, descricao:'Invoca um objeto marcado de qualquer lugar para sua mão. (Discente +4PE: até 10 espaços / Verdadeiro +9PE: 1 recipiente Médio permanente, convocado com ação padrão — custa 1 PE permanente)' },
-  { nome:'Salto Fantasma', elemento:'Energia', circulo:3, execucao:'padrão', alcance:'longo', alvo:'você e aliados escolhidos', duracao:'instantânea', resistencia:'-', custo:4, descricao:'Teletransporta você e outros seres para um ponto visível dentro do alcance.' },
-  { nome:'Transfigurar Água', elemento:'Energia', circulo:3, execucao:'padrão', alcance:'médio', alvo:'água e gelo em área', duracao:'cena', resistencia:'-', custo:4, descricao:'Água e gelo se comportam de forma caótica, criando obstáculos ou causando dano.' },
-  { nome:'Transfigurar Terra', elemento:'Energia', circulo:3, execucao:'padrão', alcance:'médio', alvo:'rochas, lama e areia em área', duracao:'cena', resistencia:'-', custo:4, descricao:'Rochas, lama e areia se comportam de forma caótica, soterando seres ou criando barreiras.' },
-  // Círculo 3 — Morte
-  { nome:'Âncora Temporal', elemento:'Morte', circulo:3, execucao:'padrão', alcance:'curto', alvo:'1 ser', duracao:'cena', resistencia:'Vontade parcial', custo:4, descricao:'Aura espiralada: início de cada turno, o alvo testa Vontade ou não pode se deslocar. 2 sucessos seguidos encerram. (Verdadeiro +4PE: alvos à escolha; requer 4° círculo)' },
-  { nome:'Poeira da Podridão', elemento:'Morte', circulo:3, execucao:'padrão', alcance:'médio', alvo:'área', duracao:'cena', resistencia:'Fortitude parcial', custo:4, descricao:'Nuvem de poeira que apodrece tudo que toca, causando dano de Morte a seres e danificando objetos.' },
-  { nome:'Tentáculos de Lodo', elemento:'Morte', circulo:3, execucao:'padrão', alcance:'médio', alvo:'área', duracao:'cena', resistencia:'Reflexos anula', custo:4, descricao:'Tentáculos de Lodo negro atacam e agarram seres na área, causando dano e limitando movimento.' },
-  { nome:'Zerar Entropia', elemento:'Morte', circulo:3, execucao:'padrão', alcance:'curto', alvo:'1 ser', duracao:'cena', resistencia:'Fortitude parcial', custo:4, descricao:'O alvo fica lento (se falhar na resistência) ou paralisado (falha por muito).' },
-  // Círculo 3 — Sangue
-  { nome:'Ferver Sangue', elemento:'Sangue', circulo:3, execucao:'padrão', alcance:'médio', alvo:'1 ser', duracao:'cena', resistencia:'Fortitude parcial', custo:4, descricao:'Faz o sangue do alvo entrar em ebulição: dano e condição fraco ao alvo.' },
-  { nome:'Forma Monstruosa', elemento:'Sangue', circulo:3, execucao:'padrão', alcance:'pessoal', alvo:'você', duracao:'cena', resistencia:'-', custo:4, descricao:'Você assume a aparência e forma de uma criatura monstruosa, com atributos e habilidades alterados.' },
-  { nome:'Purgatório', elemento:'Sangue', circulo:3, execucao:'padrão', alcance:'médio', alvo:'área', duracao:'cena', resistencia:'Fortitude parcial', custo:4, descricao:'Área de sangue: alvos dentro ficam vulneráveis a dano, e quem tentar sair sofre dor.' },
-  { nome:'Vomitar Pestes', elemento:'Sangue', circulo:3, execucao:'padrão', alcance:'curto', alvo:'área', duracao:'cena', resistencia:'-', custo:4, descricao:'Vomita um enxame de pequenas criaturas de Sangue que atacam e infestam inimigos.' },
-  // Círculo 3 — Medo
-  { nome:'Dissipar Ritual', elemento:'Medo', circulo:3, execucao:'padrão', alcance:'médio', alvo:'1 ser/objeto ou esfera 3m', duracao:'instantânea', resistencia:'Vontade anula (itens)', custo:4, descricao:'Dissipa rituais ativos com DT ≤ seu teste de Ocultismo. Em item amaldiçoado: torna-o mundano por 1 dia.' },
-  // Círculo 4 — Conhecimento
-  { nome:'Controle Mental', elemento:'Conhecimento', circulo:4, execucao:'padrão', alcance:'médio', alvo:'1 pessoa ou animal', duracao:'sustentada', resistencia:'Vontade parcial', custo:5, descricao:'Domina a mente do alvo, que obedece todos os comandos exceto suicídio. Teste de Vontade no fim de cada turno (quem passa fica pasmo por 1 rodada, uma vez por cena). (Discente +5PE: até 5 alvos / Verdadeiro +10PE: até 10 alvos)' },
-  { nome:'Inexistir', elemento:'Conhecimento', circulo:4, execucao:'padrão', alcance:'toque', alvo:'1 ser', duracao:'instantânea', resistencia:'Vontade anula', custo:5, descricao:'Você toca um alvo e o apaga completamente da existência, como se nunca tivesse existido.' },
-  { nome:'Possessão', elemento:'Conhecimento', circulo:4, execucao:'padrão', alcance:'curto', alvo:'1 pessoa', duracao:'sustentada', resistencia:'Vontade anula', custo:5, descricao:'Transfere sua consciência para o corpo do alvo, controlando-o. Seu corpo fica indefeso.' },
-  // Círculo 4 — Energia
-  { nome:'Alterar Destino', elemento:'Energia', circulo:4, execucao:'reação', alcance:'pessoal', alvo:'você', duracao:'instantânea', resistencia:'-', custo:4, descricao:'Vislumbra o futuro próximo: +15 em um teste de resistência ou na Defesa contra um ataque. (Verdadeiro +5PE: alcance curto, 1 aliado)' },
-  { nome:'Deflagração de Energia', elemento:'Energia', circulo:4, execucao:'completa', alcance:'pessoal', alvo:'explosão 15m de raio', duracao:'instantânea', resistencia:'Fortitude parcial', custo:5, descricao:'Explosão imensa: 3d10×10 dano de Energia e itens tecnológicos ficam quebrados (voltam após 1d4 rodadas se passarem na resistência). Você não é afetado. (Verdadeiro +5PE: afeta apenas alvos à escolha)' },
-  { nome:'Teletransporte', elemento:'Energia', circulo:4, execucao:'padrão', alcance:'ilimitado', alvo:'você e aliados', duracao:'instantânea', resistencia:'-', custo:5, descricao:'Teletransporta você e outros seres para qualquer local que você conheça bem.' },
-  // Círculo 4 — Morte
-  { nome:'Convocar o Algoz', elemento:'Morte', circulo:4, execucao:'padrão', alcance:'1,5m', alvo:'1 pessoa', duracao:'sustentada', resistencia:'Vontade / Fortitude parcial', custo:5, descricao:'Manifesta o medo da vítima como algoz incorpóreo (só ela vê com clareza). Flutua 12m/turno em direção à vítima. Em alcance curto: Vontade ou abalado. Adjacente: Fortitude ou colapso (0 PV). Incorpóreo e indestrutível.' },
-  { nome:'Distorção Temporal', elemento:'Morte', circulo:4, execucao:'padrão', alcance:'pessoal', alvo:'você', duracao:'3 rodadas', resistencia:'-', custo:5, descricao:'Cria um bolsão temporal de 3 rodadas: você age livremente, mas não pode se deslocar nem interagir com o mundo.' },
-  { nome:'Fim Inevitável', elemento:'Morte', circulo:4, execucao:'completa', alcance:'curto', alvo:'área', duracao:'cena', resistencia:'Fortitude parcial', custo:5, descricao:'Abre uma ruptura no espaço que suga tudo ao redor, causando dano massivo.' },
-  // Círculo 4 — Sangue
-  { nome:'Capturar o Coração', elemento:'Sangue', circulo:4, execucao:'padrão', alcance:'curto', alvo:'1 pessoa', duracao:'cena', resistencia:'Vontade parcial', custo:5, descricao:'Desperta paixão doentia no alvo, que age para agradá-lo. Teste de Vontade por turno; 2 sucessos consecutivos encerram o efeito.' },
-  { nome:'Invólucro de Carne', elemento:'Sangue', circulo:4, execucao:'completa', alcance:'toque', alvo:'1 ser', duracao:'cena', resistencia:'-', custo:5, descricao:'Cria um clone de carne e sangue com as mesmas estatísticas do alvo tocado.' },
-  { nome:'Vínculo de Sangue', elemento:'Sangue', circulo:4, execucao:'padrão', alcance:'toque', alvo:'1 ser', duracao:'sustentada', resistencia:'Vontade anula', custo:5, descricao:'O alvo sofre todo dano e efeitos negativos que você sofrer durante a duração.' },
-  // Círculo 4 — Medo
-  { nome:'Canalizar o Medo', elemento:'Medo', circulo:4, execucao:'padrão', alcance:'toque', alvo:'1 pessoa', duracao:'permanente até usar', resistencia:'-', custo:5, descricao:'Transfere um ritual de até 3° círculo que você conhece. O alvo pode conjurá-lo uma vez sem custo. Seus PE máximos diminuem pelo custo do ritual até ser usado.' },
-  { nome:'Conhecendo o Medo', elemento:'Medo', circulo:4, execucao:'padrão', alcance:'toque', alvo:'1 pessoa', duracao:'instantânea', resistencia:'Vontade parcial', custo:5, descricao:'Manifesta medo absoluto: falha na resistência → SAN vai a 0 e enlouquece; sucesso → 10d6 dano mental e apavorado por 1 rodada. Enlouquecido pode virar criatura paranormal.' },
-  { nome:'Lâmina do Medo', elemento:'Medo', circulo:4, execucao:'padrão', alcance:'toque', alvo:'1 ser', duracao:'instantânea', resistencia:'Vontade parcial', custo:5, descricao:'Golpeia o alvo com uma lâmina de medo puro, causando dano de Medo e infligindo penalidades.' },
-  { nome:'Medo Tangível', elemento:'Medo', circulo:4, execucao:'padrão', alcance:'pessoal', alvo:'você', duracao:'cena', resistencia:'-', custo:5, descricao:'Você recebe uma série de imunidades enquanto o Medo se manifesta em sua forma mais pura.' },
-  { nome:'Presença do Medo', elemento:'Medo', circulo:4, execucao:'completa', alcance:'pessoal', alvo:'você', duracao:'cena', resistencia:'-', custo:5, descricao:'Você assume uma forma impossível dentro da Realidade, tornando-se uma manifestação do Medo absoluto.' },
-];
 
 // Condições fiéis ao livro base de Ordem Paranormal (spec 0021). Textos verificados contra
 // as fontes oficiais/compilações (Guia Rápido de Regras). São de referência (o app não aplica
@@ -3073,35 +2986,95 @@ const OP_CONDICOES = [
   { nome:'Vulnerável', cor:'#e09050', descricao:'Sofre dano dobrado de um tipo específico (indicado pelo efeito causador).' },
 ];
 
-const OP_ARMAS = [
-  { nome:'Soco', prof:'Simples', cat:'Corpo a Corpo', dano:'1+FOR', tipo:'Impacto', prop:'Não letal', esp:'-' },
-  { nome:'Faca', prof:'Simples', cat:'Corpo a Corpo', dano:'1d4', tipo:'Corte', prop:'Leve, 1 mão', esp:'1' },
-  { nome:'Bengala', prof:'Simples', cat:'Corpo a Corpo', dano:'1d4', tipo:'Impacto', prop:'Leve, 1 mão', esp:'1' },
-  { nome:'Machadinha', prof:'Simples', cat:'Corpo a Corpo', dano:'1d4', tipo:'Corte', prop:'Leve, arremesso', esp:'1' },
-  { nome:'Clava', prof:'Simples', cat:'Corpo a Corpo', dano:'1d6', tipo:'Impacto', prop:'2 mãos', esp:'2' },
-  { nome:'Foice', prof:'Simples', cat:'Corpo a Corpo', dano:'1d6', tipo:'Corte', prop:'2 mãos', esp:'2' },
-  { nome:'Machado', prof:'Simples', cat:'Corpo a Corpo', dano:'1d6', tipo:'Corte', prop:'1 mão', esp:'2' },
-  { nome:'Machado de Batalha', prof:'Simples', cat:'Corpo a Corpo', dano:'1d8', tipo:'Corte', prop:'2 mãos, pesada', esp:'3' },
-  { nome:'Arco', prof:'Simples', cat:'À Distância', dano:'1d6', tipo:'Perfuração', prop:'2 mãos, alcance 18m', esp:'2' },
-  { nome:'Bodoque', prof:'Simples', cat:'À Distância', dano:'1d4', tipo:'Impacto', prop:'2 mãos', esp:'1' },
-  { nome:'Frasco Incendiário', prof:'Simples', cat:'À Distância', dano:'2d6', tipo:'Fogo', prop:'Arremesso, área 1,5m', esp:'1' },
-  { nome:'Espada Curta', prof:'Tática', cat:'Corpo a Corpo', dano:'1d6', tipo:'Corte', prop:'Leve, 1 mão', esp:'1' },
-  { nome:'Florete', prof:'Tática', cat:'Corpo a Corpo', dano:'1d6', tipo:'Perfuração', prop:'1 mão, +2 ataque', esp:'2' },
-  { nome:'Espada', prof:'Tática', cat:'Corpo a Corpo', dano:'1d8', tipo:'Corte', prop:'1 mão', esp:'2' },
-  { nome:'Katana', prof:'Tática', cat:'Corpo a Corpo', dano:'1d8', tipo:'Corte', prop:'Versátil', esp:'2' },
-  { nome:'Lança', prof:'Tática', cat:'Corpo a Corpo', dano:'1d8', tipo:'Perfuração', prop:'2 mãos, alcance 3m', esp:'3' },
-  { nome:'Martelo de Guerra', prof:'Tática', cat:'Corpo a Corpo', dano:'1d8', tipo:'Impacto', prop:'Versátil', esp:'2' },
-  { nome:'Espada Grande', prof:'Tática', cat:'Corpo a Corpo', dano:'1d10', tipo:'Corte', prop:'2 mãos, pesada', esp:'3' },
-  { nome:'Pistola', prof:'Tática', cat:'À Distância', dano:'1d8', tipo:'Balístico', prop:'1 mão, fogo', esp:'1' },
-  { nome:'Pistola Pesada', prof:'Tática', cat:'À Distância', dano:'1d12', tipo:'Balístico', prop:'1 mão, fogo', esp:'2' },
-  { nome:'Submetralhadora', prof:'Tática', cat:'À Distância', dano:'1d8', tipo:'Balístico', prop:'2 mãos, fogo, automática', esp:'3' },
-  { nome:'Escopeta', prof:'Tática', cat:'À Distância', dano:'2d6', tipo:'Balístico', prop:'2 mãos, fogo, curto alcance', esp:'3' },
-  { nome:'Fuzil', prof:'Tática', cat:'À Distância', dano:'1d12', tipo:'Balístico', prop:'2 mãos, fogo', esp:'3' },
-  { nome:'Rifle de Precisão', prof:'Tática', cat:'À Distância', dano:'2d8', tipo:'Balístico', prop:'2 mãos, fogo, longo alcance', esp:'4' },
-  { nome:'Metralhadora', prof:'Pesada', cat:'À Distância', dano:'2d12', tipo:'Balístico', prop:'2 mãos, fogo, automática', esp:'5' },
-  { nome:'Lança-Chamas', prof:'Pesada', cat:'À Distância', dano:'2d8', tipo:'Fogo', prop:'2 mãos, cone 6m', esp:'5' },
-  { nome:'Bazuca', prof:'Pesada', cat:'À Distância', dano:'6d6', tipo:'Balístico', prop:'2 mãos, explosão 6m', esp:'5' },
-];
+
+/* ════════════════════════════════════════════════════════════════════════
+   FICHA DE CRIATURA (biblioteca de tokens) — tema + efeitos por elemento
+   Partículas e auras usam só transform/opacity (0017 AC-1) e respeitam
+   prefers-reduced-motion. Cada elemento tem sua assinatura visual:
+   Conhecimento = runas douradas · Energia = faíscas com flicker elétrico ·
+   Medo = névoa rastejante · Morte = cinzas subindo · Sangue = gotas + pulso.
+════════════════════════════════════════════════════════════════════════ */
+const TOKEN_FX = {
+  Conhecimento: { c:'#f0c040', glyphs:['✦','◈','⟡','ᚱ','ᛟ','ᚨ'], mode:'rise' },
+  Energia:      { c:'#57a0ff', glyphs:['✦','•','•'],             mode:'rise', flicker:true },
+  Medo:         { c:'#b030d8', glyphs:['•','•'],                 mode:'rise', fog:true },
+  Morte:        { c:'#a8b0b8', glyphs:['•','•','•'],             mode:'rise' },
+  Sangue:       { c:'#e04040', glyphs:['●','•','•'],             mode:'fall', beat:true },
+  Extras:       { c:'#c9a84c', glyphs:['✦','•'],                 mode:'rise' },
+};
+
+const TokenFichaFX = () => (
+  <style>{`
+    .tokfx-hero{ position:relative; overflow:hidden; height:230px; flex-shrink:0;
+      background:
+        radial-gradient(90% 130% at 50% 105%, color-mix(in srgb, var(--fxc) 26%, transparent), transparent 60%),
+        radial-gradient(120% 90% at 50% -10%, rgba(0,0,0,0.55), transparent 55%),
+        linear-gradient(180deg, #0a0812, #120d1c); }
+    .tokfx-hero::after{ content:""; position:absolute; inset:0; pointer-events:none;
+      box-shadow:inset 0 0 70px 12px rgba(0,0,0,0.65); }
+    .tokfx-img{ position:absolute; left:50%; top:50%; max-width:78%; max-height:82%;
+      transform:translate(-50%,-50%); filter:drop-shadow(0 6px 22px color-mix(in srgb, var(--fxc) 55%, transparent)); }
+    .tokfx-p{ position:absolute; bottom:-12px; pointer-events:none; color:var(--fxc); opacity:0;
+      text-shadow:0 0 8px var(--fxc); user-select:none; }
+    .tokfx-fall .tokfx-p{ bottom:auto; top:-12px; }
+    .tokfx-fog{ position:absolute; width:70%; height:60%; border-radius:50%; pointer-events:none;
+      background:radial-gradient(circle, color-mix(in srgb, var(--fxc) 22%, transparent), transparent 70%);
+      filter:blur(26px); opacity:0.5; }
+    .tokfx-flick{ position:absolute; inset:0; pointer-events:none;
+      background:radial-gradient(70% 60% at 50% 45%, color-mix(in srgb, var(--fxc) 16%, transparent), transparent 70%); opacity:0; }
+    .tokfx-shimmer{ position:absolute; top:0; bottom:0; width:34%; pointer-events:none;
+      background:linear-gradient(100deg, transparent, color-mix(in srgb, var(--fxc) 12%, transparent), transparent); }
+    .tokfx-statpill{ display:flex; flex-direction:column; align-items:center; gap:2px; min-width:52px;
+      padding:7px 10px; border-radius:8px; background:rgba(255,255,255,0.04);
+      border:1px solid color-mix(in srgb, var(--fxc) 30%, transparent); }
+    @media (prefers-reduced-motion: no-preference){
+      .tokfx-img{ animation:tokfx-float 4.5s ease-in-out infinite; }
+      .tokfx-beat .tokfx-img{ animation:tokfx-float 4.5s ease-in-out infinite, tokfx-beatglow 1.4s ease-in-out infinite; }
+      .tokfx-p{ animation:tokfx-rise var(--dur,7s) linear var(--delay,0s) infinite; }
+      .tokfx-fall .tokfx-p{ animation:tokfx-fallanim var(--dur,5s) ease-in var(--delay,0s) infinite; }
+      .tokfx-fog{ animation:tokfx-fogdrift 9s ease-in-out infinite alternate; }
+      .tokfx-flick{ animation:tokfx-flicker 3.2s steps(1) infinite; }
+      .tokfx-shimmer{ animation:tokfx-sweep 5.5s ease-in-out infinite; }
+    }
+    @keyframes tokfx-float{ 0%,100%{ transform:translate(-50%,-50%) } 50%{ transform:translate(-50%,calc(-50% - 8px)) } }
+    @keyframes tokfx-beatglow{ 0%,30%,100%{ filter:drop-shadow(0 6px 20px color-mix(in srgb, var(--fxc) 45%, transparent)) }
+      8%{ filter:drop-shadow(0 6px 38px var(--fxc)) } 16%{ filter:drop-shadow(0 6px 26px color-mix(in srgb, var(--fxc) 70%, transparent)) } }
+    @keyframes tokfx-rise{ 0%{ transform:translateY(0) translateX(0); opacity:0 } 12%{ opacity:0.85 }
+      70%{ opacity:0.5 } 100%{ transform:translateY(-215px) translateX(var(--drift,8px)); opacity:0 } }
+    @keyframes tokfx-fallanim{ 0%{ transform:translateY(0); opacity:0 } 10%{ opacity:0.9 }
+      100%{ transform:translateY(245px); opacity:0 } }
+    @keyframes tokfx-fogdrift{ 0%{ transform:translateX(-16%) } 100%{ transform:translateX(16%) } }
+    @keyframes tokfx-flicker{ 0%,100%{ opacity:0 } 7%{ opacity:0.85 } 9%{ opacity:0.1 } 11%{ opacity:0.6 }
+      13%{ opacity:0 } 47%{ opacity:0.5 } 49%{ opacity:0 } 78%{ opacity:0.35 } 80%{ opacity:0 } }
+    @keyframes tokfx-sweep{ 0%{ transform:translateX(-140%) skewX(-16deg) } 55%,100%{ transform:translateX(340%) skewX(-16deg) } }
+  `}</style>
+);
+
+/* Extrai o que der do texto da ficha (docx) — tudo opcional, texto manda. */
+function parseFichaOP(texto) {
+  if (!texto) return { stats: [], sections: [] };
+  const grab = (re) => { const m = texto.match(re); return m ? m[1].trim() : null; };
+  const stats = [];
+  const pv = grab(/(?:\bPV\b|PONTOS DE VIDA)\s*[:\-–]?\s*(\d+)/i);
+  const def = grab(/\bDEFESA\b\s*[:\-–]?\s*(\d+)/i);
+  const desl = grab(/\bDESLOCAMENTO\b\s*[:\-–]?\s*([0-9]+\s*m?[^\n,;.]{0,18})/i);
+  if (pv) stats.push(['PV', pv]); if (def) stats.push(['Defesa', def]); if (desl) stats.push(['Desloc.', desl]);
+  ['AGI','FOR','INT','PRE','VIG'].forEach(k => {
+    const v = grab(new RegExp(`\\b${k}\\b\\s*[:\\-–]?\\s*(\\d+)`));
+    if (v) stats.push([k, v]);
+  });
+  /* Seções: linha curta em CAIXA-ALTA (ou palavra-chave) vira cabeçalho. */
+  const KEYW = /^(AÇÕES|AÇÃO|HABILIDADES|PODERES|ATAQUES?|ESTRATAGEMAS?|DESCRIÇÃO|EQUIPAMENTOS?|RITUAIS|PERÍCIAS|VARIAÇÕES|TESOURO|SANIDADE|PRESENÇA PERTURBADORA|ESTATÍSTICAS)\b/i;
+  const sections = [{ title: null, lines: [] }];
+  texto.split(/\n/).forEach(raw => {
+    const l = raw.trim();
+    if (!l) return;
+    const isHead = (l.length <= 48 && /[A-ZÀ-Ú]/.test(l) && l === l.toUpperCase() && !/\d{2,}/.test(l)) || KEYW.test(l);
+    if (isHead && l.length <= 60) sections.push({ title: l.replace(/[:.]$/, ''), lines: [] });
+    else sections[sections.length - 1].lines.push(l);
+  });
+  return { stats, sections: sections.filter(s => s.title || s.lines.length) };
+}
 
 function BestiaryTab({ campaignId }) {
   const [creatures,    setCreatures]   = useState([]);
@@ -3121,6 +3094,12 @@ function BestiaryTab({ campaignId }) {
   const [ritualSearch, setRitualSearch]= useState('');
   const [ritualExp,    setRitualExp]   = useState(null);
   const [armaFilter,   setArmaFilter]  = useState('Todos');
+  /* Biblioteca de tokens oficiais (importados dos packs de criaturas) */
+  const [tokenElem,    setTokenElem]   = useState('Todos');
+  const [tokenSearch,  setTokenSearch] = useState('');
+  const [tokenView,    setTokenView]   = useState(null);   // criatura da biblioteca aberta
+  const [tokenVariant, setTokenVariant]= useState(0);      // variante de token selecionada
+  const [tokenTab,     setTokenTab]    = useState('tokens'); // 'tokens' | 'moldes' (variantes MOLDE separadas)
 
   const SYS_COLORS = { 'Genérico':'#8888aa', 'Ordem Paranormal':'#b030d8', 'Tormenta 20':'#d4621e', 'D&D 5e':'#4a6fa5' };
   const OPC = '#b030d8';
@@ -3136,6 +3115,21 @@ function BestiaryTab({ campaignId }) {
   }, [campaignId]);
 
   function openNew() { setForm(EMPTY_CREATURE); setModal('new'); }
+
+  /* Cria uma criatura a partir da biblioteca de tokens oficiais: pré-preenche
+     nome, VD, token escolhido (caminho estático leve — a imagem vive em
+     /public/bestiary-tokens, o Firestore guarda só a URL) e o texto da ficha. */
+  function addFromToken(tk, vi = 0) {
+    setForm({
+      ...EMPTY_OP_CREATURE,
+      name: tk.nome,
+      vd: tk.vd || '',
+      imageUrl: (tk.tokens[vi] || tk.tokens[0]).src,
+      descricaoTexto: tk.ficha || '',
+    });
+    setTokenView(null);
+    setModal('new');
+  }
   function openEdit(c) {
     if (isOP(c.system)) {
       setForm({
@@ -3245,10 +3239,13 @@ function BestiaryTab({ campaignId }) {
   const OP_ATTRS    = [['AGI','agi'],['FOR','atFor'],['INT','atInt'],['PRE','pre'],['VIG','vig']];
 
   const ELEM_COLORS = { Conhecimento:'#f0c040', Energia:'#4080e0', Morte:'#808080', Sangue:'#e04040', Medo:'#b030d8' };
-  const filteredRituais = OP_RITUAIS.filter(r=>
-    (ritualElem==='Todos'||r.elemento===ritualElem) &&
+  /* Biblioteca consome os MESMOS dados oficiais da ficha (spec 0025 — fonte única). */
+  const CUSTO_CIRCULO = { 1:1, 2:3, 3:6, 4:10 };
+  const capElem = s => s ? s.charAt(0).toUpperCase()+s.slice(1) : s;
+  const filteredRituais = RITUAIS_LIB.filter(r=>
+    (ritualElem==='Todos'||capElem(r.elemento)===ritualElem) &&
     (ritualCirc===0||r.circulo===ritualCirc) &&
-    (!ritualSearch||r.nome.toLowerCase().includes(ritualSearch.toLowerCase())||r.descricao.toLowerCase().includes(ritualSearch.toLowerCase()))
+    (!ritualSearch||r.nome.toLowerCase().includes(ritualSearch.toLowerCase())||(r.descricao||'').toLowerCase().includes(ritualSearch.toLowerCase())||(r.efeito||'').toLowerCase().includes(ritualSearch.toLowerCase()))
   );
 
   return (
@@ -3450,7 +3447,7 @@ function BestiaryTab({ campaignId }) {
 
       {/* Section Tabs */}
       <div style={{ display:'flex', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-        {[['criaturas','Criaturas'],['rituais','Rituais'],['condicoes','Condições'],['armas','Armas']].map(([k,l])=>(
+        {[['criaturas','Criaturas'],['tokens','Tokens'],['rituais','Rituais'],['condicoes','Condições'],['armas','Armas'],['regras','Regras']].map(([k,l])=>(
           <button key={k} onClick={()=>setBestedTab(k)}
             style={{ flex:1, padding:'9px 4px', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1, border:'none', background:'transparent', cursor:'pointer', color:bestedTab===k?'#fff':'var(--muted)', borderBottom:bestedTab===k?`2px solid ${OPC}`:'2px solid transparent', textTransform:'uppercase', transition:'color .15s' }}>
             {l}
@@ -3485,7 +3482,7 @@ function BestiaryTab({ campaignId }) {
             const hpC = parseInt(c.hpCurrent != null ? c.hpCurrent : c.hpMax)||hpM;
             const hpColor = hpC<=hpM*0.25?'#e07070':hpC<=hpM*0.5?'#e0a050':'#70c870';
             return (
-              <div key={c.id} style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:8, overflow:'hidden', transition:'border-color .15s' }}
+              <div key={c.id} style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:8, overflow:'hidden', flexShrink:0, transition:'border-color .15s' }}
                 onMouseEnter={e=>e.currentTarget.style.borderColor='rgba(176,48,216,0.3)'}
                 onMouseLeave={e=>e.currentTarget.style.borderColor='var(--border)'}>
                 <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', cursor: isOP(c.system)?'pointer':'default' }}
@@ -3524,6 +3521,197 @@ function BestiaryTab({ campaignId }) {
         </div>
       </>)}
 
+      {/* TOKENS OFICIAIS — biblioteca importada dos packs de criaturas */}
+      {bestedTab==='tokens' && (()=>{
+        const filteredTokens = TOKENS_LIB.filter(tk=>
+          (tokenElem==='Todos'||tk.elemento===tokenElem) &&
+          (!tokenSearch||tk.nome.toLowerCase().includes(tokenSearch.toLowerCase()))
+        );
+        const elemCol = (el)=>ELEM_COLORS[el]||'#c9a84c';
+        return (<>
+        <div style={{ padding:'8px 4px', display:'flex', gap:6, flexShrink:0, flexWrap:'wrap', alignItems:'center' }}>
+          <input value={tokenSearch} onChange={e=>setTokenSearch(e.target.value)} placeholder="Buscar criatura…"
+            style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:6, color:'var(--text)', padding:'6px 12px', fontFamily:'Crimson Pro,serif', fontSize:14, outline:'none', flex:1, minWidth:140 }}/>
+          <select value={tokenElem} onChange={e=>setTokenElem(e.target.value)}
+            style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:6, color:'var(--muted)', padding:'6px 10px', fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1, outline:'none', cursor:'pointer' }}>
+            <option value="Todos">Todos Elementos</option>
+            {['Conhecimento','Energia','Medo','Morte','Sangue','Extras'].map(e=><option key={e}>{e}</option>)}
+          </select>
+          <span style={{ fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1, color:'var(--muted)' }}>{filteredTokens.length} criaturas</span>
+        </div>
+        <div style={{ overflowY:'auto', flex:1, paddingRight:2 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:8 }}>
+            {filteredTokens.map(tk=>(
+              <button key={tk.id} onClick={()=>{ setTokenVariant(0); setTokenTab('tokens'); setTokenView(tk); }}
+                style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:8, padding:0, cursor:'pointer', overflow:'hidden', textAlign:'left', transition:'border-color .15s, transform .15s' }}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor=elemCol(tk.elemento)+'70';e.currentTarget.style.transform='translateY(-2px)';}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border)';e.currentTarget.style.transform='none';}}>
+                <div style={{ aspectRatio:'1', background:'rgba(0,0,0,0.35)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
+                  <img src={tk.tokens[0].src} alt={tk.nome} loading="lazy" style={{ maxWidth:'100%', maxHeight:'100%', objectFit:'contain' }}/>
+                </div>
+                <div style={{ padding:'8px 10px' }}>
+                  <div style={{ fontFamily:'Cinzel,serif', fontSize:11.5, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{tk.nome}</div>
+                  <div style={{ display:'flex', gap:6, marginTop:4, alignItems:'center', flexWrap:'wrap' }}>
+                    <span style={{ fontSize:8.5, color:elemCol(tk.elemento), fontFamily:'Cinzel,serif', letterSpacing:1, textTransform:'uppercase' }}>{tk.elemento}</span>
+                    {tk.vd && <span style={{ fontSize:8.5, color:'var(--muted)', fontFamily:'Cinzel,serif' }}>VD {tk.vd}</span>}
+                    {tk.tokens.length>1 && <span style={{ fontSize:8.5, color:'var(--muted)', fontFamily:'Cinzel,serif' }}>{tk.tokens.length} tokens</span>}
+                    {tk.ficha && (tk.homebrew
+                      ? <span title="Ficha não-oficial, criada pelo Nexus" style={{ fontSize:8.5, color:'#c9a84c', fontFamily:'Cinzel,serif' }}>ficha ◆</span>
+                      : <span title="Ficha do pack oficial" style={{ fontSize:8.5, color:'#70c870', fontFamily:'Cinzel,serif' }}>ficha ✓</span>)}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+          {filteredTokens.length===0 && (
+            <div style={{ textAlign:'center', padding:40, color:'var(--muted)', fontFamily:'Crimson Pro,serif', fontSize:15 }}>Nenhuma criatura encontrada.</div>
+          )}
+        </div>
+
+        {/* Ficha-dossiê da criatura da biblioteca — tema animado por elemento */}
+        {tokenView && (()=>{
+          const fx = TOKEN_FX[tokenView.elemento] || TOKEN_FX.Extras;
+          const parsed = parseFichaOP(tokenView.ficha);
+          const curTok = tokenView.tokens[tokenVariant] || tokenView.tokens[0];
+          /* partículas determinísticas por índice (posição/duração/atraso estáveis) */
+          const parts = Array.from({length:14},(_,i)=>({
+            left:(i*37+11)%94, dur:5.5+(i*1.7)%4.5, delay:(i*0.9)%6,
+            size:9+(i*5)%10, glyph:fx.glyphs[i%fx.glyphs.length], drift:((i%2?1:-1)*(6+(i*3)%14)),
+          }));
+          return (
+          <div style={{ position:'fixed', inset:0, background:`radial-gradient(80% 80% at 50% 50%, color-mix(in srgb, ${fx.c} 7%, rgba(0,0,0,0.88)), rgba(0,0,0,0.92))`, display:'flex', alignItems:'center', justifyContent:'center', zIndex:1150, padding:16 }}
+            onClick={()=>setTokenView(null)}>
+            <TokenFichaFX/>
+            <div onClick={e=>e.stopPropagation()} className="fade"
+              style={{ '--fxc':fx.c, background:'#0c0a14', border:`1px solid color-mix(in srgb, ${fx.c} 40%, transparent)`,
+                borderRadius:14, width:'100%', maxWidth:560, maxHeight:'92vh', display:'flex', flexDirection:'column', overflow:'hidden',
+                boxShadow:`0 24px 90px rgba(0,0,0,0.7), 0 0 40px color-mix(in srgb, ${fx.c} 18%, transparent)` }}>
+
+              {/* HERO animado */}
+              <div className={`tokfx-hero${fx.mode==='fall'?' tokfx-fall':''}${fx.beat?' tokfx-beat':''}`}>
+                {fx.fog && <>
+                  <div className="tokfx-fog" style={{ left:'-10%', bottom:'-18%' }}/>
+                  <div className="tokfx-fog" style={{ right:'-10%', bottom:'-8%', animationDelay:'-4.5s' }}/>
+                </>}
+                {fx.flicker && <div className="tokfx-flick"/>}
+                <div className="tokfx-shimmer"/>
+                {parts.map((p,i)=>(
+                  <span key={i} className="tokfx-p" aria-hidden="true"
+                    style={{ left:`${p.left}%`, fontSize:p.size, '--dur':`${p.dur}s`, '--delay':`${p.delay}s`, '--drift':`${p.drift}px` }}>
+                    {p.glyph}
+                  </span>
+                ))}
+                <img className="tokfx-img" src={curTok.src} alt={tokenView.nome}/>
+                <button onClick={()=>setTokenView(null)} aria-label="Fechar"
+                  style={{ position:'absolute', top:10, right:12, zIndex:3, background:'rgba(0,0,0,0.5)', border:'1px solid rgba(255,255,255,0.18)', borderRadius:7, color:'rgba(255,255,255,0.85)', cursor:'pointer', padding:'5px 11px', fontFamily:'Cinzel,serif', fontSize:10, backdropFilter:'blur(4px)' }}>✕</button>
+                {/* nome sobre o hero */}
+                <div style={{ position:'absolute', left:0, right:0, bottom:0, padding:'26px 18px 12px', background:'linear-gradient(to top, rgba(6,4,10,0.92), transparent)', zIndex:2 }}>
+                  <div style={{ fontFamily:'Cinzel Decorative,serif', fontSize:'clamp(17px,3vw,23px)', color:'#fff', lineHeight:1.15,
+                    textShadow:`0 0 22px color-mix(in srgb, ${fx.c} 70%, transparent), 0 2px 8px rgba(0,0,0,0.9)` }}>{tokenView.nome}</div>
+                  <div style={{ display:'flex', gap:6, marginTop:6, flexWrap:'wrap' }}>
+                    <span style={{ fontFamily:'Cinzel,serif', fontSize:8.5, letterSpacing:1.4, textTransform:'uppercase', color:fx.c,
+                      padding:'3px 9px', borderRadius:20, background:'rgba(0,0,0,0.5)', border:`1px solid color-mix(in srgb, ${fx.c} 45%, transparent)` }}>
+                      ◈ {tokenView.elemento}
+                    </span>
+                    {tokenView.vd && <span style={{ fontFamily:'Cinzel,serif', fontSize:8.5, letterSpacing:1.4, textTransform:'uppercase', color:'rgba(255,255,255,0.8)', padding:'3px 9px', borderRadius:20, background:'rgba(0,0,0,0.5)', border:'1px solid rgba(255,255,255,0.16)' }}>VD {tokenView.vd}</span>}
+                    {tokenView.homebrew && <span title="Ficha não-oficial, criada pelo Nexus" style={{ fontFamily:'Cinzel,serif', fontSize:8.5, letterSpacing:1.4, textTransform:'uppercase', color:'#c9a84c', padding:'3px 9px', borderRadius:20, background:'rgba(0,0,0,0.5)', border:'1px solid rgba(201,168,76,0.4)' }}>◆ Nexus</span>}
+                    <span style={{ fontFamily:'Cinzel,serif', fontSize:8.5, letterSpacing:1.4, textTransform:'uppercase', color:'rgba(255,255,255,0.55)', padding:'3px 9px', borderRadius:20, background:'rgba(0,0,0,0.5)', border:'1px solid rgba(255,255,255,0.1)' }}>{curTok.label}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ flex:1, overflowY:'auto', padding:'14px 16px', scrollbarWidth:'thin' }}>
+                {/* stats extraídos da ficha */}
+                {parsed.stats.length>0 && (
+                  <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:14, '--fxc':fx.c }}>
+                    {parsed.stats.map(([l,v])=>(
+                      <div key={l} className="tokfx-statpill">
+                        <span style={{ fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1.5, color:'rgba(255,255,255,0.65)', textTransform:'uppercase' }}>{l}</span>
+                        <span style={{ fontFamily:'Cinzel,serif', fontSize:19, fontWeight:700, color:fx.c, textShadow:`0 0 12px color-mix(in srgb, ${fx.c} 40%, transparent)` }}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* variantes de token — MOLDES (bases de impressão/recorte) ficam em aba própria */}
+                {tokenView.tokens.length>1 && (()=>{
+                  const isMolde = (v)=>/molde/i.test(v.src)||/molde/i.test(v.label||'');
+                  const idx = tokenView.tokens.map((v,i)=>({ ...v, i }));
+                  const grupos = { tokens: idx.filter(v=>!isMolde(v)), moldes: idx.filter(isMolde) };
+                  const ativo = grupos[tokenTab].length ? tokenTab : 'tokens';
+                  return (<>
+                  {grupos.moldes.length>0 && (
+                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10, padding:'8px 10px', borderRadius:10,
+                      background:'rgba(255,255,255,0.04)', border:`1px solid color-mix(in srgb, ${fx.c} 25%, transparent)` }}>
+                      <span style={{ fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1.5, textTransform:'uppercase', color:'var(--muted)', flexShrink:0 }}>Galeria:</span>
+                      {[['tokens',`◉ Tokens (${grupos.tokens.length})`],['moldes',`▤ Moldes (${grupos.moldes.length})`]].map(([id,lbl])=>(
+                        <button key={id} onClick={()=>{ setTokenTab(id); const g=grupos[id]; if(g.length) setTokenVariant(g[0].i); }}
+                          style={{ flex:1, padding:'9px 14px', borderRadius:8, cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11.5, fontWeight:700, letterSpacing:1.2, textTransform:'uppercase',
+                            background: ativo===id?fx.c:'transparent',
+                            border: ativo===id?`1px solid ${fx.c}`:'1px solid var(--border)',
+                            color: ativo===id?'#0c0a14':'var(--muted2)',
+                            boxShadow: ativo===id?`0 0 16px color-mix(in srgb, ${fx.c} 55%, transparent)`:'none',
+                            transition:'all .15s' }}
+                          onMouseEnter={e=>{ if(ativo!==id) e.currentTarget.style.color='#fff'; }}
+                          onMouseLeave={e=>{ e.currentTarget.style.color=ativo===id?'#0c0a14':'var(--muted2)'; }}>
+                          {lbl}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ display:'flex', gap:6, overflowX:'auto', paddingBottom:8, marginBottom:12, scrollbarWidth:'thin' }}>
+                    {grupos[ativo].map((v)=>(
+                      <button key={v.src} onClick={()=>setTokenVariant(v.i)} title={v.label}
+                        style={{ width:54, height:54, flexShrink:0, borderRadius:8, padding:3, cursor:'pointer', background:'rgba(0,0,0,0.4)',
+                          border: v.i===tokenVariant?`2px solid ${fx.c}`:'1px solid var(--border)',
+                          boxShadow: v.i===tokenVariant?`0 0 12px color-mix(in srgb, ${fx.c} 45%, transparent)`:'none', transition:'all .15s' }}>
+                        <img src={v.src} alt={v.label} loading="lazy" style={{ width:'100%', height:'100%', objectFit:'contain' }}/>
+                      </button>
+                    ))}
+                  </div>
+                  </>);
+                })()}
+                {/* ficha em seções */}
+                {parsed.sections.length>0 ? parsed.sections.map((sec,si)=>(
+                  <div key={si} style={{ marginBottom:16 }}>
+                    {sec.title && (
+                      <div style={{ fontFamily:'Cinzel,serif', fontSize:13, fontWeight:700, letterSpacing:2, textTransform:'uppercase', color:fx.c,
+                        borderBottom:`1px solid color-mix(in srgb, ${fx.c} 40%, transparent)`, paddingBottom:6, marginBottom:10,
+                        textShadow:`0 0 14px color-mix(in srgb, ${fx.c} 40%, transparent)` }}>{sec.title}</div>
+                    )}
+                    {sec.lines.map((ln,li)=>{
+                      const m = ln.match(/^([A-ZÀ-Úa-zà-ú][\wÀ-ú' ,()-]{2,44})[.:]\s+(.{10,})/);
+                      return (
+                        <p key={li} style={{ fontFamily:'Crimson Pro,serif', fontSize:16.5, color:'rgba(240,235,245,0.92)', lineHeight:1.7, margin:'0 0 9px' }}>
+                          {m ? <><strong style={{ color:'#fff', fontFamily:'Cinzel,serif', fontSize:13.5 }}>{m[1]}.</strong> {m[2]}</> : ln}
+                        </p>
+                      );
+                    })}
+                  </div>
+                )) : (
+                  <div style={{ textAlign:'center', padding:'22px 12px', color:'var(--muted)', fontFamily:'Crimson Pro,serif', fontSize:14, fontStyle:'italic' }}>
+                    Este pack não trouxe ficha em texto — só os tokens. Adicione ao bestiário e preencha os atributos.
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display:'flex', gap:8, padding:'12px 16px', borderTop:`1px solid color-mix(in srgb, ${fx.c} 25%, transparent)`, flexShrink:0, justifyContent:'flex-end', background:'rgba(0,0,0,0.3)' }}>
+                <button onClick={()=>setTokenView(null)} style={{ padding:'8px 16px', borderRadius:7, border:'1px solid var(--border)', background:'transparent', color:'var(--muted)', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1 }}>Fechar</button>
+                <button onClick={()=>addFromToken(tokenView, tokenVariant)}
+                  style={{ padding:'8px 18px', borderRadius:7, cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1,
+                    border:`1px solid color-mix(in srgb, ${fx.c} 55%, transparent)`, background:`color-mix(in srgb, ${fx.c} 20%, transparent)`,
+                    color:'#fff', textShadow:`0 0 10px color-mix(in srgb, ${fx.c} 60%, transparent)`, transition:'all .18s' }}
+                  onMouseEnter={e=>e.currentTarget.style.background=`color-mix(in srgb, ${fx.c} 34%, transparent)`}
+                  onMouseLeave={e=>e.currentTarget.style.background=`color-mix(in srgb, ${fx.c} 20%, transparent)`}>
+                  + Adicionar ao Bestiário
+                </button>
+              </div>
+            </div>
+          </div>
+          );
+        })()}
+        </>);
+      })()}
+
       {/* RITUAIS */}
       {bestedTab==='rituais' && (<>
           <div style={{ padding:'8px 4px', display:'flex', gap:6, flexShrink:0, flexWrap:'wrap' }}>
@@ -3545,20 +3733,20 @@ function BestiaryTab({ campaignId }) {
               <div style={{ textAlign:'center', padding:40, color:'var(--muted)', fontFamily:'Crimson Pro,serif', fontSize:14 }}>Nenhum ritual encontrado.</div>
             )}
             {filteredRituais.map((r,i)=>{
-              const rKey = r.elemento+'|'+r.nome+'|'+r.circulo;
+              const rKey = r.id || (r.elemento+'|'+r.nome+'|'+r.circulo);
               const exp = ritualExp===rKey;
-              const ec = ELEM_COLORS[r.elemento]||OPC;
+              const ec = ELEM_COLORS[capElem(r.elemento)]||OPC;
               return (
-                <div key={rKey+i} style={{ background:'var(--card)', border:`1px solid ${exp ? ec+'55' : 'var(--border)'}`, borderRadius:8, overflow:'hidden' }}>
+                <div key={rKey+i} style={{ background:'var(--card)', border:`1px solid ${exp ? ec+'55' : 'var(--border)'}`, borderRadius:8, overflow:'hidden', flexShrink:0 /* sem shrink: overflow:hidden zera o min-height e o flex column comprimia os cards em listras */ }}>
                   <div style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 12px', cursor:'pointer' }} onClick={()=>setRitualExp(exp?null:rKey)}>
                     <div style={{ width:6, height:6, borderRadius:'50%', background:ec, flexShrink:0 }}/>
                     <div style={{ flex:1, minWidth:0 }}>
                       <span style={{ fontFamily:'Cinzel,serif', fontSize:12, color:'var(--text)' }}>{r.nome}</span>
-                      <span style={{ fontFamily:'Cinzel,serif', fontSize:9, color:ec, marginLeft:8, letterSpacing:1 }}>{r.elemento}</span>
+                      <span style={{ fontFamily:'Cinzel,serif', fontSize:9, color:ec, marginLeft:8, letterSpacing:1 }}>{capElem(r.elemento)}</span>
                     </div>
                     <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                       <span style={{ fontFamily:'Cinzel,serif', fontSize:9, color:'var(--muted)', letterSpacing:1 }}>{r.circulo}° circ.</span>
-                      <span style={{ fontFamily:'Cinzel,serif', fontSize:9, color:OPC }}>{r.custo} PE</span>
+                      <span style={{ fontFamily:'Cinzel,serif', fontSize:9, color:OPC }}>{CUSTO_CIRCULO[r.circulo]} PE</span>
                       <span style={{ fontSize:11, color:'var(--muted)' }}>{exp?'∧':'∨'}</span>
                     </div>
                   </div>
@@ -3569,9 +3757,10 @@ function BestiaryTab({ campaignId }) {
                         <div><span style={{ color:'var(--muted)' }}>ALCANCE </span><span style={{ color:'var(--text)' }}>{r.alcance}</span></div>
                         <div><span style={{ color:'var(--muted)' }}>ALVO </span><span style={{ color:'var(--text)' }}>{r.alvo}</span></div>
                         <div><span style={{ color:'var(--muted)' }}>DURAÇÃO </span><span style={{ color:'var(--text)' }}>{r.duracao}</span></div>
-                        {r.resistencia&&r.resistencia!=='-'&&<div style={{ gridColumn:'1/-1' }}><span style={{ color:'var(--muted)' }}>RESISTÊNCIA </span><span style={{ color:'var(--text)' }}>{r.resistencia}</span></div>}
+                        {r.resistencia&&r.resistencia!=='-'&&r.resistencia!=='—'&&<div style={{ gridColumn:'1/-1' }}><span style={{ color:'var(--muted)' }}>RESISTÊNCIA </span><span style={{ color:'var(--text)' }}>{r.resistencia}</span></div>}
                       </div>
-                      <div style={{ fontFamily:'Crimson Pro,serif', fontSize:13, color:'rgba(255,255,255,0.85)', lineHeight:1.6, marginTop:4 }}>{r.descricao}</div>
+                      <div style={{ fontFamily:'Crimson Pro,serif', fontSize:13, color:'rgba(255,255,255,0.85)', lineHeight:1.6, marginTop:4 }}
+                        dangerouslySetInnerHTML={{ __html: r.descricao || r.efeito || '' }} />
                       <div style={{ display:'flex', justifyContent:'flex-end', marginTop:8 }}>
                         <button onClick={()=>doRoll('1d20')} title="Rolar 1d20 para conjurar"
                           style={{ display:'flex', alignItems:'center', gap:4, padding:'4px 10px', borderRadius:5, border:`1px solid ${ec}44`, background:`${ec}11`, color:ec, cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1 }}>
@@ -3605,32 +3794,59 @@ function BestiaryTab({ campaignId }) {
         </div>
       )}
 
+      {/* REGRAS (spec 0024 — compêndio de referência, como Condições) */}
+      {bestedTab==='regras' && (
+        <div style={{ overflowY:'auto', flex:1, padding:'8px 4px' }}>
+          <div style={{ fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:2, color:'var(--muted)', textTransform:'uppercase', padding:'4px 2px 10px' }}>Regras Básicas — Ordem Paranormal (material não oficial, parafraseado)</div>
+          {[['testes','Testes e Dificuldade'],['acoes','Ações de Combate'],['manobras','Manobras'],['recursos','Recursos e Dano'],['interludio','Interlúdio'],['rituais','Rituais — Regras Gerais']].map(([sec,titulo])=>(
+            <div key={sec} style={{ marginBottom:16 }}>
+              <div style={{ fontFamily:'Cinzel,serif', fontSize:11, color:OPC, letterSpacing:2, textTransform:'uppercase', borderBottom:'1px solid var(--border)', padding:'4px 2px 6px', marginBottom:8 }}>{titulo}</div>
+              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                {REGRAS_OFICIAIS.filter(r=>r.secao===sec).map(r=>(
+                  <div key={r.id} style={{ display:'flex', alignItems:'flex-start', gap:10, background:'var(--card)', border:'1px solid var(--border)', borderRadius:8, padding:'10px 12px' }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontFamily:'Cinzel,serif', fontSize:11, color:'var(--text)', letterSpacing:1, marginBottom:3 }}>{r.nome}</div>
+                      <div style={{ fontFamily:'Crimson Pro,serif', fontSize:13, color:'rgba(255,255,255,0.8)', lineHeight:1.5 }}>{r.descricao}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* ARMAS */}
       {bestedTab==='armas' && (<>
           <div style={{ padding:'8px 4px 4px', flexShrink:0 }}>
             <select value={armaFilter} onChange={e=>setArmaFilter(e.target.value)}
               style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:6, color:'var(--muted)', padding:'5px 8px', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1, outline:'none', cursor:'pointer' }}>
               <option value="Todos">Todas Proficiências</option>
-              {['Simples','Tática','Pesada'].map(p=><option key={p}>{p}</option>)}
+              {['Armas Táticas','Armas de Fogo','Armas Pesadas'].map(p=><option key={p}>{p}</option>)}
             </select>
           </div>
           <div style={{ overflowY:'auto', flex:1, padding:'4px 4px 8px' }}>
             <div style={{ fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:2, color:'var(--muted)', textTransform:'uppercase', padding:'4px 2px 8px' }}>Tabela de Armas — Ordem Paranormal</div>
-            {['Simples','Tática','Pesada'].filter(p=>armaFilter==='Todos'||armaFilter===p).map(prof=>{
-              const armas = OP_ARMAS.filter(a=>a.prof===prof);
+            {['Armas Táticas','Armas de Fogo','Armas Pesadas'].filter(p=>armaFilter==='Todos'||armaFilter===p).map(prof=>{
+              /* Mesmos dados oficiais da ficha (spec 0025 — fonte única). */
+              const armas = ITENS_LIB.filter(a=>a.tipo==='arma'&&a.proficiencia===prof);
               return (
                 <div key={prof} style={{ marginBottom:16 }}>
                   <div style={{ fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:2, color:OPC, textTransform:'uppercase', marginBottom:6, borderBottom:`1px solid ${OPC}33`, paddingBottom:4 }}>{prof}</div>
                   <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
                     {armas.map(a=>(
-                      <div key={a.nome+a.cat} style={{ display:'grid', gridTemplateColumns:'1fr auto auto', gap:8, background:'var(--card)', border:'1px solid var(--border)', borderRadius:6, padding:'7px 10px', alignItems:'center' }}>
+                      <div key={a.id} style={{ display:'grid', gridTemplateColumns:'1fr auto auto', gap:8, background:'var(--card)', border:'1px solid var(--border)', borderRadius:6, padding:'7px 10px', alignItems:'center' }}>
                         <div>
                           <div style={{ fontFamily:'Cinzel,serif', fontSize:11, color:'var(--text)' }}>{a.nome}</div>
-                          <div style={{ fontFamily:'Cinzel,serif', fontSize:8, color:'var(--muted)', letterSpacing:1, marginTop:1 }}>{a.cat} · {a.prop}</div>
+                          <div style={{ fontFamily:'Cinzel,serif', fontSize:8, color:'var(--muted)', letterSpacing:1, marginTop:1 }}>
+                            {a.tipo_arma} · {a.empunhadura}{a.alcance&&a.alcance!=='—'?` · ${a.alcance}`:''} · Cat. {a.categoria} · {a.espacos} esp.
+                          </div>
                         </div>
                         <div style={{ textAlign:'center' }}>
                           <div style={{ fontFamily:'Cinzel,serif', fontSize:13, color:'var(--text)', fontWeight:600 }}>{a.dano}</div>
-                          <div style={{ fontFamily:'Cinzel,serif', fontSize:8, color:'var(--muted)', letterSpacing:1 }}>{a.tipo}</div>
+                          <div style={{ fontFamily:'Cinzel,serif', fontSize:8, color:'var(--muted)', letterSpacing:1 }}>
+                            {a.tipo_dano}{(a.critico<20||a.multiplicador>2)?` · crít. ${a.critico}${a.critico<20?'+':''}/×${a.multiplicador}`:''}
+                          </div>
                         </div>
                         <button onClick={()=>doRoll(a.dano)} title={`Rolar dano de ${a.nome}`}
                           style={{ background:'transparent', border:'none', cursor:'pointer', padding:'2px 4px', color:OPC, display:'flex', alignItems:'center' }}>
@@ -3642,6 +3858,27 @@ function BestiaryTab({ campaignId }) {
                 </div>
               );
             })}
+
+            {/* Modificações (spec 0026 — tabelas 3.5/3.7/3.9 do livro, parafraseadas) */}
+            <div style={{ marginTop:8, marginBottom:16 }}>
+              <div style={{ fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:2, color:OPC, textTransform:'uppercase', marginBottom:4, borderBottom:`1px solid ${OPC}33`, paddingBottom:4 }}>Modificações</div>
+              <div style={{ fontFamily:'Crimson Pro,serif', fontSize:12, color:'var(--muted)', marginBottom:8 }}>
+                Cada modificação aumenta a categoria do item em I. Modificações iguais não se acumulam.
+              </div>
+              {[['armas','Armas (corpo a corpo e disparo)'],['armas_fogo','Armas de Fogo'],['municao','Munições'],['protecao','Proteções'],['acessorio','Acessórios']].map(([apl,titulo])=>(
+                <div key={apl} style={{ marginBottom:10 }}>
+                  <div style={{ fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1, color:'var(--muted)', textTransform:'uppercase', margin:'6px 0 4px' }}>{titulo}</div>
+                  <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                    {MODS_LIB.filter(m=>m.aplica===apl).map(m=>(
+                      <div key={m.id} style={{ display:'flex', gap:8, background:'var(--card)', border:'1px solid var(--border)', borderRadius:6, padding:'6px 10px', alignItems:'baseline' }}>
+                        <span style={{ fontFamily:'Cinzel,serif', fontSize:10, color:'var(--text)', whiteSpace:'nowrap' }}>{m.nome}</span>
+                        <span style={{ fontFamily:'Crimson Pro,serif', fontSize:12, color:'rgba(255,255,255,0.75)', lineHeight:1.4 }}>{m.efeito}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
       </>)}
 
@@ -4380,6 +4617,8 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
   const isMaster = campaign.masterId === uid;
   const isAdmin  = !isMaster && (campaign.admins||[]).includes(uid);
   const coverInputRef = useRef(null);
+  // pill deslizante nas abas — mesmo padrão do Sidebar/ficha OP (spec 0022 AC-5)
+  const tabsPill = useSlidingPill(activeTab);
 
   /* ── Live-sync: always push character changes to sharedSheets regardless of active tab ── */
   const liveSheetsRef = useRef([]);
@@ -4449,114 +4688,141 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
     ...((isMaster||isAdmin) ? [{ id:"settings", label:"Gerenciar", svg:<SvgSettings/> }] : []),
   ];
 
-  const BtnAction = ({ icon, label, onClick, disabled }) => (
-    <button onClick={onClick} disabled={!!disabled}
-      style={{
-        display:"flex",alignItems:"center",gap:8,padding:"9px 16px",
-        background:"rgba(255,255,255,0.04)",
-        border:"1px solid rgba(255,255,255,0.1)",
-        borderRadius:8,cursor:disabled?"default":"pointer",
-        fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:"0.08em",textTransform:"uppercase",
-        color:"rgba(255,255,255,0.7)",
-        transition:"all 0.18s",whiteSpace:"nowrap",opacity:disabled?0.4:1,
-        boxShadow:"0 1px 3px rgba(0,0,0,0.3)",
-      }}
-      onMouseEnter={e=>{ if(!disabled){ e.currentTarget.style.background="rgba(176,48,216,0.18)"; e.currentTarget.style.borderColor="rgba(176,48,216,0.5)"; e.currentTarget.style.color="#e0c8ff"; e.currentTarget.style.boxShadow="0 2px 8px rgba(176,48,216,0.2)"; }}}
-      onMouseLeave={e=>{ e.currentTarget.style.background="rgba(255,255,255,0.04)"; e.currentTarget.style.borderColor="rgba(255,255,255,0.1)"; e.currentTarget.style.color="rgba(255,255,255,0.7)"; e.currentTarget.style.boxShadow="0 1px 3px rgba(0,0,0,0.3)"; }}>
-      <span style={{display:"flex",alignItems:"center",opacity:0.85}}>{icon}</span>
-      {label}
-    </button>
-  );
-
   return (
     <>
     {coverPreview && <CoverPreviewModal image={coverPreview} onConfirm={confirmCoverUpload} onClose={()=>setCoverPreview(null)}/>}
     <NarracaoOverlay campaign={campaign} uid={uid} isMaster={isMaster}/>
     <div className="fade" style={{display:"flex",flexDirection:"column",height:"calc(100vh - 136px)",minHeight:400,gap:0}}>
 
-      {/* ── Banner de capa ── */}
-      <div style={{position:"relative",width:"100%",height:campaign.coverImage?180:80,borderRadius:10,overflow:"hidden",flexShrink:0,marginBottom:0,
-        background:campaign.coverImage?"transparent":"linear-gradient(135deg,rgba(176,48,216,0.18),rgba(176,48,216,0.04))"}}>
+      {/* ── Banner de capa (hero) ──
+          As ações moram AQUI, como overlays discretos — a barra de botões que
+          duplicava abas (Adicionar Agentes → aba Agentes, Editar Campanha →
+          aba Gerenciar) foi removida: navegação só pelas abas, ações só no hero. */}
+      <input ref={coverInputRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>e.target.files?.[0]&&handleCoverUpload(e.target.files[0])}/>
+      <div style={{position:"relative",width:"100%",height:campaign.coverImage?200:110,borderRadius:12,overflow:"hidden",flexShrink:0,
+        border:"1px solid rgba(176,48,216,0.18)",
+        background:campaign.coverImage?"transparent":"radial-gradient(120% 160% at 20% 0%,rgba(176,48,216,0.22),rgba(176,48,216,0.03) 60%),linear-gradient(180deg,rgba(20,14,26,0.9),rgba(10,8,14,0.95))"}}>
         {campaign.coverImage && <img src={campaign.coverImage} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>}
-        <div style={{position:"absolute",inset:0,background:"linear-gradient(to bottom,rgba(0,0,0,0.05) 0%,rgba(0,0,0,0.72) 100%)"}}/>
-        {isMaster && campaign.coverImage && (
-          <button
-            onClick={()=>setCoverPreview(campaign.coverImage)}
-            style={{position:"absolute",top:10,right:10,background:"rgba(0,0,0,0.55)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:6,cursor:"pointer",color:"rgba(255,255,255,0.85)",padding:"5px 12px",fontFamily:"Cinzel,serif",fontSize:9,letterSpacing:1,textTransform:"uppercase",backdropFilter:"blur(4px)",transition:"all 0.2s",zIndex:2}}
-            onMouseEnter={e=>e.currentTarget.style.background="rgba(0,0,0,0.75)"}
-            onMouseLeave={e=>e.currentTarget.style.background="rgba(0,0,0,0.55)"}>
-            ✦ Ajustar
-          </button>
-        )}
-        {/* Back + title */}
-        <div style={{position:"absolute",bottom:12,left:14,right:14,display:"flex",alignItems:"flex-end",gap:12}}>
-          <button onClick={onBack} style={{
-            background:"rgba(0,0,0,0.45)",border:"1px solid rgba(255,255,255,0.18)",borderRadius:6,cursor:"pointer",
-            color:"rgba(255,255,255,0.8)",padding:"5px 11px",fontFamily:"Cinzel,serif",fontSize:9,
-            letterSpacing:1,textTransform:"uppercase",flexShrink:0,transition:"all 0.2s",
+        <div style={{position:"absolute",inset:0,background:"linear-gradient(to bottom,rgba(0,0,0,0.28) 0%,rgba(0,0,0,0.10) 34%,rgba(0,0,0,0.78) 100%)"}}/>
+
+        {/* topo: voltar (esq) + ações do mestre (dir) */}
+        <div style={{position:"absolute",top:10,left:12,right:12,display:"flex",alignItems:"center",gap:8,zIndex:2}}>
+          <button onClick={onBack} title="Voltar às campanhas" style={{
+            display:"flex",alignItems:"center",gap:6,
+            background:"rgba(0,0,0,0.5)",border:"1px solid rgba(255,255,255,0.16)",borderRadius:8,cursor:"pointer",
+            color:"rgba(255,255,255,0.85)",padding:"6px 12px",fontFamily:"Cinzel,serif",fontSize:9,
+            letterSpacing:1,textTransform:"uppercase",backdropFilter:"blur(6px)",transition:"all 0.2s",
           }}
-            onMouseEnter={e=>{e.currentTarget.style.background="rgba(0,0,0,0.65)";e.currentTarget.style.color="#fff";}}
-            onMouseLeave={e=>{e.currentTarget.style.background="rgba(0,0,0,0.45)";e.currentTarget.style.color="rgba(255,255,255,0.8)";}}>
+            onMouseEnter={e=>{e.currentTarget.style.background="rgba(0,0,0,0.72)";e.currentTarget.style.color="#fff";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="rgba(0,0,0,0.5)";e.currentTarget.style.color="rgba(255,255,255,0.85)";}}>
             ← Voltar
           </button>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{fontFamily:"'Cinzel Decorative',serif",fontSize:18,color:"#fff",lineHeight:1.2,textShadow:"0 1px 6px rgba(0,0,0,0.8)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-              {campaign.name}
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:10,marginTop:2,flexWrap:"wrap"}}>
-              {campaign.system&&<span style={{fontFamily:"Cinzel,serif",fontSize:9,letterSpacing:1,color:"rgba(255,220,100,0.9)",textTransform:"uppercase"}}>{campaign.system}</span>}
-              <span style={{fontFamily:"Cinzel,serif",fontSize:9,letterSpacing:1,color:"rgba(255,255,255,0.5)",textTransform:"uppercase"}}>◎ {campaign.members?.length||1}/{campaign.maxPlayers||6}</span>
-              {isMaster&&<span style={{fontFamily:"Cinzel,serif",fontSize:8,letterSpacing:1,color:"#c8a8f0",padding:"2px 7px",background:"rgba(176,48,216,0.35)",borderRadius:4,textTransform:"uppercase"}}>Mestre</span>}
-            </div>
+          <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+            {isMaster && (
+              <button onClick={()=>coverInputRef.current?.click()} disabled={coverUploading} title="Trocar a foto de capa"
+                style={{display:"flex",alignItems:"center",gap:6,background:"rgba(0,0,0,0.5)",border:"1px solid rgba(255,255,255,0.16)",borderRadius:8,
+                  cursor:coverUploading?"default":"pointer",color:"rgba(255,255,255,0.8)",padding:"6px 12px",fontFamily:"Cinzel,serif",fontSize:9,
+                  letterSpacing:1,textTransform:"uppercase",backdropFilter:"blur(6px)",transition:"all 0.2s",opacity:coverUploading?0.5:1}}
+                onMouseEnter={e=>{if(!coverUploading){e.currentTarget.style.background="rgba(0,0,0,0.72)";e.currentTarget.style.color="#fff";}}}
+                onMouseLeave={e=>{e.currentTarget.style.background="rgba(0,0,0,0.5)";e.currentTarget.style.color="rgba(255,255,255,0.8)";}}>
+                {coverUploading?<span style={{fontSize:12}}>⏳</span>:<SvgCamera/>}
+                <span className="camp-hero-btn-label">{coverUploading?"Enviando…":"Capa"}</span>
+              </button>
+            )}
+            {isMaster && campaign.coverImage && (
+              <button onClick={()=>setCoverPreview(campaign.coverImage)} title="Reenquadrar a capa"
+                style={{background:"rgba(0,0,0,0.5)",border:"1px solid rgba(255,255,255,0.16)",borderRadius:8,cursor:"pointer",
+                  color:"rgba(255,255,255,0.8)",padding:"6px 12px",fontFamily:"Cinzel,serif",fontSize:9,letterSpacing:1,
+                  textTransform:"uppercase",backdropFilter:"blur(6px)",transition:"all 0.2s"}}
+                onMouseEnter={e=>{e.currentTarget.style.background="rgba(0,0,0,0.72)";e.currentTarget.style.color="#fff";}}
+                onMouseLeave={e=>{e.currentTarget.style.background="rgba(0,0,0,0.5)";e.currentTarget.style.color="rgba(255,255,255,0.8)";}}>
+                ✦ Ajustar
+              </button>
+            )}
           </div>
         </div>
-      </div>
 
-      {/* ── Barra de ações ── */}
-      <input ref={coverInputRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>e.target.files?.[0]&&handleCoverUpload(e.target.files[0])}/>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",padding:"12px 0 4px",flexShrink:0,alignItems:"center"}}>
-        {isMaster && (
-          <BtnAction icon={coverUploading?<span style={{fontSize:13}}>⏳</span>:<SvgCamera/>} label={coverUploading?"Enviando...":"Foto de Capa"} disabled={coverUploading}
-            onClick={()=>coverInputRef.current?.click()}/>
-        )}
-        <BtnAction icon={<SvgSparkle/>} label="Adicionar Agentes" onClick={()=>setActiveTab("sheets")}/>
-        <BtnAction icon={<SvgUserPlus/>} label="Convidar Jogadores" onClick={()=>setShowInvite(v=>!v)}/>
-        {isMaster && <BtnAction icon={<SvgSettings/>} label="Editar Campanha" onClick={()=>setActiveTab("settings")}/>}
+        {/* base: título + meta (esq) e CTA convidar (dir) */}
+        <div style={{position:"absolute",bottom:14,left:16,right:16,display:"flex",alignItems:"flex-end",gap:12,zIndex:2}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontFamily:"'Cinzel Decorative',serif",fontSize:"clamp(19px,2.6vw,26px)",color:"#fff",lineHeight:1.15,
+              textShadow:"0 2px 10px rgba(0,0,0,0.7)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              {campaign.name}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:6,marginTop:6,flexWrap:"wrap"}}>
+              {campaign.system&&(
+                <span style={{fontFamily:"Cinzel,serif",fontSize:8.5,letterSpacing:1.2,color:"rgba(255,222,120,0.95)",textTransform:"uppercase",
+                  padding:"3px 9px",background:"rgba(0,0,0,0.45)",border:"1px solid rgba(255,220,100,0.28)",borderRadius:20,backdropFilter:"blur(4px)"}}>
+                  {campaign.system}
+                </span>
+              )}
+              <span title="Jogadores na campanha" style={{fontFamily:"Cinzel,serif",fontSize:8.5,letterSpacing:1.2,color:"rgba(255,255,255,0.75)",textTransform:"uppercase",
+                padding:"3px 9px",background:"rgba(0,0,0,0.45)",border:"1px solid rgba(255,255,255,0.16)",borderRadius:20,backdropFilter:"blur(4px)"}}>
+                ◎ {campaign.members?.length||1}/{campaign.maxPlayers||6} jogadores
+              </span>
+              {isMaster&&(
+                <span style={{fontFamily:"Cinzel,serif",fontSize:8.5,letterSpacing:1.2,color:"#e0c8ff",textTransform:"uppercase",
+                  padding:"3px 9px",background:"rgba(176,48,216,0.4)",border:"1px solid rgba(200,140,255,0.4)",borderRadius:20,backdropFilter:"blur(4px)"}}>
+                  ✦ Mestre
+                </span>
+              )}
+            </div>
+          </div>
+          <button onClick={()=>setShowInvite(v=>!v)} title="Mostrar o código de convite"
+            style={{display:"flex",alignItems:"center",gap:7,flexShrink:0,
+              background:showInvite?"rgba(176,48,216,0.5)":"linear-gradient(135deg,rgba(176,48,216,0.55),rgba(120,30,180,0.55))",
+              border:"1px solid rgba(200,140,255,0.5)",borderRadius:9,cursor:"pointer",
+              color:"#f0e4ff",padding:"8px 16px",fontFamily:"Cinzel,serif",fontSize:10,
+              letterSpacing:"0.08em",textTransform:"uppercase",backdropFilter:"blur(6px)",
+              boxShadow:"0 2px 12px rgba(140,40,220,0.35)",transition:"all 0.2s"}}
+            onMouseEnter={e=>{e.currentTarget.style.boxShadow="0 3px 18px rgba(160,60,240,0.5)";e.currentTarget.style.transform="translateY(-1px)";}}
+            onMouseLeave={e=>{e.currentTarget.style.boxShadow="0 2px 12px rgba(140,40,220,0.35)";e.currentTarget.style.transform="none";}}>
+            <SvgUserPlus/><span className="camp-hero-btn-label">Convidar</span>
+          </button>
+        </div>
       </div>
 
       {/* ── Painel código de convite ── */}
       {showInvite && (
-        <div style={{padding:"12px 16px",background:"rgba(176,48,216,0.07)",border:"1px solid rgba(176,48,216,0.22)",borderRadius:8,display:"flex",alignItems:"center",gap:14,flexShrink:0,marginBottom:4}}>
+        <div className="fade" style={{padding:"14px 18px",marginTop:10,
+          background:"linear-gradient(135deg,rgba(176,48,216,0.10),rgba(176,48,216,0.03))",
+          border:"1px solid rgba(176,48,216,0.28)",borderRadius:10,
+          display:"flex",alignItems:"center",gap:16,flexShrink:0,flexWrap:"wrap"}}>
           <div>
-            <div style={{fontFamily:"Cinzel,serif",fontSize:9,color:"var(--muted)",letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Código de Convite</div>
-            <div style={{fontFamily:"Cinzel,serif",fontSize:22,letterSpacing:8,color:"#c8a8f0",fontWeight:700}}>{campaign.inviteCode||"------"}</div>
+            <div style={{fontFamily:"Cinzel,serif",fontSize:9,color:"var(--muted)",letterSpacing:1.5,textTransform:"uppercase",marginBottom:5}}>
+              Código de convite · compartilhe com seus jogadores
+            </div>
+            <div style={{fontFamily:"Cinzel,serif",fontSize:24,letterSpacing:9,color:"#d4b0ff",fontWeight:700,textShadow:"0 0 18px rgba(176,48,216,0.4)"}}>
+              {campaign.inviteCode||"------"}
+            </div>
           </div>
           <button onClick={copyInviteCode} style={{
-            marginLeft:"auto",padding:"7px 16px",background:inviteCopied?"rgba(106,170,122,0.15)":"rgba(176,48,216,0.15)",
-            border:`1px solid ${inviteCopied?"rgba(106,170,122,0.4)":"rgba(176,48,216,0.4)"}`,
-            borderRadius:6,cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:9,letterSpacing:1,
-            color:inviteCopied?"#6aaa7a":"#c8a8f0",transition:"all 0.2s",
-          }}>{inviteCopied?"✓ Copiado!":"Copiar"}</button>
-          <button onClick={()=>setShowInvite(false)} style={{background:"transparent",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:16,lineHeight:1,padding:"2px 4px"}}>✕</button>
+            marginLeft:"auto",padding:"9px 20px",background:inviteCopied?"rgba(106,170,122,0.18)":"rgba(176,48,216,0.18)",
+            border:`1px solid ${inviteCopied?"rgba(106,170,122,0.45)":"rgba(176,48,216,0.45)"}`,
+            borderRadius:8,cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:1,
+            color:inviteCopied?"#7bc48b":"#d4b0ff",transition:"all 0.2s",textTransform:"uppercase",
+          }}>{inviteCopied?"✓ Copiado!":"⧉ Copiar código"}</button>
+          <button onClick={()=>setShowInvite(false)} aria-label="Fechar" style={{background:"transparent",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:17,lineHeight:1,padding:"2px 4px"}}>✕</button>
         </div>
       )}
 
-      {/* ── Tabs ── */}
-      <div style={{display:"flex",gap:2,borderBottom:"1px solid var(--border)",flexShrink:0,marginTop:8,paddingBottom:0,overflowX:"auto",scrollbarWidth:"none",WebkitOverflowScrolling:"touch"}}>
+      {/* ── Tabs (pill deslizante — um único realce corre até a aba ativa) ── */}
+      <div ref={tabsPill.containerRef} style={{display:"flex",gap:2,borderBottom:"1px solid var(--border)",flexShrink:0,marginTop:12,position:"relative",
+        overflowX:"auto",scrollbarWidth:"none",WebkitOverflowScrolling:"touch"}}>
+        <SlidingTabPill pill={tabsPill.pill} radius={8} background="rgba(176,48,216,0.14)" underline="#b030d8"/>
         {tabs.map(tab=>{
           const active = activeTab===tab.id;
           return (
-            <button key={tab.id} onClick={()=>setActiveTab(tab.id)} style={{
-              padding:"11px 16px",border:"none",cursor:"pointer",flexShrink:0,
-              fontFamily:"Cinzel,serif",fontSize:12,letterSpacing:"0.08em",textTransform:"uppercase",
-              color: active ? "#e0c8ff" : "rgba(255,255,255,0.4)",
-              background: active ? "rgba(176,48,216,0.15)" : "transparent",
-              borderBottom: active ? "2px solid #b030d8" : "2px solid transparent",
-              borderRadius: active ? "6px 6px 0 0" : "6px 6px 0 0",
-              transition:"all 0.18s",display:"flex",alignItems:"center",gap:7,marginBottom:-1,
-              boxShadow: active ? "inset 0 1px 0 rgba(176,48,216,0.3)" : "none",
-            }}>
-              <span style={{opacity: active ? 1 : 0.5, display:"flex", alignItems:"center"}}>{tab.svg}</span>
+            <button key={tab.id} ref={tabsPill.setItemRef(tab.id)} onClick={()=>setActiveTab(tab.id)} style={{
+              padding:"11px 15px",border:"none",cursor:"pointer",flexShrink:0,background:"transparent",
+              fontFamily:"Cinzel,serif",fontSize:11.5,letterSpacing:"0.08em",textTransform:"uppercase",
+              color: active ? "#e8d4ff" : "rgba(255,255,255,0.42)",
+              transition:"color 0.2s",display:"flex",alignItems:"center",gap:7,
+              position:"relative",zIndex:1,
+            }}
+              onMouseEnter={e=>{if(!active)e.currentTarget.style.color="rgba(255,255,255,0.75)";}}
+              onMouseLeave={e=>{e.currentTarget.style.color=active?"#e8d4ff":"rgba(255,255,255,0.42)";}}>
+              <span style={{opacity: active ? 1 : 0.55, display:"flex", alignItems:"center"}}>{tab.svg}</span>
               {tab.label}
             </button>
           );
@@ -4745,7 +5011,7 @@ function UpgradeModal({ onClose, onGoToPlans }) {
       onClick={onClose}>
       <div onClick={e=>e.stopPropagation()} style={{
         width:"min(420px,100%)", background:"#0e0c18", border:"1px solid rgba(201,168,76,0.35)",
-        borderRadius:16, padding:"32px 28px 28px", boxShadow:"0 24px 80px rgba(0,0,0,0.9)", textAlign:"center", position:"relative",
+        borderRadius:16, padding:"32px 28px 28px", boxShadow:"0 24px 80px rgba(0,0,0,0.62)", textAlign:"center", position:"relative",
       }}>
         <button onClick={onClose} style={{ position:"absolute", top:14, right:16, background:"none", border:"none", color:"var(--muted)", cursor:"pointer", fontSize:18 }}>✕</button>
         <div style={{ fontSize:36, marginBottom:12 }}>⚡</div>
@@ -4783,14 +5049,13 @@ function Dashboard({ system, onCreateChar, characters, sessions, onSelectChar, o
 
   const SvgScroll  = ({c})=><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>;
   const SvgMapPin  = ({c})=><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>;
-  const SvgWand    = ({c})=><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>;
   const SvgClock   = ({c})=><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
 
+  /* "Sessões com IA" removido a pedido do Andre (2026-07-25) — 3 atalhos restantes */
   const stats = [
-    { label:"Fichas Criadas", val: String(sysChars.length), svg:<SvgScroll c={accent}/>,   color: accent,   nav:"sheet" },
-    { label:"Mapas",          val: "0",                     svg:<SvgMapPin c="#7a9ed4"/>,   color:"#7a9ed4", nav:"map" },
-    { label:"Sessões com IA", val: String(sessions.length), svg:<SvgWand   c="#8e6dbf"/>,   color:"#8e6dbf", nav:"master" },
-    { label:"Horas Jogadas",  val: "0h",                    svg:<SvgClock  c="#6aaa7a"/>,   color:"#6aaa7a", nav:"party" },
+    { label:"Fichas Criadas", val: String(sysChars.length), svg:<SvgScroll c={accent}/>,   color: accent,   nav:"sheet", hint:"Ver fichas" },
+    { label:"Mapas",          val: "0",                     svg:<SvgMapPin c="#7a9ed4"/>,   color:"#7a9ed4", nav:"map",   hint:"Abrir mapas" },
+    { label:"Horas Jogadas",  val: "0h",                    svg:<SvgClock  c="#6aaa7a"/>,   color:"#6aaa7a", nav:"party", hint:"Ver campanhas" },
   ];
 
   /* ── Empty state helpers ── */
@@ -4814,49 +5079,34 @@ function Dashboard({ system, onCreateChar, characters, sessions, onSelectChar, o
     </div>
   );
 
-  const EmptySessions = () => (
-    <div style={{
-      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-      minHeight:180, padding:"28px 20px", gap:12, textAlign:"center",
-      background:"radial-gradient(ellipse at center, rgba(142,109,191,0.07) 0%, var(--card) 70%)",
-      border:"1px dashed rgba(142,109,191,0.18)", borderRadius:8,
-    }}>
-      <div style={{opacity:0.35, color:"#8e6dbf"}}><svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></div>
-      <div style={{fontFamily:"Cinzel,serif", fontSize:12, letterSpacing:"0.08em", color:"var(--muted)", textTransform:"uppercase"}}>Nenhuma sessão ainda</div>
-      <div style={{fontFamily:"Crimson Pro,serif", fontSize:16, color:"var(--muted)", fontStyle:"italic"}}>
-        Use o Ajudante do Mestre para iniciar sua primeira sessão.
-      </div>
-    </div>
-  );
-
   return (
     <div className="fade" style={{display:"flex", flexDirection:"column", gap:24}}>
 
-      {/* System banner */}
+      {/* ── Hero unificado ──
+          O banner do sistema e o header "Bem-vindo" viviam empilhados e o
+          subtítulo repetia o nome do sistema (ORDEM PARANORMAL 2×). Agora é um
+          bloco único: identidade à esquerda, o ÚNICO CTA primário à direita. */}
       <div style={{
-        padding:"12px 20px",
-        background:`linear-gradient(135deg, ${system?.accent}12, transparent)`,
+        position:"relative", overflow:"hidden",
+        padding:"22px 24px",
+        background:`radial-gradient(130% 200% at 0% 0%, ${system?.accent}1c, transparent 55%), linear-gradient(180deg, rgba(255,255,255,0.02), transparent)`,
         border:`1px solid ${system?.accent}30`,
-        borderRadius:8, display:"flex", alignItems:"center", gap:14, flexWrap:"wrap",
+        borderRadius:12, display:"flex", alignItems:"center", gap:18, flexWrap:"wrap",
       }}>
-        <span style={{fontSize:28}}>{system?.svgIcon ? system.svgIcon(false) : system?.icon}</span>
-        <div>
-          <div style={{fontFamily:"Cinzel,serif", fontSize:11, letterSpacing:"0.08em", color:accentText, textTransform:"uppercase", marginBottom:3}}>{system?.subtitle}</div>
-          <div style={{fontFamily:"'Cinzel Decorative',serif", fontSize:20, color:"var(--text)"}}>{system?.name}</div>
-        </div>
-        <div style={{marginLeft:"auto", fontFamily:"Crimson Pro,serif", fontSize:16, color:"#d4c4a0", fontStyle:"italic", maxWidth:320, textAlign:"right", textShadow:"0 1px 3px rgba(0,0,0,0.7)"}}>
-          {system?.desc}
-        </div>
-      </div>
-
-      {/* Header */}
-      <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-end", flexWrap:"wrap", gap:12, marginTop:8}}>
-        <div>
-          <div style={{fontFamily:"Cinzel,serif", fontSize:12, letterSpacing:"0.08em", color:"var(--muted)", textTransform:"uppercase", marginBottom:6}}>{sT("dashboard.welcome")}</div>
+        <div aria-hidden="true" style={{
+          width:56, height:56, borderRadius:14, flexShrink:0, fontSize:28,
+          background:`${system?.accent}14`, border:`1px solid ${system?.accent}38`,
+          display:"flex", alignItems:"center", justifyContent:"center",
+          boxShadow:`0 0 18px ${system?.accent}22`,
+        }}>{system?.svgIcon ? system.svgIcon(false) : system?.icon}</div>
+        <div style={{flex:1, minWidth:220}}>
+          <div style={{fontFamily:"Cinzel,serif", fontSize:11, letterSpacing:"0.14em", color:"var(--muted)", textTransform:"uppercase", marginBottom:5}}>
+            {sT("dashboard.welcome")}
+          </div>
           <div style={{display:"flex", alignItems:"center", gap:12, flexWrap:"wrap"}}>
-            <h1 style={{fontFamily:"'Cinzel Decorative',serif", fontSize:24, fontWeight:700,
+            <h1 style={{fontFamily:"'Cinzel Decorative',serif", fontSize:"clamp(20px,2.4vw,26px)", fontWeight:700, lineHeight:1.15,
               background:`linear-gradient(135deg,${accent},#e8c96d)`,
-              WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", backgroundClip:"text"}}>Painel do Agente</h1>
+              WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", backgroundClip:"text"}}>{system?.name}</h1>
             {/* Subscription seal — shimmering gold when PRO, static when free (AC-4) */}
             <span className={isSubscribed ? "nx-shimmer" : ""}
               title={isSubscribed ? "Assinante deste sistema" : "Plano gratuito — assine para desbloquear"}
@@ -4873,10 +5123,15 @@ function Dashboard({ system, onCreateChar, characters, sessions, onSelectChar, o
               {isSubscribed ? "★ Pro" : "Livre"}
             </span>
           </div>
+          {system?.desc && (
+            <div style={{fontFamily:"Crimson Pro,serif", fontSize:15, color:"var(--muted2)", fontStyle:"italic", marginTop:6, maxWidth:520, lineHeight:1.45}}>
+              {system.desc}
+            </div>
+          )}
         </div>
         <button
           className="btn-gold"
-          style={{opacity: sysChars.length >= charLimit ? 0.45 : 1, cursor: sysChars.length >= charLimit ? "not-allowed" : "pointer"}}
+          style={{flexShrink:0, opacity: sysChars.length >= charLimit ? 0.45 : 1, cursor: sysChars.length >= charLimit ? "not-allowed" : "pointer"}}
           onClick={() => {
             if (sysChars.length >= charLimit) { onShowUpgrade?.(); }
             else onCreateChar();
@@ -4889,28 +5144,29 @@ function Dashboard({ system, onCreateChar, characters, sessions, onSelectChar, o
         </button>
       </div>
 
-      {/* Stats */}
+      {/* Stats — atalhos horizontais: número e rótulo na mesma linha de leitura,
+          seta à direita deixa claro que o card navega (affordance de clique) */}
       <div className="dash-stats">
         {stats.map((s,i)=>(
-          <div key={s.label} className="stat-card"
+          <button key={s.label} className="stat-card" title={s.hint}
             onClick={()=>onNav && onNav(s.nav)}
             style={{
               background:"var(--card)", border:"1px solid var(--border)",
-              borderRadius:8, padding:"20px 18px",
-              display:"flex", flexDirection:"column", gap:10,
+              borderRadius:10, padding:"14px 16px", textAlign:"left", cursor:"pointer",
+              display:"flex", alignItems:"center", gap:14, minHeight:72,
               animation:`statCardIn 0.4s ease ${i*0.08}s both`,
             }}>
-            <div style={{
-              width:48, height:48, borderRadius:12, flexShrink:0,
-              background:`${s.color}18`, border:`1px solid ${s.color}40`,
+            <div aria-hidden="true" style={{
+              width:44, height:44, borderRadius:11, flexShrink:0,
+              background:`${s.color}16`, border:`1px solid ${s.color}38`,
               display:"flex", alignItems:"center", justifyContent:"center",
-              boxShadow:`0 0 12px ${s.color}20`,
             }}>{s.svg}</div>
-            <div>
-              <div style={{fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:"0.08em", color:"var(--muted)", textTransform:"uppercase", marginBottom:4}}>{s.label}</div>
-              <div style={{fontFamily:"'Cinzel Decorative',serif", fontSize:"1.9rem", color:s.color, lineHeight:1}}>{s.val}</div>
+            <div style={{flex:1, minWidth:0}}>
+              <div style={{fontFamily:"'Cinzel Decorative',serif", fontSize:"1.55rem", color:s.color, lineHeight:1.05, fontVariantNumeric:"tabular-nums"}}>{s.val}</div>
+              <div style={{fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:"0.1em", color:"var(--muted)", textTransform:"uppercase", marginTop:4}}>{s.label}</div>
             </div>
-          </div>
+            <span aria-hidden="true" style={{color:s.color, opacity:0.4, fontSize:14, flexShrink:0}}>→</span>
+          </button>
         ))}
       </div>
 
@@ -4962,28 +5218,8 @@ function Dashboard({ system, onCreateChar, characters, sessions, onSelectChar, o
         )}
       </div>
 
-      {/* Sessions */}
-      <div>
-        <div style={{fontFamily:"Cinzel,serif", fontSize:14, letterSpacing:"0.08em", color:accentText, textTransform:"uppercase", marginBottom:14}}>
-          Últimas Sessões com Ajudante do Mestre
-        </div>
-        {sessions.length === 0 ? <EmptySessions/> : (
-          <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10}}>
-            {sessions.map((s,i)=>(
-              <div key={i} style={{
-                background:"var(--card)", border:"1px solid var(--border)",
-                borderRadius:8, padding:18, cursor:"pointer", transition:"border-color 0.2s",
-              }} onMouseEnter={e=>e.currentTarget.style.borderColor=system?.accent+"50"}
-                 onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border)"}>
-                <div style={{fontSize:28, marginBottom:10}}>{s.icon}</div>
-                <div style={{fontFamily:"Cinzel,serif", fontSize:16, color:"var(--text)", marginBottom:6}}>{s.title}</div>
-                <div style={{fontFamily:"Cinzel,serif", fontSize:12, letterSpacing:1, color:"var(--muted)"}}>{s.date}</div>
-                <div style={{marginTop:10, display:"inline-block", padding:"4px 12px", border:`1px solid ${accent}40`, borderRadius:20, fontFamily:"Cinzel,serif", fontSize:11, color:accent}}>{s.mood}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* Seção "Últimas Sessões com IA" removida a pedido do Andre (2026-07-25) —
+          os personagens são o conteúdo central do painel */}
     </div>
   );
 }
@@ -5080,7 +5316,7 @@ function SheetList({ characters, system, onCreateChar, onSelectChar, onDeleteCha
                 {menuOpen===i && (
                   <>
                     <div onClick={()=>setMenuOpen(null)} style={{position:"fixed", inset:0, zIndex:2}}/>
-                    <div style={{position:"absolute", top:30, right:0, zIndex:4, background:"#15110a", border:"1px solid var(--border2)", borderRadius:8, minWidth:164, boxShadow:"0 8px 32px rgba(0,0,0,0.7)", overflow:"hidden"}}>
+                    <div style={{position:"absolute", top:30, right:0, zIndex:4, background:"#15110a", border:"1px solid var(--border2)", borderRadius:8, minWidth:164, boxShadow:"0 8px 32px rgba(0,0,0,0.48)", overflow:"hidden"}}>
                       <button onClick={()=>{ setMenuOpen(null); setConfirmDelete(c); }}
                         style={{display:"flex", alignItems:"center", gap:8, width:"100%", textAlign:"left", background:"none", border:"none", color:"#e57373", padding:"11px 16px", fontFamily:"Cinzel,serif", fontSize:11, letterSpacing:1, cursor:"pointer"}}
                         onMouseEnter={e=>e.currentTarget.style.background="rgba(229,57,53,0.12)"}
@@ -5206,7 +5442,7 @@ function SheetList({ characters, system, onCreateChar, onSelectChar, onDeleteCha
       )}
 
       {toast && (
-        <div className="fade" style={{position:"fixed", bottom:28, left:"50%", transform:"translateX(-50%)", zIndex:320, background:"#15110a", border:"1px solid var(--border2)", borderRadius:8, padding:"12px 22px", fontFamily:"Cinzel,serif", fontSize:12, letterSpacing:1, color:"var(--gold2)", boxShadow:"0 8px 30px rgba(0,0,0,0.6)"}}>
+        <div className="fade" style={{position:"fixed", bottom:28, left:"50%", transform:"translateX(-50%)", zIndex:320, background:"#15110a", border:"1px solid var(--border2)", borderRadius:8, padding:"12px 22px", fontFamily:"Cinzel,serif", fontSize:12, letterSpacing:1, color:"var(--gold2)", boxShadow:"0 8px 30px rgba(0,0,0,0.42)"}}>
           ✓ {toast}
         </div>
       )}
@@ -6073,7 +6309,7 @@ function Topbar({ screen, system, onChangeSystem, onLogout }) {
   return (
     <>
     <div style={{
-      height:52, background:"#09080e", borderBottom:"1px solid #1a1522",
+      height:52, background:"var(--surface)", borderBottom:"1px solid var(--border)",
       display:"flex", alignItems:"center", padding:"0 20px",
       position:"sticky", top:0, zIndex:50, gap:0,
     }}>
@@ -6198,7 +6434,7 @@ function Topbar({ screen, system, onChangeSystem, onLogout }) {
               position:"absolute", top:"calc(100% + 8px)", right:0,
               background:"#0e0c18", border:"1px solid #1e1a2a",
               borderRadius:8, padding:"6px 0", minWidth:196,
-              boxShadow:"0 8px 32px rgba(0,0,0,0.7)",
+              boxShadow:"0 8px 32px rgba(0,0,0,0.48)",
               zIndex:200,
             }}>
               {/* cabeçalho do menu */}
@@ -6256,7 +6492,7 @@ function Topbar({ screen, system, onChangeSystem, onLogout }) {
     {/* Notifications modal */}
     {notifOpen && createPortal(
       <div onClick={()=>setNotifOpen(false)} style={{
-        position:"fixed", inset:0, background:"rgba(0,0,0,0.8)", zIndex:9999,
+        position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", zIndex:9999,
         display:"flex", alignItems:"center", justifyContent:"center",
       }}>
         <div onClick={e=>e.stopPropagation()} style={{
@@ -6354,7 +6590,7 @@ function Topbar({ screen, system, onChangeSystem, onLogout }) {
           background:"var(--surface)", border:"1px solid var(--border2)",
           borderRadius:14, padding:"28px 28px 24px", width:320,
           display:"flex", flexDirection:"column", alignItems:"center", gap:20,
-          boxShadow:"0 20px 60px rgba(0,0,0,0.7)",
+          boxShadow:"0 20px 60px rgba(0,0,0,0.48)",
         }}>
           <div style={{fontFamily:"Cinzel,serif", fontSize:13, letterSpacing:2, color:"var(--muted)", textTransform:"uppercase"}}>Editar Perfil</div>
 
@@ -6656,7 +6892,7 @@ const SYSTEMS = [
     desc: "A aventura épica de fantasia mais jogada do mundo. Masmorras, dragões e heróis lendários.",
     tags: ["Fantasia","Combate","Épico"],
     /* accent derived from theme registry (dragon red) — getCardAccent overlay (spec 0017 AC-6) */
-    available: true,
+    available: false,   // decisão do Andre (2026-07-25): fica em "EM BREVE" até liberar
   },
   {
     id: "tormenta",
@@ -6669,7 +6905,7 @@ const SYSTEMS = [
     desc: "O maior RPG nacional. Fantasia épica com heróis, deuses e a sombra da Tormenta sobre Arton.",
     tags: ["Fantasia","Épico","Nacional"],
     /* accent derived from theme registry (verdant green) — getCardAccent overlay (spec 0017 AC-6) */
-    available: true,
+    available: false,   // decisão do Andre (2026-07-25): fica em "EM BREVE" até liberar
   },
   {
     id: "3det",
@@ -6682,6 +6918,7 @@ const SYSTEMS = [
     accentText: "#b87ee0",
     accentGlow: "rgba(122,79,160,0.25)",
     available: true,
+    hidden: true,
   },
   {
     id: "call",
@@ -6694,6 +6931,7 @@ const SYSTEMS = [
     accentText: "#5ec4a0",
     accentGlow: "rgba(58,110,90,0.25)",
     available: false,
+    hidden: true,
   },
   {
     id: "vampire",
@@ -6706,6 +6944,7 @@ const SYSTEMS = [
     accentText: "#d04545",
     accentGlow: "rgba(107,26,26,0.25)",
     available: false,
+    hidden: true,
   },
   {
     id: "custom",
@@ -6718,9 +6957,15 @@ const SYSTEMS = [
     accentText: "#a8a870",
     accentGlow: "rgba(90,90,58,0.2)",
     available: false,
+    hidden: true,
   },
 ]
-  /* AC-6: for every system that has a theme in the registry, its card accent is
+  /* `hidden` tira o card da vitrine sem apagar a definição (decisão do Andre
+   * 2026-07-25: "o resto pode sumir POR ENQUANTO"). Voltar é remover a flag.
+   * `available:false` continua sendo o gate de ENTRADA — ver handleSelect e a
+   * restauração de `nexus_system`.
+   *
+   * AC-6: for every system that has a theme in the registry, its card accent is
    * DERIVED from that same registry (single source of truth) — killing the old
    * divergence (D&D card was blue, theme red). Systems without a theme yet
    * (3D&T, Call, Vampire, Custom) keep their literal accent until themed. */
@@ -6805,7 +7050,7 @@ function SystemSelect({ onSelect, onLogout }) {
 
           {/* Grid */}
           <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(290px, 1fr))", gap:18, alignItems:"stretch"}}>
-            {SYSTEMS.map((sys, i) => {
+            {SYSTEMS.filter(s => !s.hidden).map((sys, i) => {
               const isHov = hovered === sys.id;
               const isSel = selected === sys.id;
               const showSubtitle = sys.subtitle && sys.subtitle !== sys.name;
@@ -6908,8 +7153,13 @@ function SystemSelect({ onSelect, onLogout }) {
                       </div>
                     </div>
 
-                    {/* Description — skeleton shimmer while the system is "coming soon" (AC-3) */}
-                    {sys.available ? (
+                    {/* Descrição — skeleton só quando o card ainda NÃO tem conteúdo.
+                        SPEC_DEVIATION (0017 AC-3): a spec mandava skeleton para todo
+                        `available:false`. Com D&D e Tormenta gated por decisão de
+                        lançamento (2026-07-25) — e não por falta de conteúdo — apagar a
+                        descrição deixaria dois cards vazios na vitrine. O skeleton segue
+                        valendo para sistemas sem `desc`. */}
+                    {sys.desc ? (
                       <p style={{
                         fontFamily:"Crimson Pro,serif", fontSize:14,
                         color:"var(--muted2)",
@@ -6923,8 +7173,8 @@ function SystemSelect({ onSelect, onLogout }) {
                       </div>
                     )}
 
-                    {/* Tags — skeleton pills when unavailable (AC-3) */}
-                    {sys.available ? (
+                    {/* Tags — skeleton pills quando o card não tem conteúdo (ver acima) */}
+                    {sys.tags?.length ? (
                       <div style={{display:"flex", gap:6, flexWrap:"wrap", marginBottom:16}}>
                         {sys.tags.map(t => (
                           <span key={t} style={{
@@ -7258,6 +7508,7 @@ const ORIGENS = [
   { id:"militar",      name:"Militar",                 skills:["Pontaria","Tática"],            power:"Para Bellum. Você recebe +2 em rolagens de dano com armas de fogo." },
   { id:"policial",     name:"Policial",                skills:["Percepção","Pontaria"],         power:"Patrulha. Você recebe +2 em Defesa." },
   { id:"religioso",    name:"Religioso",               skills:["Religião","Vontade"],           power:"Acalentar. Recebe +5 em testes de Religião para acalmar. Quando acalma uma pessoa, ela recebe 1d6 + Presença de SAN." },
+  { id:"servidor",     name:"Servidor Público",        skills:["Intuição","Vontade"],           power:"Espírito Cívico. Sempre que faz um teste para ajudar, pode gastar 1 PE para aumentar o bônus concedido em +2." },
   { id:"ti",           name:"T.I.",                    skills:["Investigação","Tecnologia"],    power:"Motor de Busca. Com acesso à internet, pode gastar 2 PE para substituir qualquer perícia por um teste de Tecnologia." },
   { id:"universitario",name:"Universitário",           skills:["Atualidades","Investigação"],  power:"Dedicação. Recebe +1 PE, mais 1 PE a cada NEX ímpar. Seu limite de PE por turno aumenta em 1." },
   { id:"vitima",       name:"Vítima",                  skills:["Reflexos","Vontade"],           power:"Cicatrizes Psicológicas. Você recebe +1 de Sanidade para cada 5% de NEX." },
@@ -8155,7 +8406,7 @@ function Bar({val, set, max, setMax, color, label}) {
       <div style={{display:"flex",justifyContent:"center",marginBottom:3}}>
         <span style={{fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:2,color:"var(--muted2)",textTransform:"uppercase"}}>{label}</span>
       </div>
-      <div style={{position:"relative",height:34,borderRadius:4,overflow:"hidden",background:"rgba(0,0,0,0.6)",border:"1px solid rgba(255,255,255,0.05)"}}>
+      <div style={{position:"relative",height:34,borderRadius:4,overflow:"hidden",background:"rgba(0,0,0,0.42)",border:"1px solid rgba(255,255,255,0.05)"}}>
         {/* Ghost trail — stays behind, drains slowly on damage */}
         <div style={{position:"absolute",inset:0,width:`${trailPct*100}%`,background:color+"44",transition:"background 0.4s"}}/>
         {/* Lead bar — fast response */}
@@ -8170,7 +8421,7 @@ function Bar({val, set, max, setMax, color, label}) {
                 onKeyDown={e=>{if(e.key==="Enter")commitVal(e.target.value);if(e.key==="Escape")setEditVal(false);}}
                 onClick={e=>e.stopPropagation()} style={{...inpStyle,width:60}}/>
             ) : (
-              <span onClick={()=>setEditVal(true)} style={{fontFamily:"Cinzel,serif",fontSize:13,fontWeight:700,color:"white",textShadow:"0 1px 6px rgba(0,0,0,0.9)",cursor:"pointer",userSelect:"none",borderBottom:"1px dashed rgba(255,255,255,0.35)",lineHeight:1.3}}>{displayVal}</span>
+              <span onClick={()=>setEditVal(true)} style={{fontFamily:"Cinzel,serif",fontSize:13,fontWeight:700,color:"white",textShadow:"0 1px 6px rgba(0,0,0,0.62)",cursor:"pointer",userSelect:"none",borderBottom:"1px dashed rgba(255,255,255,0.35)",lineHeight:1.3}}>{displayVal}</span>
             )}
             <span style={{fontFamily:"Cinzel,serif",fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.45)",userSelect:"none"}}>/</span>
             {editMax ? (
@@ -8179,7 +8430,7 @@ function Bar({val, set, max, setMax, color, label}) {
                 onKeyDown={e=>{if(e.key==="Enter")commitMax(e.target.value);if(e.key==="Escape")setEditMax(false);}}
                 onClick={e=>e.stopPropagation()} style={{...inpStyle,width:60}}/>
             ) : (
-              <span onClick={()=>setEditMax(true)} style={{fontFamily:"Cinzel,serif",fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.7)",textShadow:"0 1px 6px rgba(0,0,0,0.9)",cursor:"pointer",userSelect:"none",borderBottom:"1px dashed rgba(255,255,255,0.25)",lineHeight:1.3}}>{max}</span>
+              <span onClick={()=>setEditMax(true)} style={{fontFamily:"Cinzel,serif",fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.7)",textShadow:"0 1px 6px rgba(0,0,0,0.62)",cursor:"pointer",userSelect:"none",borderBottom:"1px dashed rgba(255,255,255,0.25)",lineHeight:1.3}}>{max}</span>
             )}
           </div>
           <button onClick={()=>set(v=>Math.min(max,v+1))} style={{...btnR,borderLeft:"1px solid rgba(255,255,255,0.04)"}}>›</button>
@@ -8462,7 +8713,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
       {showNexMenu && (() => {
         const r = nexBtnRef.current?.getBoundingClientRect() ?? {bottom:0,left:0,width:80};
         return (
-          <div style={{position:"fixed",top:r.bottom+4,left:r.left,width:Math.max(r.width,72),zIndex:9998,background:"var(--card2)",border:"1px solid rgba(201,168,76,0.5)",borderRadius:6,boxShadow:"0 6px 24px rgba(0,0,0,0.9)",maxHeight:220,overflowY:"auto"}}
+          <div style={{position:"fixed",top:r.bottom+4,left:r.left,width:Math.max(r.width,72),zIndex:9998,background:"var(--card2)",border:"1px solid rgba(201,168,76,0.5)",borderRadius:6,boxShadow:"0 6px 24px rgba(0,0,0,0.62)",maxHeight:220,overflowY:"auto"}}
             onMouseLeave={()=>setShowNexMenu(false)}>
             {NEX_STEPS.map(v=>(
               <div key={v} onClick={()=>handleNexChange(v)}
@@ -8483,24 +8734,14 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
       {/* ── Settings modal ── */}
       {showSettings && createPortal(
         <div onClick={()=>setShowSettings(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"#111",border:"1px solid #2a2a2a",borderRadius:12,width:560,maxWidth:"95vw",boxShadow:"0 24px 64px rgba(0,0,0,0.8)",overflow:"hidden"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--card2)",border:"1px solid var(--border2)",borderRadius:12,width:560,maxWidth:"95vw",boxShadow:"0 24px 64px rgba(0,0,0,0.55)",overflow:"hidden"}}>
             {/* Header */}
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"20px 24px 0"}}>
               <span style={{fontFamily:"Cinzel,serif",fontSize:16,color:"#fff",fontWeight:600}}>{sT("settings.title")}</span>
               <button onClick={()=>setShowSettings(false)} style={{background:"none",border:"none",cursor:"pointer",color:"#888",fontSize:18,lineHeight:1,padding:4}}>✕</button>
             </div>
-            {/* Tabs */}
-            <div style={{display:"flex",gap:0,padding:"12px 24px 0",borderBottom:"1px solid #222",marginTop:8}}>
-              {["ficha","stream","idioma"].map(tabId=>(
-                <button key={tabId} onClick={()=>setSettingsTab(tabId)} style={{
-                  background:"none",border:"none",cursor:"pointer",
-                  fontFamily:"Cinzel,serif",fontSize:12,letterSpacing:1,
-                  color:settingsTab===tabId?"#fff":"#666",
-                  borderBottom:settingsTab===tabId?"2px solid #8b5cf6":"2px solid transparent",
-                  padding:"0 4px 10px",marginRight:20,marginBottom:-1,transition:"all 0.2s",
-                }}>{sT("settings.tabs."+tabId)}</button>
-              ))}
-            </div>
+            {/* Tabs — indicador deslizante (spec 0022 AC-1) */}
+            <SettingsTabs active={settingsTab} onPick={setSettingsTab} label={sT} />
             {/* Content */}
             <div style={{padding:"24px 24px 28px",display:"flex",flexDirection:"column",gap:24}}>
               {settingsTab==="ficha" && (<>
@@ -8509,9 +8750,9 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                   <div style={{fontFamily:"Cinzel,serif",fontSize:13,color:"#fff",marginBottom:10}}>Classe para cálculo de atributos</div>
                   <div style={{position:"relative",display:"inline-block"}}>
                     <select value={classe?.id||""} onChange={e=>{ const c=CLASSES.find(c=>c.id===e.target.value)||null; setClasse(c); }}
-                      style={{background:"#1a1a1a",border:"1px solid #333",borderRadius:6,color:"#fff",fontFamily:"Cinzel,serif",fontSize:12,padding:"8px 32px 8px 12px",cursor:"pointer",appearance:"none",outline:"none"}}>
-                      <option value="" style={{background:"#1a1a1a"}}>—</option>
-                      {CLASSES.map(c=><option key={c.id} value={c.id} style={{background:"#1a1a1a"}}>{c.name}</option>)}
+                      style={{background:"var(--card2)",border:"1px solid var(--border2)",borderRadius:6,color:"#fff",fontFamily:"Cinzel,serif",fontSize:12,padding:"8px 32px 8px 12px",cursor:"pointer",appearance:"none",outline:"none"}}>
+                      <option value="" style={{background:"#2c2c39"}}>—</option>
+                      {CLASSES.map(c=><option key={c.id} value={c.id} style={{background:"#2c2c39"}}>{c.name}</option>)}
                     </select>
                     <span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",pointerEvents:"none",color:"#888",fontSize:10}}>▼</span>
                   </div>
@@ -8526,10 +8767,10 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                     <div style={{position:"relative",display:"inline-block"}}>
                       <select value={trilha?.id||""}
                         onChange={e=>{const ts=CLASS_TRAILS[classe.id]||[];setTrilha(ts.find(t=>t.id===e.target.value)||null);}}
-                        style={{background:"#1a1a1a",border:"1px solid #333",borderRadius:6,color:"#fff",fontFamily:"Cinzel,serif",fontSize:12,padding:"8px 32px 8px 12px",cursor:"pointer",appearance:"none",outline:"none"}}>
-                        <option value="" style={{background:"#1a1a1a"}}>— Nenhuma —</option>
+                        style={{background:"var(--card2)",border:"1px solid var(--border2)",borderRadius:6,color:"#fff",fontFamily:"Cinzel,serif",fontSize:12,padding:"8px 32px 8px 12px",cursor:"pointer",appearance:"none",outline:"none"}}>
+                        <option value="" style={{background:"#2c2c39"}}>— Nenhuma —</option>
                         {(CLASS_TRAILS[classe.id]||[]).map(t=>(
-                          <option key={t.id} value={t.id} style={{background:"#1a1a1a"}}>{t.name}</option>
+                          <option key={t.id} value={t.id} style={{background:"#2c2c39"}}>{t.name}</option>
                         ))}
                       </select>
                       <span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",pointerEvents:"none",color:"#888",fontSize:10}}>▼</span>
@@ -8541,9 +8782,9 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                   <div style={{fontFamily:"Cinzel,serif",fontSize:13,color:"#fff",marginBottom:10}}>Origem do Agente</div>
                   <div style={{position:"relative",display:"inline-block"}}>
                     <select value={origem?.id||""} onChange={e=>setOrigem(ORIGENS.find(o=>o.id===e.target.value)||null)}
-                      style={{background:"#1a1a1a",border:"1px solid #333",borderRadius:6,color:"#fff",fontFamily:"Cinzel,serif",fontSize:12,padding:"8px 32px 8px 12px",cursor:"pointer",appearance:"none",outline:"none"}}>
-                      <option value="" style={{background:"#1a1a1a"}}>—</option>
-                      {ORIGENS.map(o=><option key={o.id} value={o.id} style={{background:"#1a1a1a"}}>{o.name}</option>)}
+                      style={{background:"var(--card2)",border:"1px solid var(--border2)",borderRadius:6,color:"#fff",fontFamily:"Cinzel,serif",fontSize:12,padding:"8px 32px 8px 12px",cursor:"pointer",appearance:"none",outline:"none"}}>
+                      <option value="" style={{background:"#2c2c39"}}>—</option>
+                      {ORIGENS.map(o=><option key={o.id} value={o.id} style={{background:"#2c2c39"}}>{o.name}</option>)}
                     </select>
                     <span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",pointerEvents:"none",color:"#888",fontSize:10}}>▼</span>
                   </div>
@@ -8557,7 +8798,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                   <div key={label}>
                     <div style={{fontFamily:"Cinzel,serif",fontSize:13,color:"#fff",marginBottom:desc?6:10}}>{label}</div>
                     {desc && <div style={{fontSize:12,color:"#666",marginBottom:10,lineHeight:1.5}}>{desc}</div>}
-                    <div style={{display:"inline-flex",border:"1px solid #333",borderRadius:6,overflow:"hidden"}}>
+                    <div style={{display:"inline-flex",border:"1px solid var(--border2)",borderRadius:6,overflow:"hidden"}}>
                       <button onClick={()=>set(false)} style={{padding:"8px 20px",background:!val?"#8b5cf6":"transparent",border:"none",cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:1,color:!val?"#fff":"#666",transition:"all 0.2s"}}>DESLIGADO</button>
                       <button onClick={()=>set(true)}  style={{padding:"8px 20px",background: val?"#8b5cf6":"transparent",border:"none",cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:1,color: val?"#fff":"#666",transition:"all 0.2s"}}>LIGADO</button>
                     </div>
@@ -8572,7 +8813,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                   <div style={{fontSize:12,color:"#666",marginBottom:10,lineHeight:1.5}}>
                     Habilita o botão "Gerar com IA" no upload de retrato do personagem. Usa Higgsfield para criar imagens a partir de uma descrição.
                   </div>
-                  <div style={{display:"inline-flex",border:"1px solid #333",borderRadius:6,overflow:"hidden"}}>
+                  <div style={{display:"inline-flex",border:"1px solid var(--border2)",borderRadius:6,overflow:"hidden"}}>
                     <button onClick={()=>toggleAiArt(false)} style={{padding:"8px 20px",background:!aiArt?"#8b5cf6":"transparent",border:"none",cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:1,color:!aiArt?"#fff":"#666",transition:"all 0.2s"}}>DESLIGADO</button>
                     <button onClick={()=>toggleAiArt(true)}  style={{padding:"8px 20px",background: aiArt?"#8b5cf6":"transparent",border:"none",cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:1,color: aiArt?"#fff":"#666",transition:"all 0.2s"}}>LIGADO</button>
                   </div>
@@ -8613,10 +8854,10 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
 
       {/* ── Nova Habilidade modal ── */}
       {showSkillModal && createPortal(
-        <div onClick={()=>setShowSkillModal(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"#111",border:"1px solid #2a2a2a",borderRadius:12,width:620,maxWidth:"95vw",maxHeight:"90vh",display:"flex",flexDirection:"column",boxShadow:"0 24px 64px rgba(0,0,0,0.9)"}}>
+        <div onClick={()=>setShowSkillModal(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--card2)",border:"1px solid var(--border2)",borderRadius:12,width:620,maxWidth:"95vw",maxHeight:"90vh",display:"flex",flexDirection:"column",boxShadow:"0 24px 64px rgba(0,0,0,0.62)"}}>
             {/* Header */}
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"20px 24px 16px",borderBottom:"1px solid #222"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"20px 24px 16px",borderBottom:"1px solid var(--border)"}}>
               <span style={{fontFamily:"Cinzel,serif",fontSize:17,color:"#fff",fontWeight:600}}>Nova Habilidade</span>
               <button onClick={()=>setShowSkillModal(false)} style={{background:"none",border:"none",cursor:"pointer",color:"#666",fontSize:20,lineHeight:1,padding:4}} onMouseEnter={e=>e.currentTarget.style.color="#fff"} onMouseLeave={e=>e.currentTarget.style.color="#666"}>✕</button>
             </div>
@@ -8627,7 +8868,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                 <div style={{fontFamily:"Cinzel,serif",fontSize:11,color:"#aaa",marginBottom:8}}>Nome<span style={{color:"#8b5cf6"}}>*</span></div>
                 <input value={skillDraft.name} onChange={e=>setSkillDraft(d=>({...d,name:e.target.value}))}
                   autoFocus
-                  style={{width:"100%",boxSizing:"border-box",background:"#1a1a1a",border:"1px solid #333",borderRadius:6,color:"#fff",fontFamily:"Cinzel,serif",fontSize:14,padding:"10px 14px",outline:"none"}}
+                  style={{width:"100%",boxSizing:"border-box",background:"var(--card2)",border:"1px solid var(--border2)",borderRadius:6,color:"#fff",fontFamily:"Cinzel,serif",fontSize:14,padding:"10px 14px",outline:"none"}}
                   onFocus={e=>e.target.style.borderColor="#8b5cf6"} onBlur={e=>e.target.style.borderColor="#333"}/>
               </div>
               {/* Imagem */}
@@ -8636,7 +8877,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                 <div onClick={()=>skillImgRef.current?.click()} style={{
                   width:100,height:100,borderRadius:8,border:"2px dashed #333",cursor:"pointer",
                   display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",
-                  background:"#1a1a1a",transition:"border-color 0.2s",
+                  background:"var(--card2)",transition:"border-color 0.2s",
                 }}
                   onMouseEnter={e=>e.currentTarget.style.borderColor="#8b5cf6"}
                   onMouseLeave={e=>e.currentTarget.style.borderColor="#333"}>
@@ -8654,7 +8895,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                   <span style={{fontFamily:"Crimson Pro,serif",fontSize:11,color:"#555",marginLeft:8,fontStyle:"italic"}}>utilize negrito para aplicar a cor roxo</span>
                 </div>
                 {/* Toolbar */}
-                <div style={{display:"flex",gap:2,padding:"6px 10px",background:"#1a1a1a",border:"1px solid #333",borderBottom:"none",borderRadius:"6px 6px 0 0"}}>
+                <div style={{display:"flex",gap:2,padding:"6px 10px",background:"var(--card2)",border:"1px solid var(--border2)",borderBottom:"none",borderRadius:"6px 6px 0 0"}}>
                   {[
                     { label:"B", style:{fontWeight:700}, cmd:"bold" },
                     { label:"I", style:{fontStyle:"italic"}, cmd:"italic" },
@@ -8669,7 +8910,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                 </div>
                 {/* Editor */}
                 <div ref={skillEditorRef} contentEditable suppressContentEditableWarning
-                  style={{minHeight:180,padding:"12px 14px",background:"#0e0e0e",border:"1px solid #333",borderRadius:"0 0 6px 6px",
+                  style={{minHeight:180,padding:"12px 14px",background:"var(--card)",border:"1px solid var(--border2)",borderRadius:"0 0 6px 6px",
                     color:"#ddd",fontFamily:"Crimson Pro,serif",fontSize:14,lineHeight:1.75,outline:"none",
                     overflowY:"auto"}}
                   onFocus={e=>e.currentTarget.style.borderColor="#8b5cf6"}
@@ -8680,7 +8921,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
             </div>
             {/* Footer */}
             <div style={{display:"flex",justifyContent:"flex-end",gap:12,padding:"16px 24px",borderTop:"1px solid #222"}}>
-              <button onClick={()=>setShowSkillModal(false)} style={{padding:"10px 24px",background:"none",border:"1px solid #333",borderRadius:8,cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:11,letterSpacing:1,color:"#888",transition:"all 0.2s"}}
+              <button onClick={()=>setShowSkillModal(false)} style={{padding:"10px 24px",background:"none",border:"1px solid var(--border2)",borderRadius:8,cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:11,letterSpacing:1,color:"#888",transition:"all 0.2s"}}
                 onMouseEnter={e=>e.currentTarget.style.borderColor="#555"} onMouseLeave={e=>e.currentTarget.style.borderColor="#333"}>Cancelar</button>
               <button onClick={confirmSkill} style={{padding:"10px 28px",background:"#7c3aed",border:"none",borderRadius:8,cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:11,letterSpacing:1,color:"#fff",transition:"all 0.2s"}}
                 onMouseEnter={e=>e.currentTarget.style.background="#6d28d9"} onMouseLeave={e=>e.currentTarget.style.background="#7c3aed"}>Adicionar</button>
@@ -8697,7 +8938,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
         const ATK_ATTRS = ["Nenhum","Agilidade","Força","Intelecto","Presença","Vigor"];
         const d = atkModal.data;
         const setD = fn => setAtkModal(m=>({...m, data: fn(m.data)}));
-        const inputStyle = {width:"100%",boxSizing:"border-box",background:"#1a1a1a",border:"1px solid rgba(255,255,255,0.15)",borderRadius:4,color:"#e0e0e0",fontFamily:"Cinzel,serif",fontSize:13,padding:"7px 10px",outline:"none"};
+        const inputStyle = {width:"100%",boxSizing:"border-box",background:"var(--card2)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:4,color:"#e0e0e0",fontFamily:"Cinzel,serif",fontSize:13,padding:"7px 10px",outline:"none"};
         const selectStyle = {...inputStyle,cursor:"pointer",appearance:"none"};
         const labelStyle = {fontFamily:"Cinzel,serif",fontSize:10,color:"rgba(255,255,255,0.5)",marginBottom:4,display:"block"};
         const save = () => {
@@ -8708,7 +8949,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
         };
         return (
           <div onClick={()=>setAtkModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:9999,display:"flex",alignItems:"flex-start",justifyContent:"center",paddingTop:40,overflowY:"auto"}}>
-            <div onClick={e=>e.stopPropagation()} style={{background:"#111",border:"1px solid #2a2a2a",borderRadius:8,width:520,maxWidth:"95vw",boxShadow:"0 24px 64px rgba(0,0,0,0.9)",marginBottom:40}}>
+            <div onClick={e=>e.stopPropagation()} style={{background:"var(--card2)",border:"1px solid var(--border2)",borderRadius:8,width:520,maxWidth:"95vw",boxShadow:"0 24px 64px rgba(0,0,0,0.62)",marginBottom:40}}>
               {/* Header */}
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"18px 22px 16px",borderBottom:"1px solid #1e1e1e"}}>
                 <span style={{fontFamily:"Cinzel,serif",fontSize:18,color:"#e0e0e0",fontWeight:700}}>{atkModal.mode==="create"?"Novo Ataque":"Editar Ataque"}</span>
@@ -8749,7 +8990,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                   <div>
                     <label style={labelStyle}>Tipo de Dano</label>
                     <select value={d.type} onChange={e=>setD(x=>({...x,type:e.target.value}))} style={selectStyle}>
-                      {ATK_TYPES.map(t=><option key={t} value={t} style={{background:"#111"}}>{t}</option>)}
+                      {ATK_TYPES.map(t=><option key={t} value={t} style={{background:"#2c2c39"}}>{t}</option>)}
                     </select>
                   </div>
                 </div>
@@ -8758,19 +8999,19 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                   <div>
                     <label style={labelStyle}>Alcance</label>
                     <select value={d.range} onChange={e=>setD(x=>({...x,range:e.target.value}))} style={selectStyle}>
-                      {ATK_RANGES.map(r=><option key={r} value={r} style={{background:"#111"}}>{r}</option>)}
+                      {ATK_RANGES.map(r=><option key={r} value={r} style={{background:"#2c2c39"}}>{r}</option>)}
                     </select>
                   </div>
                   <div>
                     <label style={labelStyle}>Perícia</label>
                     <select value={d.skill} onChange={e=>setD(x=>({...x,skill:e.target.value}))} style={selectStyle}>
-                      {ATK_SKILLS.map(s=><option key={s} value={s} style={{background:"#111"}}>{s}</option>)}
+                      {ATK_SKILLS.map(s=><option key={s} value={s} style={{background:"#2c2c39"}}>{s}</option>)}
                     </select>
                   </div>
                   <div>
                     <label style={labelStyle}>Atributo Dano</label>
                     <select value={d.attrDmg} onChange={e=>setD(x=>({...x,attrDmg:e.target.value}))} style={selectStyle}>
-                      {ATK_ATTRS.map(a=><option key={a} value={a} style={{background:"#111"}}>{a}</option>)}
+                      {ATK_ATTRS.map(a=><option key={a} value={a} style={{background:"#2c2c39"}}>{a}</option>)}
                     </select>
                   </div>
                 </div>
@@ -8792,7 +9033,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                       <div style={{flex:1}}>
                         <label style={labelStyle}>Tipo*</label>
                         <select value={ex.type} onChange={e=>setD(x=>({...x,extraDmg:x.extraDmg.map((v,j)=>j===ei?{...v,type:e.target.value}:v)}))} style={selectStyle}>
-                          {ATK_TYPES.map(t=><option key={t} value={t} style={{background:"#111"}}>{t}</option>)}
+                          {ATK_TYPES.map(t=><option key={t} value={t} style={{background:"#2c2c39"}}>{t}</option>)}
                         </select>
                       </div>
                       <button onClick={()=>setD(x=>({...x,extraDmg:x.extraDmg.filter((_,j)=>j!==ei)}))}
@@ -8829,7 +9070,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                       onInput={e=>setD(x=>({...x,notes:e.currentTarget.innerHTML}))}
                       style={{
                         minHeight:120,padding:"10px 12px",outline:"none",
-                        background:"#0d0d0d",color:"#d0d0d0",
+                        background:"var(--card)",color:"#d0d0d0",
                         fontFamily:"Crimson Pro,serif",fontSize:14,lineHeight:1.7,
                       }}
                     />
@@ -8892,7 +9133,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
               background:rollPopup.crit?"rgba(16,12,0,0.98)":"rgba(18,14,26,0.98)",
               border:`1px solid ${rollPopup.crit?"rgba(255,200,0,0.5)":"rgba(201,168,76,0.35)"}`,
               borderRadius:10,padding:"14px 18px",minWidth:220,
-              boxShadow:"0 6px 32px rgba(0,0,0,0.9)",
+              boxShadow:"0 6px 32px rgba(0,0,0,0.62)",
               animation:rollPopup.crit?"critPopupGlow 1.4s ease-in-out infinite":"fadeIn 0.25s ease",
             }}>
             {/* Tooltip: dados rolados — aparece no hover */}
@@ -8965,7 +9206,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
           <div onClick={()=>avatarInputRef.current?.click()} title="Trocar foto"
             style={{width:90,height:90,borderRadius:10,flexShrink:0,overflow:"hidden",cursor:"pointer",position:"relative",
               border:"2px solid rgba(201,168,76,0.4)",
-              boxShadow:"0 0 0 1px rgba(201,168,76,0.1), 0 4px 20px rgba(0,0,0,0.6)",
+              boxShadow:"0 0 0 1px rgba(201,168,76,0.1), 0 4px 20px rgba(0,0,0,0.42)",
               background:"rgba(201,168,76,0.06)",
               display:"flex",alignItems:"center",justifyContent:"center",fontSize:38,
             }}
@@ -8973,7 +9214,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
             onMouseLeave={e=>{ const ov=e.currentTarget.querySelector('.av-ov'); if(ov) ov.style.opacity=0; }}
           >
             {form.avatar ? <img src={form.avatar} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/> : "🕵️"}
-            <div className="av-ov" style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",opacity:0,transition:"opacity 0.2s"}}>
+            <div className="av-ov" style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.42)",display:"flex",alignItems:"center",justifyContent:"center",opacity:0,transition:"opacity 0.2s"}}>
               <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="rgba(201,168,76,0.9)" strokeWidth="1.8"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
             </div>
             <input ref={avatarInputRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleAvatarFile}/>
@@ -9006,15 +9247,15 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                 { label:"Origem", node:
                   <select value={origem?.id||""} onChange={e=>setOrigem(ORIGENS.find(o=>o.id===e.target.value)||null)}
                     style={{background:"transparent",border:"none",outline:"none",fontFamily:"Cinzel,serif",fontSize:13,color:"rgba(232,201,109,0.9)",width:"100%",cursor:"pointer",appearance:"none"}}>
-                    <option value="" style={{background:"#111"}}>—</option>
-                    {ORIGENS.map(o=><option key={o.id} value={o.id} style={{background:"#111"}}>{o.name}</option>)}
+                    <option value="" style={{background:"#2c2c39"}}>—</option>
+                    {ORIGENS.map(o=><option key={o.id} value={o.id} style={{background:"#2c2c39"}}>{o.name}</option>)}
                   </select>
                 },
                 { label:"Classe", node:
                   <select value={classe?.id||""} onChange={e=>setClasse(CLASSES.find(c=>c.id===e.target.value)||null)}
                     style={{background:"transparent",border:"none",outline:"none",fontFamily:"Cinzel,serif",fontSize:13,color:"rgba(232,201,109,0.9)",width:"100%",cursor:"pointer",appearance:"none"}}>
-                    <option value="" style={{background:"#111"}}>—</option>
-                    {CLASSES.map(c=><option key={c.id} value={c.id} style={{background:"#111"}}>{c.name}</option>)}
+                    <option value="" style={{background:"#2c2c39"}}>—</option>
+                    {CLASSES.map(c=><option key={c.id} value={c.id} style={{background:"#2c2c39"}}>{c.name}</option>)}
                   </select>
                 },
               ].map(({label,node},i)=>(
@@ -9559,9 +9800,9 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                               style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:4,
                                 color:"var(--text)",fontFamily:"Cinzel,serif",fontSize:9,padding:"4px 8px",
                                 cursor:"pointer",outline:"none"}}>
-                              <option value="" style={{background:"#111"}}>— Escolher —</option>
+                              <option value="" style={{background:"#2c2c39"}}>— Escolher —</option>
                               {(CLASS_TRAILS[classe.id]||[]).map(t=>(
-                                <option key={t.id} value={t.id} style={{background:"#111"}}>{t.name}</option>
+                                <option key={t.id} value={t.id} style={{background:"#2c2c39"}}>{t.name}</option>
                               ))}
                             </select>
                           </div>
@@ -9662,7 +9903,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                               <select value={skill.type}
                                 onChange={e=>setSkills(v=>v.map(s=>s.id===skill.id?{...s,type:e.target.value}:s))}
                                 style={{background:"var(--card)",border:"1px solid var(--border2)",borderRadius:4,color:"var(--muted2)",fontFamily:"Cinzel,serif",fontSize:10,padding:"5px 8px",cursor:"pointer",outline:"none"}}>
-                                {["passiva","ativa","reação"].map(t=><option key={t} value={t} style={{background:"#111"}}>{t.charAt(0).toUpperCase()+t.slice(1)}</option>)}
+                                {["passiva","ativa","reação"].map(t=><option key={t} value={t} style={{background:"#2c2c39"}}>{t.charAt(0).toUpperCase()+t.slice(1)}</option>)}
                               </select>
                               <input value={skill.cost}
                                 onChange={e=>setSkills(v=>v.map(s=>s.id===skill.id?{...s,cost:e.target.value}:s))}
@@ -9769,10 +10010,10 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                                         <select value={r.circulo}
                                           onChange={e=>setRituais(v=>v.map(x=>x.id===r.id?{...x,circulo:parseInt(e.target.value)}:x))}
                                           style={{width:"100%",background:"var(--card)",border:"1px solid var(--border2)",borderRadius:4,color:"var(--muted2)",fontFamily:"Cinzel,serif",fontSize:11,padding:"6px 8px",cursor:"pointer",outline:"none"}}>
-                                          <option value={1} style={{background:"#111"}}>1° Círculo</option>
-                                          <option value={2} style={{background:"#111"}}>2° Círculo</option>
-                                          <option value={3} style={{background:"#111"}}>3° Círculo</option>
-                                          <option value={4} style={{background:"#111"}}>4° Círculo</option>
+                                          <option value={1} style={{background:"#2c2c39"}}>1° Círculo</option>
+                                          <option value={2} style={{background:"#2c2c39"}}>2° Círculo</option>
+                                          <option value={3} style={{background:"#2c2c39"}}>3° Círculo</option>
+                                          <option value={4} style={{background:"#2c2c39"}}>4° Círculo</option>
                                         </select>
                                       </div>
                                       <div>
@@ -9837,7 +10078,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                       style={{
                         width:"100%",
                         minHeight:minH,
-                        background:"#1a1a1a",
+                        background:"var(--card2)",
                         border:"1px solid rgba(255,255,255,0.15)",
                         borderRadius:4,
                         color:"#cccccc",
@@ -11627,6 +11868,33 @@ function RoadmapScreen() {
 }
 
 /* ── Ficha pública (rota /p/:charId, sem login) ─────────────────────── */
+/* ── ROTA DE TRANSMISSÃO: /cast/{campaignId} (doc Owlbear /docs/casting) ──
+ * Janela dedicada para jogar em mesa presencial: você abre numa segunda tela (TV) e ela
+ * mostra a mesa em **VISÃO DE JOGADOR** — `isMaster={false}` mesmo estando logado como
+ * mestre, então a névoa fica opaca na TV, que é justamente o ponto (no Owlbear o
+ * dispositivo de transmissão entra como jogador e não vê através da névoa).
+ * Sem chrome do app: é mapa em tela cheia. A câmera acompanha o mestre pelo Sync View que
+ * já existe, porque a TV normalmente não recebe input. */
+function CastView({ campaignId }) {
+  const [uid, setUid] = useState(auth.currentUser?.uid || null);
+  const [ready, setReady] = useState(!!auth.currentUser);
+
+  useEffect(() => onAuthStateChanged(auth, u => { setUid(u?.uid || null); setReady(true); }), []);
+
+  const center = { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#07070d', color: 'rgba(255,255,255,0.6)', fontSize: 14, textAlign: 'center', padding: 24 };
+
+  if (!ready) return (<><Shell/><div style={center}><div style={{ width: 32, height: 32, border: '2px solid rgba(201,168,76,0.3)', borderTopColor: 'var(--gold)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /></div></>);
+  if (!uid) return (<><Shell/><div style={center}>Entre na mesma conta neste navegador para transmitir a mesa.</div></>);
+
+  return (
+    <><Shell/>
+      <div style={{ position: 'fixed', inset: 0, background: '#000' }}>
+        <MapEditor campaignId={campaignId} uid={uid} isMaster={false} db={db} />
+      </div>
+    </>
+  );
+}
+
 function PublicSheetView({ charId }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -11661,7 +11929,7 @@ function PublicSheetView({ charId }) {
     setSubmitState("done");
   };
 
-  const bg = "var(--bg,#0a0a0f)";
+  const bg = "var(--bg,#14141c)";
   const gold = "var(--gold,#c9a84c)";
   const green = "#4ade80";
 
@@ -11673,7 +11941,7 @@ function PublicSheetView({ charId }) {
 
   if (!data || !data.public) return (
     <div style={{ minHeight:"100vh", background:bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, padding:24 }}>
-      <G/>
+      <Shell/>
       <div style={{ fontFamily:"Cinzel,serif", fontSize:28, color:gold }}>◈</div>
       <div style={{ fontFamily:"Cinzel,serif", fontSize:16, color:"#eee", textAlign:"center" }}>Ficha não disponível publicamente</div>
       <div style={{ fontFamily:"Cinzel,serif", fontSize:11, color:"rgba(255,255,255,0.4)", textAlign:"center" }}>Este dossiê não foi compartilhado ou foi removido.</div>
@@ -11683,7 +11951,7 @@ function PublicSheetView({ charId }) {
 
   if (submitState === "done") return (
     <div style={{ minHeight:"100vh", background:bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, padding:24 }}>
-      <G/>
+      <Shell/>
       <div style={{ fontFamily:"Cinzel,serif", fontSize:32, color:green }}>✓</div>
       <div style={{ fontFamily:"Cinzel,serif", fontSize:16, color:"#eee", textAlign:"center" }}>Sugestão enviada!</div>
       <div style={{ fontFamily:"Cinzel,serif", fontSize:11, color:"rgba(255,255,255,0.45)", textAlign:"center", maxWidth:320 }}>
@@ -11695,7 +11963,7 @@ function PublicSheetView({ charId }) {
 
   return (
     <div style={{ minHeight:"100vh", background:bg }}>
-      <G/>
+      <Shell/>
       {/* Banner */}
       <div style={{ background: isEditorMode ? "rgba(74,222,128,0.07)" : "rgba(201,168,76,0.07)", borderBottom:`1px solid ${isEditorMode ? "rgba(74,222,128,0.2)" : "rgba(201,168,76,0.18)"}`, padding:"8px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, flexWrap:"wrap" }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -11736,28 +12004,48 @@ function PublicSheetView({ charId }) {
   );
 }
 
+/* Divisória vertical entre os blocos do rodapé — sem ela a linha vira um
+ * amontoado de textos que o olho não consegue separar. */
+const FooterDivider = () => (
+  <span aria-hidden="true" style={{ width:1, height:20, background:"var(--border2)", flexShrink:0 }}/>
+);
+
 const AppFooter = ({ system }) => (
-  <div className="nexus-footer" style={{borderTop:"1px solid var(--border2)", padding:"9px 20px", display:"flex", gap:12, alignItems:"center", background:"rgba(6,6,6,0.6)"}}>
-    <div style={{display:"flex", gap:8, alignItems:"center"}}>
-      <NexusLogo size={16}/>
-      <span style={{fontFamily:"Cinzel,serif", fontSize:8, letterSpacing:2, color:"var(--muted2)", textTransform:"uppercase"}}>Nexus RPG · v0.1 Beta</span>
+  <div className="nexus-footer" style={{
+    borderTop:"1px solid var(--border2)", padding:"12px 24px",
+    display:"flex", alignItems:"center", columnGap:18, rowGap:10, flexWrap:"wrap",
+    background:"rgba(6,6,6,0.72)",
+  }}>
+    <div style={{display:"flex", gap:10, alignItems:"center", flexShrink:0}}>
+      <NexusLogo size={18}/>
+      <span style={{
+        fontFamily:"var(--font-title,'Cinzel'),serif", fontSize:11, fontWeight:600,
+        letterSpacing:"0.14em", color:"var(--muted2)", textTransform:"uppercase",
+        whiteSpace:"nowrap",
+      }}>Nexus RPG · v0.1 Beta</span>
     </div>
-    {system?.id === "op" && <LicencaOP variant="footer"/>}
-    <div style={{marginLeft:"auto", display:"flex", gap:4}}>
+    {system?.id === "op" && (
+      <>
+        <FooterDivider/>
+        <LicencaOP variant="footer" style={{ flex:"1 1 300px", minWidth:0 }}/>
+      </>
+    )}
+    <div style={{marginLeft:"auto", display:"flex", gap:2, alignItems:"center", flexShrink:0}}>
       {[
-        {label:"Suporte", icon:<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>},
-        {label:"Discord", icon:<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057c.002.022.015.045.03.06a19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z"/></svg>},
-        {label:"Changelog", icon:<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>},
+        {label:"Suporte", icon:<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>},
+        {label:"Discord", icon:<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057c.002.022.015.045.03.06a19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z"/></svg>},
+        {label:"Changelog", icon:<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>},
       ].map(({label,icon})=>(
         <span key={label} style={{
-          fontFamily:"Cinzel,serif", fontSize:7, letterSpacing:1, color:"var(--muted2)",
-          cursor:"pointer", textTransform:"uppercase",
-          display:"flex", alignItems:"center", gap:4,
-          padding:"3px 8px", borderRadius:4,
+          fontFamily:"var(--font-body,'Inter'),sans-serif", fontSize:11, fontWeight:500,
+          letterSpacing:"0.07em", color:"var(--muted2)",
+          cursor:"pointer", textTransform:"uppercase", whiteSpace:"nowrap",
+          display:"flex", alignItems:"center", gap:7,
+          padding:"7px 12px", borderRadius:6,
           border:"1px solid transparent",
-          transition:"all 0.2s",
+          transition:"color .18s ease, border-color .18s ease, background .18s ease",
         }}
-          onMouseEnter={e=>{e.currentTarget.style.color="var(--gold)";e.currentTarget.style.borderColor="rgba(201,168,76,0.25)";e.currentTarget.style.background="rgba(201,168,76,0.06)";}}
+          onMouseEnter={e=>{e.currentTarget.style.color="var(--gold)";e.currentTarget.style.borderColor="rgba(201,168,76,0.3)";e.currentTarget.style.background="rgba(201,168,76,0.08)";}}
           onMouseLeave={e=>{e.currentTarget.style.color="var(--muted2)";e.currentTarget.style.borderColor="transparent";e.currentTarget.style.background="none";}}
         >
           {icon}{label}
@@ -11777,7 +12065,13 @@ export default function App() {
   const [showCreateCampaign, setShowCreateCampaign] = useState(false);
   const [showJoinCampaign, setShowJoinCampaign] = useState(false);
   const [activeSystem, setActiveSystem] = useState(() => {
-    try { const s = localStorage.getItem('nexus_system'); return s ? JSON.parse(s) : null; } catch { return null; }
+    try {
+      const s = localStorage.getItem('nexus_system');
+      const saved = s ? JSON.parse(s) : null;
+      // Um sistema que saiu do ar não pode ser retomado pelo cache — senão quem já
+      // tinha entrado em D&D/Tormenta voltaria direto para lá, furando o "EM BREVE".
+      return saved && SYSTEMS.some(x => x.id === saved.id && x.available) ? saved : null;
+    } catch { return null; }
   });
   const [screen, setScreen] = useState(() => localStorage.getItem('nexus_screen') || "dashboard");
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('nexus_sidebar_collapsed') === 'true');
@@ -12103,34 +12397,41 @@ export default function App() {
     }
   };
 
-  if (!introPlayed) return (
-    <IntroScreen onDone={() => { sessionStorage.setItem("nx_intro", "1"); setIntroPlayed(true); }} />
-  );
+  /* Rotas diretas vêm ANTES da intro. `introPlayed` sai do sessionStorage, que é por aba —
+   * a janela de transmissão e o link público são sempre sessão nova, então a intro animada
+   * apareceria toda vez antes do conteúdo. Numa TV isso é exatamente o que não se quer. */
 
   // Rota pública — sem login necessário
   const _pubM = window.location.pathname.match(/^\/p\/(.+)$/);
   if (_pubM) return <PublicSheetView charId={_pubM[1]} />;
 
-  if (loggedIn === null) return (<><G/><div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"var(--bg)"}}><div style={{width:32,height:32,border:"2px solid rgba(201,168,76,0.3)",borderTopColor:"var(--gold)",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/></div></>);
-  if (!loggedIn) return (<><G/><Login onLogin={()=>{}}/></>);
-  if (!activeSystem) return (<><G/><SystemSelect onSelect={sys => setActiveSystem(sys)} onLogout={logout}/></>);
+  // Rota de transmissão (doc Owlbear /docs/casting) — janela/tela secundária da mesa.
+  const _castM = window.location.pathname.match(/^\/cast\/(.+)$/);
+  if (_castM) return <CastView campaignId={decodeURIComponent(_castM[1])} />;
+
+  if (!introPlayed) return (
+    <IntroScreen onDone={() => { sessionStorage.setItem("nx_intro", "1"); setIntroPlayed(true); }} />
+  );
+
+  if (loggedIn === null) return (<><Shell/><div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"var(--bg)"}}><div style={{width:32,height:32,border:"2px solid rgba(201,168,76,0.3)",borderTopColor:"var(--gold)",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/></div></>);
+  if (!loggedIn) return (<><Shell/><Login onLogin={()=>{}}/></>);
+  if (!activeSystem) return (<><Shell/><SystemSelect onSelect={sys => setActiveSystem(sys)} onLogout={logout}/></>);
 
   if (creatingChar) {
     if (activeSystem?.id === "dnd") return (
-      <><G/><DnDCharacterCreator onFinish={handleFinishChar} onCancel={()=>setCreatingChar(false)}/></>
+      <><Shell/><DnDCharacterCreator onFinish={handleFinishChar} onCancel={()=>setCreatingChar(false)}/></>
     );
     return (
-      <><G/><CharacterCreator onFinish={handleFinishChar} onCancel={()=>setCreatingChar(false)}/></>
+      <><Shell/><CharacterCreator onFinish={handleFinishChar} onCancel={()=>setCreatingChar(false)}/></>
     );
   }
 
   return (
     <>
-      <G/>
-      <ThemeStyles/>
+      <Shell/>
       <Deco/>
       {saveError && (
-        <div role="alert" style={{position:"fixed", bottom:20, left:"50%", transform:"translateX(-50%)", zIndex:9000, background:"#2a1414", border:"1px solid rgba(224,112,112,0.5)", color:"#f0b0b0", borderRadius:8, padding:"10px 16px 10px 18px", fontSize:13, maxWidth:"90%", display:"flex", alignItems:"center", gap:12, boxShadow:"0 8px 30px rgba(0,0,0,0.6)"}}>
+        <div role="alert" style={{position:"fixed", bottom:20, left:"50%", transform:"translateX(-50%)", zIndex:9000, background:"#2a1414", border:"1px solid rgba(224,112,112,0.5)", color:"#f0b0b0", borderRadius:8, padding:"10px 16px 10px 18px", fontSize:13, maxWidth:"90%", display:"flex", alignItems:"center", gap:12, boxShadow:"0 8px 30px rgba(0,0,0,0.42)"}}>
           <span>⚠ {saveError}</span>
           <button onClick={clearSaveError} style={{background:"none", border:"none", color:"rgba(255,255,255,0.6)", cursor:"pointer", fontSize:16, lineHeight:1}}>×</button>
         </div>
