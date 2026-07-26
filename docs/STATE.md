@@ -10,7 +10,333 @@ alwaysApply: true
 > todo. Diferente do **ADR** (decisão durável e imutável). Decisão estrutural → ADR; estado do
 > trabalho → aqui. Atualize ao **pausar/encerrar**; leia ao **retomar**. Use a skill `/handoff`.
 
-**Última atualização:** 2026-07-21 por Claude (Tailwind+shadcn ADITIVO instalado — ADR-0007; build+testes verdes; NÃO deployado)
+**Última atualização:** 2026-07-25 por Claude (SPEC 0026 — conteúdo do livro v1.4; 28 suítes/324 testes + build exit 0; NÃO commitado/deployado)
+
+> **2026-07-25 (11): SPEC 0026 — CONTEÚDO DO LIVRO v1.4 (itens antes bloqueados por fonte).**
+> Andre forneceu o PDF oficial ("Ordem Paranormal 1.4 (2).pdf", Desktop/livros ordem paranormal,
+> 330 pg. — FORA do repo). Camada de texto extraída e verificada página a página. Entregue:
+> - **Poderes Paranormais** (novo `poderes-paranormais.json`, 22: Aprender Ritual + Resistir a
+>   Elemento + 5 por elemento, pgs 122-124, parafraseados) — o placeholder "aguarde expansão"
+>   do HabilidadesTab virou lista real com chips por elemento; destrava o Transcender.
+> - **Equipamento geral** (tabela 3.8, pg 63): +21 itens `tipo:geral` → 38 gerais / 97 itens.
+> - **Modificações** (novo `modificacoes-oficiais.json`, 23 das tabelas 3.5/3.7/3.9) + seção
+>   "Modificações" na aba Armas da biblioteca (regra: cada modificação = +I categoria).
+> - **Origem Servidor Público** (pg 20-21): Intuição/Vontade, Espírito Cívico → 25 origens.
+> - Gate: 28 suítes/324 testes PASS, build exit 0. Specs `specs/0026-conteudo-livro-v14/`.
+> - **Aberto p/ auditoria futura:** diffs v1.1→v1.4 no conteúdo já codificado (rules.js foi
+>   verificado contra v1.1; o livro agora está disponível para conferência fina — ex.: notação
+>   de dados ±O do v1.4, texto exato de poderes de classe/trilhas).
+
+> **2026-07-25 (10): SPEC 0025 — BIBLIOTECA DO MESTRE COM FONTE ÚNICA.** Auditoria pós-0024
+> achou 4 lacunas; Andre aprovou ("FAÇA ISSO"). Entregue o item 2 (consistência):
+> - **Aba Rituais** do BestiaryTab agora consome `rituais-oficiais.json` (85, os mesmos da
+>   ficha; custo derivado do círculo 1/3/6/10 PE; descricao HTML via dangerouslySetInnerHTML,
+>   padrão do RituaisTab). **Aba Armas** consome as 28 armas de `itens-oficiais.json`
+>   agrupadas por proficiência oficial, com crítico/categoria/espaços.
+> - **OP_RITUAIS (107 linhas) e OP_ARMAS (29) REMOVIDOS** do App.jsx — mestre e jogador viam
+>   números divergentes (ex.: Katana 1d8 vs 1d10 crít. 18). Fonte única agora.
+> - Gate: 27 suítes/317 testes PASS, build exit 0 (warnings pré-existentes: fs* legados no
+>   App.jsx L44-89 e tStat importado sem uso no RituaisTab — NENHUM introduzido nesta leva).
+> **BLOQUEADOS POR FONTE (itens 1/3/4 da auditoria — NÃO implementados, decisão consciente):**
+> - **Poderes Paranormais por elemento** (placeholder na UI continua; Transcender referencia
+>   escolha que não existe no app), **equipamentos gerais/modificações de armas** (17 vs ~40 do
+>   livro) e **origem Servidor Público** (existe no livro, mecânica não confirmada).
+> - Motivo: as fontes públicas do livro cortam no cap. 2 (pdfcoffee/anyflip ofuscado); wikis só
+>   têm homebrew. Regra do projeto: NUNCA inventar (CLAUDE.md). **Desbloqueio: Andre fornecer o
+>   PDF do livro** (colocar na pasta do projeto) → extrair, parafrasear (licença, spec 0003) e
+>   fechar os 3 itens numa spec 0026.
+
+> **2026-07-25 (9): SPEC 0024 — CONTEÚDO OP COMPLETO (trilhas + poderes oficiais + compêndio).**
+> Andre perguntou se "todas as regras do livro estão no sistema"; levantamento mostrou lacunas e
+> ele aprovou o plano ("FAÇA ISSO"). Entregue:
+> - **Trilhas de Especialista completas** (rules.js): + Infiltrador (Ataque Furtivo/Gatuno/
+>   Assassinar/Sombra Fugaz) e + Técnico (Inventário Otimizado/Remendão/Improvisar/Preparado
+>   para Tudo). Nomes verificados em 2+ fontes (Fandom, texto do livro via pdfcoffee).
+> - **CLASS_POWERS substituído pelo catálogo oficial** (18/15/16 por classe, parafraseado).
+>   Entradas antigas sem lastro no livro (Ataque Giratório, Wards Protetoras…) saíram do
+>   catálogo — fichas existentes NÃO mudam (habilidades adicionadas são cópias, HabilidadesTab).
+> - **Grau +10 renomeado "Veterano"→"Competente"** (nome oficial; TREINO_TIERS + tLabel).
+> - **Compêndio de regras** novo: `data/ordemParanormal/regras-oficiais.json` (32 entradas:
+>   testes, ações, manobras, recursos, interlúdio, rituais) + aba "Regras" no BestiaryTab.
+> - **Fora (vinculante na spec):** trilhas de suplementos, bestiário oficial, DTs finas não
+>   verificadas (dano massivo etc. — texto qualitativo marcado "Resumo"), FullSheet legado.
+> - Gate: 26 suítes / 313 testes PASS, build exit 0. Specs em `specs/0024-conteudo-op-completo/`.
+
+> **2026-07-25 (8): REVISÃO POR AGENTES — 3 subagentes acharam defeitos na Onda 4, incluindo um que
+> eu tinha declarado como FUNCIONANDO. Correções aplicadas.**
+> **CORREÇÃO DE ALGO QUE EU AFIRMEI ERRADO:** eu disse que os 3 eixos de permissão (mover/criar/
+> apagar) estavam ligados. **Estavam furados.** (a) O filtro de `canDelete` que adicionei no handler de
+> teclado era **inalcançável** — `index.jsx:951` faz `if (viewer) { ...; return; }` bem antes dele; era
+> código morto, exatamente a armadilha que eu vinha criticando. (b) Pior: **o jogador não tem caminho
+> de escrita para criar/apagar** — `publishElements` só roda no efeito `isMaster`, e a única escrita do
+> jogador é `updateElementPos` (x/y). Ligar `create` daria a ferramenta, o jogador desenharia e o
+> objeto sumiria no próximo snapshot. (c) `canMove`/`canDelete` aceitam `'all'`, mas `firestore.rules`
+> linhas 124 e 128 exigem literalmente `== 'owner'` — a UI liberaria e o servidor negaria em silêncio
+> (divergência PRÉ-EXISTENTE, não introduzida agora).
+> **Ação: REVERTIDO** o painel para o eixo único `update` que de fato funciona, e removido o filtro
+> morto. `permissions.js` e seus 22 testes ficam (lógica pura correta, pronta para quando existir o
+> caminho de escrita do jogador). Expor controle que não funciona é pior que não ter controle.
+> **Outros defeitos corrigidos (todos meus):** (1) **vazamento da transmissão** — `castRef` nunca era
+> fechado no unmount, então sair da tela do mapa com a transmissão ligada deixava a janela órfã e sem
+> botão para fechar; agora tem cleanup. (2) **`key` por spread** em `FogLayer.shapeOutline` — virou
+> item de `.map()` nesta leva e o React deprecia essa forma; agora é atributo literal. (3) **rAF sem
+> cancelamento** no editor de texto (Ctrl+B + concluir no mesmo frame tocava nó desmontado). (4)
+> **acessibilidade**: `aria-label` no textarea e `aria-pressed` nos toggles de cor/contorno. (5) **rota
+> `/cast` depois do gate da intro** — como `introPlayed` vem do sessionStorage (por aba), a janela de
+> TV sempre mostraria a animação de abertura antes do mapa; `/p/` e `/cast/` foram movidas para antes.
+> **ACHADOS NÃO CORRIGIDOS (precisam de decisão do Andre):**
+> - **Perda de dados silenciosa no autosave (CRÍTICO, pré-existente).** `index.jsx:504` avança
+>   `lastPubRef.current = next` ANTES de `publishElements`, sem await; e `campaignSync2.js:124` engole o
+>   erro do `batch.commit()`. Se a escrita falha, a baseline já avançou → a alteração **nunca mais entra
+>   num diff e nunca é reenviada**, sem aviso. Mesmo padrão em `saveSceneMeta` (metadados), no upload de
+>   imagem (`uploadedRef` marca antes do `saveImage` resolver) e em `createScene` (retorna o id mesmo
+>   com o setDoc falhando → a mesa aponta para documento inexistente). Conserto exige decidir política
+>   de retry — não fiz por conta própria.
+> - **`pruneContained` pode apagar a preparação de névoa.** Ele remove um `add` contido em outro `add`
+>   e roda em todo commit. Se o mestre cobrir a área com um retângulo grande e desenhar as salas por
+>   cima, cada sala some ao soltar o mouse, sem aviso. O fluxo novo só é seguro usando "Cobrir tudo"
+>   (fillAll) como base.
+> - **Forma de névoa sob um token fica inalcançável:** `onElementDown` dá `stopPropagation` antes de
+>   checar a ferramenta, então o clique seleciona o token e não a forma.
+> **Gates após as correções: 25 suítes/303 testes + build exit 0, zero warning nos arquivos tocados.**
+
+> **2026-07-25 (7): PARIDADE OWLBEAR — ONDA 4 (CORREÇÕES DE FUNDO + PERMISSÕES + DESENHO).** Andre deu
+> mandato aberto ("faça o que achar melhor, não pare"). A auditoria por subagentes finalmente fechou
+> (69 min, 13 agentes, **424 features: 117 done / 92 partial / 215 missing**) e revelou dois defeitos
+> que valiam mais que qualquer feature nova.
+> **BUG 1 — A NÉVOA NÃO ESCONDIA TOKENS.** Tudo no canvas é filho do MESMO container transformado
+> (index.jsx L1526), ou seja um único contexto de empilhamento. A grade estava em `zIndex:6`, a névoa
+> em `200` e os pings em `300`, enquanto os ELEMENTOS usam `layerZIndex` = idx*100000+50000±49999, ou
+> seja 100k a 700k. **Todo token renderizava ACIMA da névoa** — um inimigo em sala coberta aparecia
+> para o jogador, e a névoa só escondia o mapa. A grade em 6 ficava sob a própria imagem do mapa.
+> **Fix:** `gridZIndex`/`fogZIndex(layerCount)`/`overlayZIndex(layerCount)` novos em `mapHelpers.js`,
+> derivados de `layerZIndex` (nada de número mágico — a próxima camada nova quebraria de novo), com
+> **6 testes** travando a ordem: grade acima do Mapa e abaixo de Desenho, névoa acima de TODAS as
+> camadas, overlays acima da névoa, e névoa acompanhando `layers.length`. `FogLayer` e `PingsOverlay`
+> passaram a receber `zIndex` por prop.
+> **BUG 2 — "Cobrir tudo" APAGAVA a preparação.** `coverFog` gravava `shapes: []`. Com o fluxo de
+> Cortar/Recobrir da Onda 3 isso destrói o trabalho todo. Agora "Cobrir tudo" só liga `fillAll` e
+> preserva as formas (é o Fill Fog da doc: sala cortada vira buraco na névoa infinita), e "Revelar
+> tudo" marca tudo como `cut` em vez de deletar.
+> **PERMISSÕES (doc /docs/permissions):** `canCreate` e `canDelete` existiam em `permissions.js`, COM
+> teste, e **nunca eram chamados** — só `canMove` era importado (4ª ocorrência do padrão "campo/função
+> no código ≠ feature", junto de grid.js órfão, `folder` sempre null e `rotation` da nota). Agora:
+> `canDelete` aceita `'all'` além de `'owner'`; novos `nextPerm`/`creatableLayers`/`PERM_LABELS`
+> (**11 testes**); painel de camadas ganhou os **3 eixos** (mover/criar/apagar) no lugar de só mover; e
+> **as ferramentas do jogador saem das permissões** — antes eram 3 fixas (select/measure/pointer) e ele
+> não podia criar nada. Delete do jogador filtra por `canDelete` com aviso, senão o eixo novo seria
+> config morta.
+> **NOTA LEGADA — beco sem saída fechado:** a nota era criada e NUNCA editável (sem menu de contexto,
+> clique-direito engolido pelo `onElementDown`, duplo-clique só pingava). Agora duplo-clique e botão na
+> barra de ações abrem edição; o modal de prompt ganhou campo **multilinha** (Enter quebra linha,
+> Ctrl+Enter confirma) usado na criação e na edição; texto vazio apaga a nota; e o `rotation` que o
+> migrations gravava e o render ignorava passou a ser aplicado.
+> **DESENHO (doc /docs/drawing):** `fill:'none'` era hardcoded — desenho só fazia contorno, nunca área
+> de efeito de magia. Agora tem **preenchimento** (cor do traço + opacidade 5-90%) e **estilo de traço**
+> (sólido/tracejado/pontilhado, com dash proporcional à espessura). Traço livre com preenchimento vira
+> `polygon` (polyline aberta não pinta área). O preview ao vivo mostra os dois.
+> **Também:** Ctrl/Cmd segurado desliga o snap **só durante o gesto** (docs de images e fog); `alt` nas
+> 2 imagens sem alt; `no-loop-func` do `fogCellsToShapes` resolvido (ids atribuídos após o laço).
+> **Gates: 24 suítes/286 testes + build exit 0. O MapEditor agora não emite NENHUM warning** (eram 3).
+> **VERIFICADO POR TESTE DE INTEGRAÇÃO (não por checklist manual).** Andre mandou "então faça os
+> testes". Playwright não serve aqui: o MCP entrou no meio da sessão (tools só após restart) e o app
+> exige login Firebase. Em vez disso, novo **`renderStack.test.jsx`** (RTL, 11 testes) que semeia
+> `localStorage` com uma cena sintética, **renderiza o MapEditor de verdade** e mede o z-index no DOM.
+> **O bug foi provado empiricamente por mutação:** revertendo a névoa para o `zIndex:200` original o
+> teste falha com `Expected: > 650009, Received: 200` — a nota da camada Notas estava em **650.009** e
+> a névoa em **200**, três ordens de grandeza abaixo. Depois de restaurar, passa. Cobre: névoa acima do
+> token e de TODO elemento, grade abaixo do token e acima da camada Mapa, névoa não montada sem fog,
+> desenho com/sem preenchimento, dasharray proporcional à espessura, e o texto rico virando blocos
+> (`# Cripta` vira título, marcação não vaza para a tela, negrito vira peso 700).
+> **NÃO verificável por teste automatizado (continua com o Andre):** aparência (cores, layout,
+> legibilidade) e o painel de camadas com os 3 eixos, que só existe em modo campanha e exigiria
+> Firestore no teste.
+> **Pendente do Andre:** olhar o visual e commitar/deployar — **nada foi commitado nem deployado desde
+> a 0022**.
+> **PRÓXIMOS (do relatório da auditoria):** Asset Manager de verdade (hoje **não dá para adicionar à
+> biblioteca sem antes pôr a imagem numa cena**, e `folder` é gravado null e nunca lido); single-layer
+> fog + Trim geométrico; edição de pontos de desenho; régua permanente e modo movimento; importador de
+> imagem com defaults.
+
+> **2026-07-25 (6): PARIDADE OWLBEAR — ONDA 3 (NÉVOA: FLUXO DE ENCONTRO) IMPLEMENTADA.** Após ler as
+> 9 docs que faltavam, o maior gap não era feature solta: **o Nexus não tinha o fluxo de encontro da
+> névoa**. No Owlbear você pré-desenha a névoa de todas as salas ANTES da sessão e, conforme os
+> jogadores entram, alterna cada forma entre coberta e cortada. No Nexus cobrir/cortar eram **modos de
+> pincel** e o sub-modo de edição só apagava — não havia toggle por forma, então a névoa não era
+> preparável.
+> **Achado que corrige o histórico:** o plano/ADR descartou Join/Trim alegando que "máscara binária
+> torna união um no-op visual". A doc mostra que o propósito do Join **não é visual** — é agrupar
+> formas para que **um Cut revele todas de uma vez**. A premissa do descarte estava errada.
+> **Feito, tudo em `fog.js` (puro, testado):** `toggleCut` vira o `op` da forma existente
+> ('add'↔'cut') **e move a forma para o FIM do array** — a mask é sequencial, então um `cut` no índice
+> 0 não revelaria nada que um `add` posterior cobrisse; sem reordenar, o botão seria um no-op visual em
+> metade dos casos (tem teste dedicado). Seleção mista vira TODA cortada (revelar é a intenção
+> dominante). `joinShapes`/`splitShapes`/`expandGroups` implementam o Join via campo novo `groupId`:
+> alternar/apagar um membro alcança o grupo inteiro; juntar num grupo existente absorve os dois.
+> `fogFill` converte a cor (hex #rgb/#rrggbb) e **cai no preto em valor inválido** — errar a cor nunca
+> pode deixar a névoa transparente e vazar o mapa.
+> **UI:** sub-toolbar de névoa em modo edição ganhou **Cortar/Recobrir**, **Juntar**, **Separar**,
+> contador de seleção e Apagar (plural). **Shift+clique acumula** seleção (`fogSel` virou `Set`).
+> Fora do modo edição entrou a **cor da névoa** (5 opções). No `FogLayer` o modo edição agora
+> **contorna TODAS as formas por estado — âmbar = coberta, verde = revelada, roxo = selecionada**;
+> sem isso preparar a névoa antes da sessão era adivinhação.
+> **SCHEMA (aditivo, sem migração):** forma de fog ganha `groupId?` opcional e `scene.fog` ganha
+> `color`. Opacidade deliberadamente NÃO é campo — sai do papel de quem olha (mestre 0,88 para
+> trabalhar, jogador 0,98).
+> **Gates: 24 suítes/269 testes + build exit 0** (18 testes novos de fog), zero warning novo.
+> **NÃO ENTREGUE da névoa:** single-layer fog (forma nova se recortando automaticamente contra as
+> existentes, que no Owlbear dá meia-lua de graça) e seu toggle multicamada; Trim de verdade
+> (subtração geométrica); modos triângulo/hexágono; modo Grab para mover/duplicar forma de névoa
+> (Alt-arrastar) e rotacionar.
+> **Pendente do Andre:** validar no browser — desenhar 2-3 salas, entrar no modo edição e ver os
+> contornos âmbar, Cortar uma e conferir que o jogador passa a ver (usar o preview 👁), Shift+clique em
+> duas + Juntar e conferir que cortar uma revela as duas.
+
+> **2026-07-25 (5): PARIDADE OWLBEAR — ONDA 2 (TEXTO RICO + TRANSMISSÃO) IMPLEMENTADA.** Andre pediu
+> "OS DOIS" entre as duas áreas da lista dele que tinham lacuna TOTAL.
+> **TEXTO (doc `/docs/text`):** novo módulo puro **`richText.js`** — o texto é guardado como STRING
+> markdown-ish (não árvore de nós), então o dado que vai pro Firestore continua simples e não precisa
+> migração quando o render mudar. Parser de títulos 1/2, lista com marcador, lista numerada (guarda o
+> número inicial), parágrafo e inline `**negrito**`/`*itálico*` — marcador não fechado fica LITERAL,
+> que é o comportamento certo enquanto se digita. Mais `toggleWrap` (Ctrl+B/I, com desfazer nos dois
+> casos: marcadores dentro e fora da seleção) e `toggleLinePrefix` (toggle de verdade: reaplicar
+> remove, trocar prefixo não acumula, lista numerada renumera). **`TextItem.jsx`** novo (componente,
+> como FogLayer/PingsOverlay): `TextItem` desenha os blocos e `TextEditorOverlay` é o editor in-place
+> — textarea + barra com 7 cores, 3 fontes, 6 tamanhos, B/I/H1/H2/•/1., contorno 0-4px e "Pronto".
+> Contorno via `-webkit-text-stroke` + `paint-order`, senão o traço come a letra. Ferramenta **Texto
+> (E)** na toolbar; clicar cria e já abre o editor; **duplo-clique reedita**; Shift+Enter e Esc
+> concluem; texto vazio ao concluir se autodeleta (não deixa item fantasma). O `onKeyDown` do textarea
+> dá `stopPropagation` — sem isso os atalhos de 1 tecla do canvas (V/T/D/F…) disparariam ao digitar.
+> Digitação coalesce em **1 passo de undo** via `updateElText` + `coalesceKey` (reusa o mecanismo do
+> arrasto de fog da 0019 AC-7); sem isso cada tecla viraria um passo e o Ctrl+Z ficaria inútil.
+> **TRANSMISSÃO (doc `/docs/casting`):** rota nova **`/cast/{campaignId}`** no App.jsx (mesmo padrão
+> de early-return da `/p/{charId}` já existente; o `firebase.json` já tem rewrite catch-all, então a
+> rota serve sem mudança de infra). Novo **`CastView`** renderiza a mesa com **`isMaster={false}`
+> mesmo logado como mestre** — é o ponto: a névoa fica OPACA na TV, igual ao Owlbear, onde o
+> dispositivo de transmissão entra como jogador. Como a sessão do Firebase é a mesma origem, não
+> precisou fluxo de admissão. Botão **Transmitir** na toolbar usa a **Presentation API** quando o
+> navegador oferece (Chrome/Edge com tela ESTENDIDA — espelhada não conta — ou Chromecast) e cai para
+> `window.open` que o mestre arrasta para a TV, com aviso se o pop-up for bloqueado; botão vira Parar.
+> A câmera na TV acompanha pelo **Sync View que já existia** (a TV não recebe input).
+> **Gates: 24 suítes/251 testes + build exit 0** (35 testes novos de richText), zero warning novo.
+> **NÃO ENTREGUE:** (1) **one-shot do Sync View** — a doc de casting descreve o botão dividido, onde o
+> lado direito puxa TODOS os jogadores para a visão do mestre de uma vez; o Nexus só tem o toggle
+> contínuo. Exige sinal novo nas duas pontas (um contador no payload do canal ao vivo que o jogador
+> obedece mesmo com `followMaster=false`). (2) Do texto: seletor de emoji e o item "Editar Texto" no
+> context menu (o duplo-clique e o Shift+Enter cobrem a reedição).
+> **Pendente do Andre:** validar no browser — criar texto com `# título` e `- lista`, Ctrl+B, duplo-
+> clique reeditando, Ctrl+Z desfazendo a digitação inteira de uma vez; e abrir Transmitir numa segunda
+> tela conferindo que a névoa aparece OPACA lá. Depois commitar/deployar.
+
+> **2026-07-25 (4): SPEC 0023 (TEMA GRAFITE) IMPLEMENTADA.** Andre viu o Painel e disse "está muito
+> escuro, quero um layout um pouco mais claro". Decidido com ele: **grafite sutil** (não tema claro),
+> **app inteiro**, **trocando o padrão** (sem toggle). O fundo era `#07070d` (L\* 2,0) com cards a
+> `#121220` — separação de **1,15:1**, invisível a olho nu.
+> **Achado que redefiniu a fatia 1:** existiam **duas escalas de luminância vivas** — o `:root` do bloco
+> `G` (`--bg:#0d0d0d`) pintava login/seleção/criadores e o registry (`--bg:#07070d`) pintava o shell,
+> porque `<ThemeStyles/>` só era montado no shell logado, embora `data-nexus-system` já fosse escrito
+> sempre. Novo **`Shell` = `<G/>` + `<ThemeStyles/>`** (escopo de módulo, não dentro de `App()` — declarar
+> lá criaria um tipo novo a cada render e remontaria as `<style>`) usado nos 6 pontos de entrada + no
+> `PublicSheetView`. O `:root` do `G` virou **fallback de boot** espelhando a escala do OP.
+> **Escala nova** (mesma escada de L\* 6,6/10,7/14,6/18,5 nos 3 sistemas, tonalidade preservada): OP
+> `#14141c/#1c1c26/#24242f/#2c2c39`, D&D `#1a140f/#231b13/#2d231a/#372b1f`, Tormenta
+> `#10170f/#161f15/#1e281d/#243023`. **`--muted` subiu** nos 3 (cairia para ~4,2:1 sobre o card2 novo —
+> abaixo do AA, e ele é usado em labels de 9-11px): `#a89a7c` / `#a89678` / `#94a87a`. **Alphas de
+> `--border`/`--border2` NÃO mudaram** — recalculado, a borda dourada mantém o mesmo contraste.
+> Separação bg→card2 subiu para **1,33:1**: clarear aqui aumentou a elevação percebida.
+> **Também clareados:** `index.html` (`theme-color` + `body`) e `manifest.json` (primeiro frame/PWA),
+> `modalStyles.js` (um `background` pinta TODOS os modais das abas OP), topbar (agora `var(--surface)` —
+> elevada, não recessada), bottom-nav, modal de Ajustes e família (`#111`/`#1a1a1a`/`#333` → tokens;
+> `<option>` ficou com **hex literal** de propósito: o compositor nativo do SO ignora `var()` herdado),
+> ficha OP (`--el-deep`/`--el-bg`, `.op-ink` inset 0,55→0,32, os 6 `bg` de `elementos.jsx` preservando
+> matiz), ficha D&D (`--ink`/`--stone`/gradiente) e as 19 superfícies literais do editor de mapas
+> (decisão: **não tokenizar** — identidade própria, 0 `var()`). Sombras pretas ≥0,5 reduzidas ~30% (33 em
+> App.jsx) e o piso do keyframe `op-el-fade` subiu de `#000` para `#0a0a10` (com fundo claro, partir do
+> preto virava piscar visível). **Teste novo `surfaces-ladder.test.js`** (12 asserções) trava a escada
+> para sempre: completude, monotonicidade, coerência ±1 L\* entre sistemas e AA 4,5:1 de
+> text/muted/muted2 sobre card2. **Gates: 23 suítes/216 testes + build exit 0.**
+> **NÃO verificado por mim:** a checagem visual no browser — o MCP do Playwright não expôs as ferramentas
+> `browser_*` nesta sessão. **Pendente do Andre:** olhar o app (dev server rodando), aprovar e commitar.
+> **Gap documentado (fora de escopo, vira spec própria):** accent de D&D (2,8:1) e Tormenta (3,0:1) como
+> **cor de texto** sobre o card novo — a regra correta é *accent preenche, accent2 escreve*.
+
+> **2026-07-25 (3): PARIDADE OWLBEAR — ONDA 1 (FUNDAÇÃO DE GRID) IMPLEMENTADA. Andre mandou as 10
+> páginas da doc do Owlbear e pediu "traga TODAS essas funcionalidades".** Achado que redefiniu a
+> onda: **`grid.js` era MÓDULO ÓRFÃO** (nenhum import) e o `index.jsx` duplicava a matemática inline
+> (`gridSize` L147, snap L166-173, medição `Math.hypot` L1203, stroke da grade hardcoded L1437) — logo
+> `grid.type`, `grid.offset`, `grid.measurement`, `grid.color`, `grid.opacity` e `grid.lineWidth` eram
+> **config morta**: só `size` tinha efeito, e o único ajuste de grade na UI estava escondido dentro da
+> sub-toolbar de névoa. **Docs baixadas via Firecrawl** para `scratchpad/owlbear/` (13 páginas — o
+> WebFetch toma **403** no site do Owlbear; o `map` do Firecrawl revelou 17 páginas, 3 relevantes que
+> o Andre não listou: getting-started, rooms, troubleshooting).
+> **Feito:** `grid.js` reescrito como fonte única (~260 l) — hex **pointy-top e flat-top** (axial +
+> arredondamento de cubo), 4 modos de medição em quadrado (**chessboard/alternating/euclidean/
+> manhattan**) e 2 em hex, `offset` de alinhamento normalizado para [0,g), `cellSizeFromColumns/Rows`
+> (o controle manual linhas×colunas do Owlbear), `parseGridFromFilename` ("mapa_49x28.jpg" → 49×28,
+> rejeitando resolução tipo 1920x1080), `parseScale`/`formatScale` com **precisão derivada dos
+> decimais digitados** ("5.00mi" → 2 casas) e `gridPattern` (tile SVG do favo de mel, 5 hexágonos
+> por tile). **`index.jsx` wired**: snap/snapToken/medição/render passam pelo módulo; grade honra
+> color/opacity/lineWidth/offset/tipo; fog "retângulo por células" ficou offset-aware (e em hex cobre
+> a área crua, pois célula retangular não existe em favo). **Painel novo "CONTROLES DE GRADE"**
+> (botão `target` na toolbar): tipo, colunas/linhas, célula ±1px, offset X/Y (±1/±5 + zerar), modo de
+> medição filtrado pelo tipo, escala digitável e opacidade/espessura. **Alinhamento automático pelo
+> nome do arquivo** no `loadBg`.
+> **SCHEMA v2 → v3** (`migrateSceneV3`, idempotente): `grid.offset` e `scale.digits` novos, e
+> `measurement:'euclidean'` (config morta, nunca lida por ninguém) vira **'chessboard'** (padrão D&D 5e
+> — Andre aprovou a migração: "MIGRE SIM"). `SCHEMA_V2` ganhou constante própria porque a v2 gravava
+> `schemaV: SCHEMA_V`, e subir a constante sem isso faria toda cena v2 re-executar a migração v1→v2.
+> Teste explícito garante que **escolher euclidiana DEPOIS de migrar não é revertido** (guard de
+> schemaV). **Dívida quitada:** `mapHelpers.cellCenterSnap` REMOVIDO (superado por `grid.cellCenter`);
+> o AC-9 da 0019 segue rastreável — o teste foi reapontado para o grid.js.
+> **Gates: 23 suítes/216 testes + build exit 0**, zero warning novo (os do MapEditor — alt-text no
+> index.jsx, no-loop-func em migrations.js:21 — são pré-existentes).
+> **NÃO ENTREGUE da área aligning-a-map:** as **réguas visuais de alinhamento** (arrastar canto,
+> escalar, trilho de precisão por eixo com Shift). Entreguei o controle manual + nudge de offset, que
+> resolve mapa com dimensão conhecida; mapa com grade desconhecida ainda exige tentativa e erro.
+> **PRÓXIMAS ONDAS (docs já em disco, ler de `scratchpad/owlbear/`):** ferramenta de **texto** (doc
+> `text.md` — nunca implementada), **casting/segunda tela** (`casting.md` — nunca implementada),
+> régua **permanente** e modo **movimento** (`measure.md`: hoje a régua só existe durante o arrasto),
+> refinos de `images`/`scenes`/`fog`/`drawing`/`managing-assets`/`permissions`.
+> **Pendente do Andre:** validar no browser (grade quadrada não deslocou; hex desenha fechado; offset
+> alinha; medição muda com o modo; nome "40x22" auto-alinha) + commitar/deployar. Uma auditoria por
+> subagentes das 10 áreas ficou rodando e **não foi usada** — 12 agentes numa máquina de 4 núcleos
+> serializa em 2, erro de dimensionamento meu; as docs foram lidas direto do disco.
+
+> **2026-07-25 (2): SPEC 0022 (pílula nas abas) IMPLEMENTADA — mesma leva, escopo novo aprovado pelo
+> Andre.** A 0017 deixou fichas explicitamente fora de escopo, então abri `specs/0022-pilula-nas-abas/`
+> (tier pequeno: spec + tasks) antes de codar. Novo **`src/components/SlidingTabPill.jsx`** (apresentação
+> pura do realce: fundo/raio/sombra/sublinhado/linha de topo; sublinhado é filho absoluto, NÃO
+> `border-bottom`, pra borda não inflar a caixa onde não há `border-box`) + 6 testes. As **6 superfícies**
+> agora usam o mesmo par hook+componente: sidebar desktop, bottom-nav mobile, **abas da ficha OP**,
+> **secnav mobile do OP**, **abas da ficha D&D** e **abas do modal de Ajustes** (extraídas para um
+> `SettingsTabs` em App.jsx). Nos CSS (`ordemStyles.jsx`, `DnDSheetStyles.jsx`) o ativo perdeu
+> fundo/`border-bottom` colorido/`::before` — sobrou cor e peso do texto; a borda transparente ficou para
+> o box-model não encolher 2px, e os botões ganharam `position:relative;z-index:1` pra ficar acima do
+> realce. Barras roláveis receberam `position:relative` para o realce rolar junto com o conteúdo (AC-2).
+> **Gates: 21 suítes/158 testes + build exit 0.** AC-1/2/3/4 são checklist visual do Andre (tasks.md da
+> 0022). **Pendente do Andre:** validar no browser as 6 barras + commitar/deployar as duas levas de hoje.
+
+> **2026-07-25: PÍLULA DE NAV — o item estava FEITO; o que faltava era robustez + docs.** O handoff
+> da sessão anterior listava "pílula de nav deslizante" como pendência, mas o `tasks.md` da 0017 é que
+> estava desatualizado (tudo marcado `todo` mesmo com a Onda 1 entregue e deployada em `f90a316`): a
+> pílula já existia no `Sidebar` desktop e na `MobileBottomNav` (commit `baae1b3`). **Feito nesta leva:**
+> (1) as duas cópias inline viraram **`src/hooks/useSlidingPill.js`** (`measurePill`/`samePill` puros +
+> hook), com **6 casos de teste** novos (`useSlidingPill.test.js`, RTL + fake ResizeObserver + offsets
+> simulados por `data-*`, já que o jsdom devolve 0 em todo offset); (2) **bug real corrigido** — a medida
+> só acontecia no `useLayoutEffect`, ou seja ANTES da transição `width 0.3s` da sidebar e ANTES das
+> webfonts (Cinzel) trocarem as métricas: ao recolher/expandir, a pílula congelava na largura antiga até
+> a próxima troca de aba. Agora re-mede via **ResizeObserver** (container + item ativo) e no
+> **`document.fonts.ready`**, com guarda de igualdade (`samePill`) pra não entrar em laço de render.
+> **Gates: 20 suítes/152 testes + `npm run build` exit 0** (com `CI=true` o build falha por warnings
+> **pré-existentes** de outros arquivos — `no-unused-vars`/`exhaustive-deps` em App.jsx, sheets de
+> OP/D&D; nenhum vem desta leva). `tasks.md` da 0017 reconciliado com a realidade (status por task +
+> checklist visual da regressão da pílula). **Achado:** a **task 9 (ADR do Higgsfield) nunca foi escrita**
+> — a Onda 2 rodou sem ADR (o último é o 0007/Tailwind). **Pendente do Andre:** conferir no browser
+> (recolher/expandir a sidebar + girar o celular) e commitar/deployar. **0017 ainda em aberto:** voz do
+> Ajudante do Mestre (`narracao-mestre.mp3`, falta decidir onde toca), ADR do Higgsfield, explainer 30s
+> (adiado), trilha/SFX (impossíveis neste conector). **Fora da 0017 (precisa decisão):** as **abas** ainda
+> trocam seco — ficha OP (`.op-tab`), ficha D&D (`.dnd-tab`), modal de Ajustes e a secnav mobile do OP;
+> a spec 0017 põe fichas explicitamente fora de escopo, então levar a pílula até lá é escopo novo.
 
 > **2026-07-21 (5): TAILWIND + shadcn/ui ADOTADO (aditivo) — ADR-0007. Build via CRACO exit 0 + 19
 > suítes/142 testes verdes. NÃO deployado ainda (mudança de build+CSS global no app inteiro — precisa

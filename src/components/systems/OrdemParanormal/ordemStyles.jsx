@@ -12,13 +12,13 @@ export const OrdemSheetStyles = () => (
        document.body, outside .op-sheet's DOM subtree) still resolve --el-*
        colors instead of falling back to invalid/transparent values. */
     :root{ --el-primary:#c9a84c; --el-accent:#e8c96d; --el-glow:#e8c96d; --el-rune:#c9a84c; --el-vital:#e8c96d;
-      --el-deep:#07070d; --el-bg:#07070d; --el-border:rgba(201,168,76,0.34); }
+      --el-deep:#14141c; --el-bg:#14141c; --el-border:rgba(201,168,76,0.34); }
     .op-sheet{ position:relative; color:var(--text); font-family:var(--font-body,'IM Fell English',serif);
       --el-accent:#c9a84c; --el-glow:#e8c96d; --el-rune:#c9a84c; --el-vital:#c9a84c; }
     .op-grain::before{ content:""; position:absolute; inset:0; pointer-events:none; z-index:0; opacity:0.05; mix-blend-mode:overlay;
       background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
     .op-ink{ border:1px solid var(--border2); border-radius:3px; position:relative; background:var(--card); }
-    .op-ink::after{ content:""; position:absolute; inset:3px; border:1px solid rgba(201,168,76,0.10); border-radius:2px; pointer-events:none; box-shadow:inset 0 0 22px rgba(0,0,0,0.55); }
+    .op-ink::after{ content:""; position:absolute; inset:3px; border:1px solid rgba(201,168,76,0.10); border-radius:2px; pointer-events:none; box-shadow:inset 0 0 22px rgba(0,0,0,0.32); }
     .op-label{ font-family:Inter,'Inter var',system-ui,sans-serif; font-size:10px; letter-spacing:0.18em; text-transform:uppercase; color:var(--muted2); font-weight:600; }
     .op-data{ font-family:var(--font-data,'Share Tech Mono',monospace); font-size:13px; }
     .op-stagg0{ animation:op-rise 0.5s ease both; } .op-stagger>*{ animation:op-rise 0.5s ease both; }
@@ -40,7 +40,7 @@ export const OrdemSheetStyles = () => (
     .op-breach .op-dial-rune{ animation-duration:8s; }
 
     /* ── VITAL SIGN / EKG ── */
-    .op-vital{ border:1px solid var(--border2); border-radius:3px; padding:8px 10px; background:rgba(0,0,0,0.3); position:relative; }
+    .op-vital{ border:1px solid var(--border2); border-radius:3px; padding:8px 10px; background:rgba(0,0,0,0.22); position:relative; }
     .op-ekg-line{ fill:none; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
     .op-ekg-sweep{ stroke-dasharray:60 240; animation:op-ekg-sweep linear infinite; }
     @keyframes op-ekg-sweep{ from{ stroke-dashoffset:300; } to{ stroke-dashoffset:0; } }
@@ -71,17 +71,28 @@ export const OrdemSheetStyles = () => (
       90%{ text-shadow:-2px 0 #e53935, 2px 0 #2bd1c4; }
       93%{ text-shadow:2px 0 #e53935, -2px 0 #2bd1c4; transform:translate(1px,0); }
       96%{ text-shadow:-1px 0 #e53935; transform:translate(-1px,0); } }
+    /* nome do agente — editável no modo edição, mesma tipografia do título */
+    .op-name-edit{ cursor:text; }
+    .op-name-edit:hover{ text-decoration:underline; text-decoration-style:dotted; text-underline-offset:6px; text-decoration-color:var(--gold); }
+    .op-name-input{ width:100%; padding:0 0 2px; border:none; border-radius:0; background:transparent;
+      border-bottom:1px dashed var(--gold); color:var(--el-glow);
+      font-family:var(--font-display,'Cinzel Decorative',serif); font-size:clamp(22px,3.4vw,38px); line-height:1.05;
+      text-shadow:0 0 18px var(--el-glow); }
+    .op-name-input:focus{ border-bottom-color:var(--el-accent); }
     .op-watermark{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; z-index:2;
       font-family:var(--font-display,'Cinzel Decorative',serif); font-size:clamp(34px,9vw,90px); color:rgba(229,57,53,0.07);
       letter-spacing:0.12em; transform:rotate(-14deg); text-transform:uppercase; }
 
     /* ── TABS (underline, scrollable) ── */
-    .op-tabs-row{ display:flex; width:100%; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+    /* O realce do ativo é a pílula deslizante (spec 0022) — os botões só mudam
+       cor/peso; fundo e sublinhado vivem no <SlidingTabPill>. A borda transparente
+       fica para o box-model não encolher 2px. */
+    .op-tabs-row{ display:flex; width:100%; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; position:relative; }
     .op-tabs-row::-webkit-scrollbar{ display:none; }
     .op-tab{ flex:0 0 auto; min-width:70px; text-align:center; font-family:Inter,'Inter var',system-ui,sans-serif; font-size:11.5px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; padding:11px 14px; cursor:pointer;
-      border:none; border-bottom:2px solid transparent; background:transparent; color:var(--muted2); transition:all 0.18s; white-space:nowrap; }
+      border:none; border-bottom:2px solid transparent; background:transparent; color:var(--muted2); transition:color 0.18s; white-space:nowrap; position:relative; z-index:1; }
     .op-tab:hover{ color:var(--text); background:rgba(201,168,76,0.05); }
-    .op-tab.active{ color:var(--el-glow); background:rgba(201,168,76,0.08); border-bottom:2px solid var(--el-accent); font-weight:700; }
+    .op-tab.active{ color:var(--el-glow); font-weight:700; }
 
     /* ── TERMINAL DICE ── */
     .op-terminal{ font-family:var(--font-data,'Share Tech Mono',monospace); background:#03100a; border:1px solid rgba(74,222,128,0.35); color:#7dffb0; border-radius:4px; padding:11px 12px; width:100%; letter-spacing:0.08em; box-shadow:inset 0 0 18px rgba(0,40,20,0.6); }
@@ -100,7 +111,7 @@ export const OrdemSheetStyles = () => (
     .op-skill,.op-skill-head{ display:grid; grid-template-columns:var(--skill-cols,22px minmax(0,1fr) 34px 38px 42px 42px 26px); gap:0 4px; align-items:center; }
     .op-skill{ padding:5px 10px; border-bottom:1px solid rgba(201,168,76,0.06); font-family:Inter,'Inter var',system-ui,sans-serif; font-size:13px; transition:background 0.15s; }
     .op-skill:hover{ background:rgba(214,184,74,0.12); }
-    .op-skill-head{ padding:6px 10px; border-bottom:1px solid var(--border2); background:rgba(0,0,0,0.3); }
+    .op-skill-head{ padding:6px 10px; border-bottom:1px solid var(--border2); background:rgba(0,0,0,0.22); flex-shrink:0; }
     .op-skill input{ width:100%; text-align:center; background:transparent; border:none; border-bottom:1px solid transparent; color:inherit; font-family:inherit; font-size:12px; padding:2px 0; -moz-appearance:textfield; }
     .op-skill input:focus{ outline:none; border-bottom:1px solid var(--el-accent); }
     .op-skill input::-webkit-inner-spin-button,.op-skill input::-webkit-outer-spin-button{ -webkit-appearance:none; margin:0; }
@@ -121,7 +132,7 @@ export const OrdemSheetStyles = () => (
     /* ── ROLL RESULT CARD ── */
     .op-roll-card{ position:relative; width:min(500px,93vw); background:#06060a; border:1px solid var(--el-accent); border-radius:12px; padding:18px 26px 14px; box-shadow:0 0 44px rgba(0,0,0,0.85), 0 0 22px var(--el-glow); overflow:hidden; animation:op-card-in 0.3s ease; }
     @keyframes op-card-in{ from{ opacity:0; transform:scale(0.92); } to{ opacity:1; transform:scale(1); } }
-    .op-roll-card.op-crit{ border-color:var(--el-glow); box-shadow:0 0 70px var(--el-glow), inset 0 0 50px rgba(0,0,0,0.55); }
+    .op-roll-card.op-crit{ border-color:var(--el-glow); box-shadow:0 0 70px var(--el-glow), inset 0 0 50px rgba(0,0,0,0.38); }
     .op-roll-x{ background:none; border:none; color:var(--muted2); font-size:18px; line-height:1; cursor:pointer; padding:2px 4px; }
     .op-roll-x:hover{ color:var(--el-glow); }
     .op-crit-badge{ text-align:center; font-family:var(--font-title,'Cinzel',serif); font-size:11px; letter-spacing:0.32em; text-transform:uppercase; margin-bottom:2px; position:relative; z-index:2;
@@ -143,8 +154,8 @@ export const OrdemSheetStyles = () => (
 
     /* ── CORNER CARD (rolagens normais, canto inferior direito) ── */
     .op-corner{ position:fixed; bottom:24px; right:24px; width:320px; max-width:calc(100vw - 32px); z-index:99999;
-      background:var(--el-bg,#07070d); border:1px solid var(--el-border,var(--border2)); border-radius:10px;
-      box-shadow:0 0 12px var(--el-glow), 0 10px 30px rgba(0,0,0,0.6); padding:14px 16px; animation:op-corner-in 0.3s ease-out; }
+      background:var(--el-bg,#14141c); border:1px solid var(--el-border,var(--border2)); border-radius:10px;
+      box-shadow:0 0 12px var(--el-glow), 0 10px 30px rgba(0,0,0,0.42); padding:14px 16px; animation:op-corner-in 0.3s ease-out; }
     @keyframes op-corner-in{ from{ opacity:0; transform:translateX(40px); } to{ opacity:1; transform:translateX(0); } }
     .op-corner-x{ background:none; border:none; color:var(--muted); font-size:15px; line-height:1; cursor:pointer; padding:0 2px; }
     .op-corner-x:hover{ color:var(--el-glow); }
@@ -152,7 +163,7 @@ export const OrdemSheetStyles = () => (
     /* ── CRITICAL: vinheta + toques por elemento ── */
     @keyframes op-crit-vig{ 0%,100%{ opacity:0.7; } 50%{ opacity:1; } }
     .op-crit-energia{ animation:op-card-in 0.3s ease, op-arc 1.2s ease-in-out infinite; }
-    @keyframes op-arc{ 0%,100%{ box-shadow:0 0 60px var(--el-glow), inset 0 0 50px rgba(0,0,0,0.55); } 50%{ box-shadow:0 0 95px var(--el-glow), 0 0 26px #fff, inset 0 0 50px rgba(0,0,0,0.55); } }
+    @keyframes op-arc{ 0%,100%{ box-shadow:0 0 60px var(--el-glow), inset 0 0 50px rgba(0,0,0,0.38); } 50%{ box-shadow:0 0 95px var(--el-glow), 0 0 26px #fff, inset 0 0 50px rgba(0,0,0,0.38); } }
     .op-crit-medo{ animation:op-card-in 0.3s ease, op-medo-glitch 2.6s steps(1) infinite; }
     @keyframes op-medo-glitch{ 0%,90%,100%{ transform:translate(0,0); } 92%{ transform:translate(-2px,1px); } 95%{ transform:translate(2px,-1px); } 97%{ transform:translate(-1px,0); } }
     .op-drop{ position:absolute; top:0; width:3px; height:13px; border-radius:2px; background:#cc0000; opacity:0.6; animation:op-drop-fall linear infinite; }
@@ -161,12 +172,14 @@ export const OrdemSheetStyles = () => (
     /* ── ELEMENT SELECTION + TRANSITION ── */
     .op-el-veil{ position:fixed; inset:0; z-index:200; background:#020205; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:20px; overflow:auto; }
     .op-el-title{ font-family:var(--font-display,'Cinzel Decorative',serif); font-size:clamp(26px,5vw,48px); color:var(--gold2); text-align:center; animation:op-flicker 3.4s ease-in-out infinite; text-shadow:0 0 30px rgba(201,168,76,0.4); }
-    .op-el-card{ border:1px solid var(--border2); border-radius:6px; padding:16px; cursor:pointer; background:rgba(0,0,0,0.5); transition:all 0.25s; position:relative; overflow:hidden; }
+    .op-el-card{ border:1px solid var(--border2); border-radius:6px; padding:16px; cursor:pointer; background:rgba(0,0,0,0.32); transition:all 0.25s; position:relative; overflow:hidden; }
     .op-el-card:hover{ transform:translateY(-3px); }
     .op-el-particle{ position:absolute; width:3px; height:3px; border-radius:50%; opacity:0.6; animation:op-particle linear infinite; }
     @keyframes op-particle{ from{ transform:translateY(0); opacity:0; } 10%{ opacity:0.7; } to{ transform:translateY(-120px); opacity:0; } }
     .op-el-transition{ position:fixed; inset:0; z-index:210; background:#000; display:flex; align-items:center; justify-content:center; animation:op-el-fade 1.5s ease forwards; }
-    @keyframes op-el-fade{ 0%{ background:#000; } 45%{ background:#000; } 100%{ background:var(--el-deep,#07070d); } }
+    /* spec 0023: o piso subiu de #000 junto com --el-deep — com o fundo grafite,
+       partir do preto puro virava um piscar visível na troca de elemento. */
+    @keyframes op-el-fade{ 0%{ background:#0a0a10; } 45%{ background:#0a0a10; } 100%{ background:var(--el-deep,#14141c); } }
     .op-el-erupt{ animation:op-erupt 1.5s cubic-bezier(.2,.6,.2,1) forwards; }
     @keyframes op-erupt{ 0%{ transform:scale(0) rotate(-30deg); opacity:0; } 30%{ opacity:1; } 60%{ transform:scale(1.4) rotate(8deg); } 100%{ transform:scale(8) rotate(0); opacity:0; } }
 
@@ -174,17 +187,21 @@ export const OrdemSheetStyles = () => (
     .op-mobile-secnav{ display:none; }
     .op-mobile-secbtn{ flex:1; padding:11px 8px; font-family:var(--font-title,'Cinzel',serif); font-size:11px; font-weight:600;
       letter-spacing:0.07em; text-transform:uppercase; background:none; border:none; border-bottom:2px solid transparent;
-      color:var(--muted2); cursor:pointer; white-space:nowrap; min-height:44px; -webkit-tap-highlight-color:transparent; transition:color 0.15s; }
-    .op-mobile-secbtn.active{ color:var(--el-glow); border-bottom-color:var(--el-accent); }
+      color:var(--muted2); cursor:pointer; white-space:nowrap; min-height:44px; -webkit-tap-highlight-color:transparent; transition:color 0.15s;
+      position:relative; z-index:1; }
+    /* Sublinhado do ativo = pílula deslizante (spec 0022); aqui só a cor do texto. */
+    .op-mobile-secbtn.active{ color:var(--el-glow); }
     .op-mobile-secbtn:active{ background:rgba(255,255,255,0.04); }
 
     /* full-viewport fill + independent column scroll (desktop) */
     .op-sheet-grid{ display:grid; grid-template-columns:280px minmax(0,420px) minmax(0,1fr); gap:14px; align-items:start; }
     @media(min-width:769px){
       .op-sheet.op-fill{ flex:1 1 auto; min-height:0; height:100%; display:flex; flex-direction:column; overflow:hidden; }
-      .op-sheet.op-fill .op-sheet-grid{ flex:1; min-height:0; align-items:stretch; }
+      .op-sheet.op-fill .op-sheet-grid{ flex:1; min-height:0; align-items:stretch; grid-template-rows:minmax(0,1fr); }
       .op-col{ min-height:0; overflow-y:auto; padding-right:4px; }
-      .op-col-panel{ min-height:0; max-height:100%; }
+      /* o painel de perícias encolhe até o conteúdo (sem vão morto) e só então
+         vira scroll ao bater no teto da linha do grid */
+      .op-col-panel{ min-height:0; max-height:100%; align-self:start; }
       .op-col::-webkit-scrollbar,.op-col-rows::-webkit-scrollbar{ width:5px; }
       .op-col::-webkit-scrollbar-thumb,.op-col-rows::-webkit-scrollbar-thumb{ background:var(--gold3); border-radius:2px; }
     }
@@ -195,7 +212,7 @@ export const OrdemSheetStyles = () => (
       .op-col,.op-col-panel,.op-col-rows{ overflow:visible; max-height:none; }
 
       /* Section switcher */
-      .op-mobile-secnav{ display:flex; border-top:1px solid var(--border2); margin:8px -0px 0; }
+      .op-mobile-secnav{ display:flex; border-top:1px solid var(--border2); margin:8px -0px 0; position:relative; }
       .op-mobile-hidden{ display:none !important; }
 
       /* Header */
@@ -272,7 +289,7 @@ export const OrdemSheetStyles = () => (
     .op-drawer-overlay{ position:fixed; inset:0; z-index:300; background:rgba(2,2,6,0.62); backdrop-filter:blur(2px); animation:op-fade-in 0.25s ease; }
     @keyframes op-fade-in{ from{ opacity:0; } to{ opacity:1; } }
     .op-roll-drawer{ position:fixed; top:0; right:0; height:100vh; width:min(380px,92vw); z-index:301; background:#0a0a0f; border-left:1px solid var(--el-border);
-      box-shadow:-12px 0 40px rgba(0,0,0,0.6); display:flex; flex-direction:column; animation:op-drawer-in 0.3s cubic-bezier(.2,.7,.2,1); }
+      box-shadow:-12px 0 40px rgba(0,0,0,0.42); display:flex; flex-direction:column; animation:op-drawer-in 0.3s cubic-bezier(.2,.7,.2,1); }
     @keyframes op-drawer-in{ from{ transform:translateX(100%); } to{ transform:translateX(0); } }
     .op-roll-drawer-head{ flex-shrink:0; padding:16px 18px 12px; border-bottom:1px solid var(--border2); display:flex; align-items:center; justify-content:space-between; }
     .op-roll-drawer-body{ flex:1; min-height:0; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:14px; }

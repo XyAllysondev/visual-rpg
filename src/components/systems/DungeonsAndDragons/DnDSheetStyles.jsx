@@ -11,8 +11,8 @@ export const DnDSheetStyles = () => (
       --gold-line: rgba(201,168,76,0.28);
       --cream:     #ede0c4;
       --cream-dim: #9a8a74;
-      --ink:       #0d0a14;
-      --stone:     #100d1a;
+      --ink:       #1a1722;
+      --stone:     #1e1a2a;
       --parch-bg:  rgba(210,185,140,0.06);
       --accent:    var(--dnd-accent, #c9a84c);
       --glow:      var(--dnd-glow,   #f0d278);
@@ -26,7 +26,7 @@ export const DnDSheetStyles = () => (
       background:
         radial-gradient(ellipse 80% 60% at 50% -10%, rgba(140,100,40,0.08) 0%, transparent 70%),
         radial-gradient(ellipse 60% 50% at 80% 110%, rgba(80,40,120,0.07) 0%, transparent 70%),
-        linear-gradient(180deg, #06040b 0%, #0c0a14 60%, #060409 100%);
+        linear-gradient(180deg, #141019 0%, #1a1722 60%, #131017 100%);
       min-height: 100%;
     }
     /* stone noise */
@@ -46,7 +46,7 @@ export const DnDSheetStyles = () => (
        HEADER / BANNER
     ══════════════════════════════════════════════════ */
     .dnd-banner {
-      background:linear-gradient(180deg, rgba(6,4,11,0.98) 0%, rgba(10,8,18,0.95) 100%);
+      background:linear-gradient(180deg, rgba(20,16,25,0.98) 0%, rgba(26,23,34,0.95) 100%);
       border-bottom:1px solid var(--gold-line);
       position:relative; overflow:hidden;
     }
@@ -206,10 +206,12 @@ export const DnDSheetStyles = () => (
     /* ══════════════════════════════════════════════════
        TABS — illuminated book tabs
     ══════════════════════════════════════════════════ */
+    /* O realce do ativo é a pílula deslizante (spec 0022): fundo, sublinhado e a
+       linha dourada do topo vivem no <SlidingTabPill>; o botão só muda cor/peso. */
     .dnd-tabs {
       display:flex; overflow-x:auto; scrollbar-width:none; gap:1px;
       border-bottom:1px solid var(--gold-line);
-      background:rgba(6,4,11,0.95);
+      background:rgba(6,4,11,0.95); position:relative;
     }
     .dnd-tabs::-webkit-scrollbar{display:none}
     .dnd-tab {
@@ -217,16 +219,11 @@ export const DnDSheetStyles = () => (
       font-family:'Cinzel',serif; font-size:10px; font-weight:600;
       letter-spacing:0.14em; text-transform:uppercase; white-space:nowrap;
       background:transparent; border:none; border-bottom:2px solid transparent;
-      color:var(--cream-dim); position:relative; transition:all 0.18s;
+      color:var(--cream-dim); position:relative; z-index:1; transition:color 0.18s;
     }
     .dnd-tab:hover { color:var(--cream); background:rgba(201,168,76,0.04); }
     .dnd-tab.on {
-      color:var(--gold-hi); background:rgba(201,168,76,0.08);
-      border-bottom:2px solid var(--gold); font-weight:700;
-    }
-    .dnd-tab.on::before {
-      content:""; position:absolute; top:0; left:0; right:0; height:1px;
-      background:linear-gradient(90deg,transparent,var(--gold-hi),transparent);
+      color:var(--gold-hi); font-weight:700;
     }
 
     /* ══════════════════════════════════════════════════

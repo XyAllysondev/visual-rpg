@@ -69,12 +69,12 @@ export const tSubtext = {
 
 /* shared modal + form styling for all OP tabs */
 export const overlayS = {
-  position: "fixed", inset: 0, zIndex: 120, background: "rgba(3,3,7,0.88)",
+  position: "fixed", inset: 0, zIndex: 120, background: "rgba(8,8,14,0.82)",
   backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
 };
 export const modalS = {
   width: "min(620px,100%)", maxHeight: "88vh", overflow: "auto", padding: 22,
-  background: "#0d0d14", border: "1px solid var(--el-border)",
+  background: "var(--card2,#2c2c39)", border: "1px solid var(--el-border)",
   boxShadow: "0 0 40px var(--el-glow)", borderRadius: 8,
 };
 export const modalTitle = {
@@ -86,8 +86,8 @@ export const fieldLabel = {
 };
 export const inputS = {
   width: "100%", padding: "8px 12px",
-  background: "rgba(255,255,255,0.05)",
-  border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6,
+  background: "rgba(255,255,255,0.06)",
+  border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6,
   color: "rgba(232,228,217,0.9)",
   fontFamily: FONT.ui, fontSize: 16, outline: "none", // 16px evita o zoom automático do iOS ao focar
   boxSizing: "border-box",

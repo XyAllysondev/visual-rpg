@@ -113,3 +113,79 @@ export function hitFogShape(shapes, x, y) {
   }
   return null;
 }
+
+/* ───────────── Cortar / Recobrir e grupos (doc Owlbear /docs/fog) ─────────────
+ *
+ * O fluxo de encontro do Owlbear é: pré-desenhar a névoa de todas as salas ANTES da sessão
+ * e, conforme os jogadores entram, alternar cada forma entre coberta e cortada. Aqui isso é
+ * virar o `op` da forma que já existe ('add' cobre, 'cut' revela) — a geometria não muda.
+ *
+ * `groupId` implementa o Join: formas do mesmo grupo alternam JUNTAS. É para o caso do
+ * salão com reentrâncias, onde revelar forma por forma seria tedioso. (A doc mostra que o
+ * propósito do Join é agrupar para o Cut valer de uma vez — não é união visual.) */
+
+let _grp = 0;
+export const newGroupId = () => `g_${Date.now()}_${(_grp++).toString(36)}`;
+
+/* Expande uma seleção de ids para incluir todo o grupo de cada forma tocada. */
+export function expandGroups(shapes, ids) {
+  const picked = new Set(ids || []);
+  const groups = new Set();
+  for (const s of shapes || []) if (picked.has(s.id) && s.groupId) groups.add(s.groupId);
+  if (!groups.size) return picked;
+  const out = new Set(picked);
+  for (const s of shapes) if (s.groupId && groups.has(s.groupId)) out.add(s.id);
+  return out;
+}
+
+/* Alterna cobrir↔cortar. Duas decisões que importam:
+ * 1) Seleção mista (umas cobertas, outras cortadas) vira TODA cortada — revelar é a
+ *    intenção dominante de quem clicou.
+ * 2) As formas tocadas vão para o FIM do array. A mask é sequencial, então um `cut` só
+ *    revela o que foi pintado antes dele: sem subir para o topo, cortar uma sala que um
+ *    `add` posterior cobre não faria nada visível. */
+export function toggleCut(shapes, ids) {
+  const list = shapes || [];
+  const target = expandGroups(list, ids);
+  if (!target.size) return list;
+  const anyCovered = list.some(s => target.has(s.id) && s.op !== 'cut');
+  const op = anyCovered ? 'cut' : 'add';
+  const touched = [], rest = [];
+  for (const s of list) (target.has(s.id) ? touched : rest).push(s);
+  if (!touched.length) return list;
+  return [...rest, ...touched.map(s => (s.op === op ? s : { ...s, op }))];
+}
+
+/* Join: dá um groupId comum às formas selecionadas (mínimo 2 para fazer sentido). */
+export function joinShapes(shapes, ids, groupId = newGroupId()) {
+  const list = shapes || [];
+  const target = expandGroups(list, ids);
+  if (target.size < 2) return list;
+  return list.map(s => (target.has(s.id) ? { ...s, groupId } : s));
+}
+
+/* Desfaz o Join das formas selecionadas. */
+export function splitShapes(shapes, ids) {
+  const list = shapes || [];
+  const target = expandGroups(list, ids);
+  let changed = false;
+  const out = list.map(s => {
+    if (!target.has(s.id) || !s.groupId) return s;
+    changed = true;
+    const { groupId: _g, ...rest } = s;
+    return rest;
+  });
+  return changed ? out : list;
+}
+
+/* Cor da névoa (Fog Style do Owlbear) → rgba com a opacidade do papel de quem olha.
+ * Aceita hex #rgb/#rrggbb; qualquer outra coisa cai no preto. */
+export function fogFill(color, alpha) {
+  const hex = typeof color === 'string' ? color.trim() : '';
+  const m3 = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(hex);
+  const m6 = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  let r = 0, g = 0, b = 0;
+  if (m6) { r = parseInt(m6[1], 16); g = parseInt(m6[2], 16); b = parseInt(m6[3], 16); }
+  else if (m3) { r = parseInt(m3[1] + m3[1], 16); g = parseInt(m3[2] + m3[2], 16); b = parseInt(m3[3] + m3[3], 16); }
+  return `rgba(${r},${g},${b},${alpha})`;
+}

@@ -1,18 +1,24 @@
-import { cellCenterSnap, layerZIndex, collectOrphanImageIds } from '../mapHelpers';
+import { layerZIndex, collectOrphanImageIds, gridZIndex, fogZIndex, overlayZIndex } from '../mapHelpers';
+import { cellCenter } from '../grid';
 
-describe('cellCenterSnap (AC-9)', () => {
-  it('snaps to cell CENTER, not to the grid intersection', () => {
+/* O snap ao centro (AC-9 da spec 0019) migrou de `mapHelpers.cellCenterSnap` para
+ * `grid.cellCenter`, que é offset-aware e suporta hex. O AC continua coberto aqui para
+ * manter a rastreabilidade, e o grid.test.js cobre offset/hex em profundidade. */
+describe('snap ao centro da célula (AC-9, agora via grid.js)', () => {
+  const sc = { grid: { type: 'square', size: 70 } };
+
+  it('gruda no CENTRO da célula, não na interseção da grade', () => {
     // gs=70 → centros em 35, 105, 175… (nunca em múltiplos de 70)
-    expect(cellCenterSnap(10, 10, 70)).toEqual({ x: 35, y: 35 });
-    expect(cellCenterSnap(69, 1, 70)).toEqual({ x: 35, y: 35 });
-    expect(cellCenterSnap(71, 71, 70)).toEqual({ x: 105, y: 105 });
+    expect(cellCenter(sc, 10, 10)).toEqual({ x: 35, y: 35 });
+    expect(cellCenter(sc, 69, 1)).toEqual({ x: 35, y: 35 });
+    expect(cellCenter(sc, 71, 71)).toEqual({ x: 105, y: 105 });
   });
-  it('is idempotente sobre um centro de célula', () => {
-    const c = cellCenterSnap(200, 200, 70);
-    expect(cellCenterSnap(c.x, c.y, 70)).toEqual(c);
+  it('é idempotente sobre um centro de célula', () => {
+    const c = cellCenter(sc, 200, 200);
+    expect(cellCenter(sc, c.x, c.y)).toEqual(c);
   });
   it('tolera gridSize inválido (fallback 70)', () => {
-    expect(cellCenterSnap(10, 10, 0)).toEqual({ x: 35, y: 35 });
+    expect(cellCenter({ grid: { size: 0 } }, 10, 10)).toEqual({ x: 35, y: 35 });
   });
 });
 
@@ -48,5 +54,45 @@ describe('collectOrphanImageIds (AC-11)', () => {
   it('retorna vazio quando tudo é usado ou store vazio', () => {
     expect(collectOrphanImageIds(scenes, {})).toEqual([]);
     expect(collectOrphanImageIds([], { a: 1 })).toEqual(['a']);
+  });
+});
+
+/* Ordem da pilha de render. Isto existe porque grade e névoa estavam com z-index FIXO (6 e
+ * 200) enquanto os elementos usam layerZIndex (~100k a ~700k): a névoa ficava abaixo de todo
+ * token e um inimigo em sala coberta aparecia para o jogador. O teste trava a ordem. */
+describe('pilha de render (grade / névoa / overlays)', () => {
+  const LAYERS = 7; // DEFAULT_LAYERS_V2
+  const MAP = 0, DRAWING = 1, TOP = LAYERS - 1;
+  const maxOf = idx => layerZIndex(idx, 49999);
+  const minOf = idx => layerZIndex(idx, -49999);
+
+  it('a grade fica ACIMA da camada Mapa (senão a imagem do mapa cobre a grade)', () => {
+    expect(gridZIndex()).toBeGreaterThan(maxOf(MAP));
+  });
+
+  it('e ABAIXO da camada Desenho (o desenho é o marcador sobre a mesa)', () => {
+    expect(gridZIndex()).toBeLessThan(minOf(DRAWING));
+  });
+
+  it('a névoa fica acima de TODAS as camadas — inclusive tokens', () => {
+    expect(fogZIndex(LAYERS)).toBeGreaterThan(maxOf(TOP));
+    for (let i = 0; i < LAYERS; i++) {
+      expect(fogZIndex(LAYERS)).toBeGreaterThan(maxOf(i));
+    }
+  });
+
+  it('régua, pings e editor de texto ficam acima da névoa', () => {
+    expect(overlayZIndex(LAYERS)).toBeGreaterThan(fogZIndex(LAYERS));
+  });
+
+  it('a névoa acompanha o número de camadas (camada nova não passa por cima dela)', () => {
+    const oito = 8;
+    expect(fogZIndex(oito)).toBeGreaterThan(maxOf(oito - 1));
+  });
+
+  it('layerCount inválido não colapsa a névoa para dentro dos elementos', () => {
+    expect(fogZIndex(0)).toBeGreaterThan(maxOf(0));
+    expect(fogZIndex(undefined)).toBeGreaterThan(maxOf(0));
+    expect(fogZIndex(NaN)).toBeGreaterThan(maxOf(0));
   });
 });

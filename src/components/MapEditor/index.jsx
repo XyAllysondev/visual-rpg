@@ -9,15 +9,23 @@ import {
 } from './sync/campaignSync2.js';
 import { byId } from './sync/elementDiff.js';
 import { makeLivePublisher, subscribeLive, isFresh } from './sync/live.js';
-import { canMove } from './permissions.js';
+import { canMove, canCreate, nextPerm, PERM_LABELS } from './permissions.js';
 import { anchorOf, findAttachTarget, subtreeIds, wouldCycle, dupSubtree } from './attach.js';
-import { strokeToPoly, pruneContained, hitFogShape } from './fog.js';
+import { strokeToPoly, pruneContained, hitFogShape, toggleCut, joinShapes, splitShapes, expandGroups } from './fog.js';
 import FogLayer from './FogLayer.jsx';
 import { newElementId } from './schema.js';
-import { cellCenterSnap, layerZIndex, collectOrphanImageIds } from './mapHelpers.js';
+import { layerZIndex, collectOrphanImageIds, gridZIndex, fogZIndex, overlayZIndex } from './mapHelpers.js';
+import {
+  cellSize, cellCenter, snapPoint, worldToCell, gridType, gridOffset, isHex, gridPattern,
+  measure as measureGrid, measurementMode, measurementsFor, gridScale,
+  cellsAcross, cellSizeFromColumns, cellSizeFromRows, parseGridFromFilename, parseScale, formatScale,
+  GRID_TYPES, GRID_TYPE_LABELS, MEASUREMENT_LABELS,
+} from './grid.js';
 import { MapIcon } from './icons.jsx';
 import PingsOverlay from './PingsOverlay.jsx';
 import AssetDock from './AssetDock.jsx';
+import { TextItem, TextEditorOverlay } from './TextItem.jsx';
+import { DEFAULT_TEXT_STYLE, plainText, previewLabel } from './richText.js';
 import {
   subscribeAssets, saveAsset, deleteAsset, ASSET_SOFT_CAP,
   layerForAssetType, assetTypeForElement, assetPlacesAsToken, assetPlacesAsNote,
@@ -30,10 +38,14 @@ const TOOLS = [
   { id: 'fog',     label: 'Névoa — cobrir (F)', icon: 'fog' },
   { id: 'reveal',  label: 'Revelar névoa (R)',  icon: 'reveal' },
   { id: 'note',    label: 'Nota (N)',       icon: 'note' },
+  { id: 'text',    label: 'Texto (E)',      icon: 'text' },
   { id: 'measure', label: 'Medir (M)',      icon: 'measure' },
   { id: 'pointer', label: 'Apontar',        icon: 'pointer' },
 ];
-const VIEWER_TOOLS = ['select', 'measure', 'pointer'];
+const VIEWER_TOOLS = ['select', 'measure', 'pointer']; // sempre liberadas ao jogador
+/* Ferramenta → camada em que ela cria. O jogador ganha a ferramenta quando o `create`
+ * daquela camada está ligado (doc /docs/permissions). Névoa/revelar são só do mestre. */
+const TOOL_LAYER = { token: 'layer-character', draw: 'layer-drawing', note: 'layer-note', text: 'layer-note' };
 const COLORS = ['#4ade80','#60a5fa','#f87171','#fbbf24','#c084fc','#f472b6','#34d399','#fb923c','#e2e8f0','#a3e635'];
 
 /* Condições de token (spec 0008 AC-4) e espessuras de desenho (AC-1). */
@@ -44,13 +56,34 @@ const CONDICOES = [
 ];
 const DRAW_WIDTHS = [2, 4, 7];
 
-/* Shape de um elemento drawing — points normalizados ao bbox; rect/círculo usam só w/h. */
+/* Estilos de traço do Owlbear (/docs/drawing → Stroke Style). O dash escala com a
+ * espessura, senão em traço grosso o tracejado vira quase contínuo. */
+const DASH = {
+  solid:  () => undefined,
+  dashed: (w) => `${w * 3},${w * 2}`,
+  dotted: (w) => `${Math.max(0.5, w * 0.1)},${w * 1.8}`,
+};
+export const STROKE_STYLES = Object.keys(DASH);
+
+/* Shape de um elemento drawing — points normalizados ao bbox; rect/círculo usam só w/h.
+ * `fill`/`fillOpacity` eram hardcoded em 'none': desenho servia para contorno, nunca para
+ * área de efeito (a doc do Owlbear trata preenchimento como controle de primeira classe). */
 function DrawingShape({ d }) {
-  const p = { fill: 'none', stroke: d.color, strokeWidth: d.strokeWidth, strokeLinecap: 'round', strokeLinejoin: 'round' };
-  if (d.shape === 'line') { const a = d.points[0], b = d.points[1] || a; return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...p} />; }
-  if (d.shape === 'rect') return <rect x={d.strokeWidth / 2} y={d.strokeWidth / 2} width={Math.max(1, d.w - d.strokeWidth)} height={Math.max(1, d.h - d.strokeWidth)} {...p} />;
-  if (d.shape === 'circle') return <ellipse cx={d.w / 2} cy={d.h / 2} rx={Math.max(1, (d.w - d.strokeWidth) / 2)} ry={Math.max(1, (d.h - d.strokeWidth) / 2)} {...p} />;
-  return <polyline points={d.points.map(pt => `${pt.x},${pt.y}`).join(' ')} {...p} />;
+  const sw = d.strokeWidth;
+  const p = {
+    fill: d.fill && d.fill !== 'none' ? d.fill : 'none',
+    fillOpacity: d.fill && d.fill !== 'none' ? (d.fillOpacity ?? 0.25) : undefined,
+    stroke: d.color, strokeWidth: sw, strokeLinecap: 'round', strokeLinejoin: 'round',
+    strokeDasharray: (DASH[d.strokeStyle] || DASH.solid)(sw),
+  };
+  if (d.shape === 'line') { const a = d.points[0], b = d.points[1] || a; return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...p} fill="none" fillOpacity={undefined} />; }
+  if (d.shape === 'rect') return <rect x={sw / 2} y={sw / 2} width={Math.max(1, d.w - sw)} height={Math.max(1, d.h - sw)} {...p} />;
+  if (d.shape === 'circle') return <ellipse cx={d.w / 2} cy={d.h / 2} rx={Math.max(1, (d.w - sw) / 2)} ry={Math.max(1, (d.h - sw) / 2)} {...p} />;
+  // Traço livre fechado quando tem preenchimento — polyline aberta não pinta área direito.
+  const pts = d.points.map(pt => `${pt.x},${pt.y}`).join(' ');
+  return p.fill !== 'none'
+    ? <polygon points={pts} {...p} />
+    : <polyline points={pts} {...p} />;
 }
 
 export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
@@ -83,6 +116,9 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
   // Clima: derivado de scene.weather (ver abaixo) — persistido via PATCH_SCENE p/ sincronizar a mesa.
   const [showLeft,        setShowLeft]        = useState(true);
   const [snapGrid,        setSnapGrid]        = useState(true);   // spec 0019: snap ligado por padrão
+  const [gridPanel,       setGridPanel]       = useState(false);  // painel de Controles de Grade
+  const [textEdit,        setTextEdit]        = useState(null);   // id do texto em edição in-place
+  const [casting,         setCasting]         = useState(false);  // transmissão p/ segunda tela ativa
   const [flash,           setFlash]           = useState(null);  // aviso temporário (camada travada, quota…)
   const [boxSel,          setBoxSel]          = useState(null);
   const [layerPickerOpen, setLayerPickerOpen] = useState(false);
@@ -91,6 +127,9 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
   const [drawMode,   setDrawMode]   = useState('free'); // free | line | rect | circle
   const [drawColor,  setDrawColor]  = useState('#f87171');
   const [drawWidth,  setDrawWidth]  = useState(4);
+  const [drawFill,        setDrawFill]        = useState('none');   // preenchimento (área de efeito)
+  const [drawFillOpacity, setDrawFillOpacity] = useState(0.25);
+  const [drawStroke,      setDrawStroke]      = useState('solid');  // solid | dashed | dotted
   const [drawLive,   setDrawLive]   = useState(null);   // preview do traço (coords de mundo)
   const [tokSize,    setTokSize]    = useState(1);      // multiplicador da célula (P/M/G/E)
   const [tokImageId, setTokImageId] = useState(null);   // imagem aplicada aos próximos tokens
@@ -109,7 +148,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
   /* spec 0012 — fog avançada */
   const [fogShape,      setFogShape]      = useState('rect'); // rect|circle|poly|free
   const [fogEdit,       setFogEdit]       = useState(false);  // sub-modo edição 🧽
-  const [fogSel,        setFogSel]        = useState(null);   // id da shape de fog selecionada
+  const [fogSel,        setFogSel]        = useState(() => new Set()); // ids das shapes de fog selecionadas
   const [fogDraft,      setFogDraft]      = useState(null);   // preview de poly/free pendente
   const [previewPlayer, setPreviewPlayer] = useState(false);  // 👁 visão do jogador (AC-5)
   const fogPolyRef = useRef(null);  // polígono clique-a-clique pendente
@@ -141,16 +180,30 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
   const flashTimerRef    = useRef(null);
   const stateRef         = useRef({});
   const dragRafRef       = useRef(0); // coalesce dos re-renders de arraste/resize/rotate (1 por frame)
+  const castRef          = useRef(null); // conexão/janela da transmissão ativa
+  /* Ctrl/Cmd segurado desliga o snap SÓ durante aquele gesto (docs /docs/images e /docs/fog).
+   * É o que permite encostar um token fora da grade sem ter que desligar o snap da cena. */
+  const modKeyRef        = useRef(false);
 
   const scene    = scenes.find(s => s.id === activeScene) || scenes[0];
   const elements = scene.elements || [];
-  const gridSize = scene.grid?.size || scene.gridSize || 70;
+  const gridSize = cellSize(scene); // fonte única: grid.js valida/normaliza
   const bgSize   = scene.bgSize   || { w: 3000, h: 2000 };
   const layers   = scene.layers   || DEFAULT_LAYERS_V2;
   const layerOrder = Object.fromEntries(layers.map((l, i) => [l.id, i]));
   const weather  = scene.weather ?? null; // clima agora vive na cena (sincroniza p/ a mesa)
   const mapW     = bgSize.w;
   const mapH     = bgSize.h;
+  /* Ferramentas do jogador saem das permissões de criação da cena. Na prática hoje isto
+   * devolve sempre VIEWER_TOOLS, porque nenhuma UI liga `create` — foi revertida de
+   * propósito enquanto o jogador não tiver caminho de escrita (ver comentário no painel de
+   * camadas). A lógica fica pronta para quando esse caminho existir.
+   * Declarado aqui em cima porque um efeito logo abaixo usa `allowedKey` como dependência,
+   * que é avaliada durante o render. */
+  const allowedTools = viewer
+    ? TOOLS.filter(t => VIEWER_TOOLS.includes(t.id) || (TOOL_LAYER[t.id] && canCreate(scene, TOOL_LAYER[t.id], uid, false)))
+    : TOOLS;
+  const allowedKey = allowedTools.map(t => t.id).join(',');
 
   stateRef.current = { pan, scale, scene, tool, selIds, elements, gridSize, snapGrid, imageStore, fogShape, fogEdit, fogSel };
 
@@ -162,15 +215,17 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
     const r = containerRef.current.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
+  /* Snap de vértice (interseção da grade). Delega ao grid.js, então respeita o offset de
+   * alinhamento e o tipo de grid — em hex não há interseção retangular e cai no centro. */
+  const snapOff = () => !stateRef.current.snapGrid || modKeyRef.current;
   function snap(x, y) {
-    if (!stateRef.current.snapGrid) return { x, y };
-    const gs = stateRef.current.gridSize;
-    return { x: Math.round(x / gs) * gs, y: Math.round(y / gs) * gs };
+    if (snapOff()) return { x, y };
+    return snapPoint(stateRef.current.scene, x, y);
   }
   /* Snap de token: centro da célula (não a interseção) — spec 0019 AC-9. */
   function snapToken(x, y) {
-    if (!stateRef.current.snapGrid) return { x, y };
-    return cellCenterSnap(x, y, stateRef.current.gridSize);
+    if (snapOff()) return { x, y };
+    return cellCenter(stateRef.current.scene, x, y);
   }
   /* Aviso temporário no canto (camada travada, quota de armazenamento…). */
   function showFlash(msg) {
@@ -214,11 +269,19 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
     let shape;
     if (drag.kind === 'circle') {
       shape = { id: drag.shapeId, op, type: 'circle', cx: Math.round(drag.wx), cy: Math.round(drag.wy), r: Math.max(6, Math.round(Math.hypot(wx - drag.wx, wy - drag.wy))) };
+    } else if (isHex(sc)) {
+      // "Retângulo por células" não tem sentido em favo de mel: cobre a área arrastada crua.
+      const x1 = Math.min(drag.wx, wx), y1 = Math.min(drag.wy, wy);
+      shape = { id: drag.shapeId, op, type: 'rect', x: Math.round(x1), y: Math.round(y1),
+        w: Math.max(6, Math.round(Math.abs(wx - drag.wx))), h: Math.max(6, Math.round(Math.abs(wy - drag.wy))) };
     } else {
-      const gs = stateRef.current.gridSize;
-      const c1 = Math.floor(Math.min(drag.wx, wx) / gs), c2 = Math.floor(Math.max(drag.wx, wx) / gs);
-      const r1 = Math.floor(Math.min(drag.wy, wy) / gs), r2 = Math.floor(Math.max(drag.wy, wy) / gs);
-      shape = { id: drag.shapeId, op, type: 'rect', x: c1 * gs, y: r1 * gs, w: (c2 - c1 + 1) * gs, h: (r2 - r1 + 1) * gs };
+      // Alinha às células via grid.js, então o offset de alinhamento é respeitado.
+      const gs = cellSize(sc), o = gridOffset(sc);
+      const a = worldToCell(sc, Math.min(drag.wx, wx), Math.min(drag.wy, wy));
+      const b = worldToCell(sc, Math.max(drag.wx, wx), Math.max(drag.wy, wy));
+      shape = { id: drag.shapeId, op, type: 'rect',
+        x: a.c * gs + o.x, y: a.r * gs + o.y,
+        w: (b.c - a.c + 1) * gs, h: (b.r - a.r + 1) * gs };
     }
     dispatch({ type: 'PATCH_SCENE', sceneId: sc.id, coalesceKey: drag.shapeId, patch: {
       fog: { v: 2, fillAll: !!sc.fog?.fillAll, shapes: [...drag.base, shape] },
@@ -242,10 +305,47 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
     fogPolyRef.current = null; setFogDraft(null);
     if (pend) commitFogShape(pend.op, 'poly', pend.pts.map(p => ({ x: Math.round(p.x), y: Math.round(p.y) })));
   }
-  function removeFogShape(id) {
+  /* Cortar/Recobrir a névoa selecionada (doc Owlbear /docs/fog): o fluxo de encontro é
+   * pré-desenhar as salas e ir alternando durante a sessão. Coalesce por seleção para o
+   * undo não virar uma entrada por sala quando você alterna várias de uma vez. */
+  function toggleFogCut() {
     const sc = stateRef.current.scene;
-    upScene({ fog: { ...sc.fog, shapes: (sc.fog?.shapes || []).filter(s => s.id !== id) } });
-    setFogSel(null);
+    const sel = stateRef.current.fogSel;
+    if (!sel?.size) return;
+    const shapes = sc.fog?.shapes || [];
+    const next = toggleCut(shapes, [...sel]);
+    if (next === shapes) return;
+    upScene({ fog: { ...sc.fog, shapes: next } });
+  }
+
+  /* Join: as formas passam a alternar juntas (salão com reentrâncias vira uma unidade). */
+  function joinFogShapes() {
+    const sc = stateRef.current.scene;
+    const sel = stateRef.current.fogSel;
+    if (!sel || sel.size < 2) { showFlash('Selecione 2 ou mais formas (Shift+clique) para juntar.'); return; }
+    const shapes = sc.fog?.shapes || [];
+    const next = joinShapes(shapes, [...sel]);
+    if (next === shapes) return;
+    upScene({ fog: { ...sc.fog, shapes: next } });
+    showFlash('Formas juntas — cortar uma agora revela todas.');
+  }
+
+  function splitFogShapes() {
+    const sc = stateRef.current.scene;
+    const sel = stateRef.current.fogSel;
+    if (!sel?.size) return;
+    const shapes = sc.fog?.shapes || [];
+    const next = splitShapes(shapes, [...sel]);
+    if (next === shapes) { showFlash('Nenhuma das formas selecionadas está em grupo.'); return; }
+    upScene({ fog: { ...sc.fog, shapes: next } });
+  }
+
+  function removeFogShape(ids) {
+    const sc = stateRef.current.scene;
+    const shapes = sc.fog?.shapes || [];
+    const kill = expandGroups(shapes, ids instanceof Set ? [...ids] : [ids]);
+    upScene({ fog: { ...sc.fog, shapes: shapes.filter(s => !kill.has(s.id)) } });
+    setFogSel(new Set());
   }
 
   function upScene(patch) { dispatch({ type: 'PATCH_SCENE', sceneId: stateRef.current.scene.id, patch }); }
@@ -254,6 +354,51 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
   function addEl(el)       { dispatch({ type: 'ADD_ELEMENT',    sceneId: stateRef.current.scene.id, element: { ownerId: uid ?? null, parentId: null, z: Date.now(), rotation: 0, ...el } }); }
   function updateEl(id, p) { dispatch({ type: 'UPDATE_ELEMENT', sceneId: stateRef.current.scene.id, id, patch: p }); }
   function deleteEl(id)    { dispatch({ type: 'DELETE_ELEMENT', sceneId: stateRef.current.scene.id, id }); }
+  /* Digitar num texto coalesce numa ÚNICA entrada de undo — sem isso cada tecla vira um
+   * passo e o Ctrl+Z fica inútil (mesmo mecanismo do arrasto de fog, spec 0019 AC-7). */
+  function updateElText(id, text) { dispatch({ type: 'UPDATE_ELEMENT', sceneId: stateRef.current.scene.id, id, patch: { text }, coalesceKey: `text:${id}` }); }
+
+  /* ── TRANSMISSÃO / CASTING (doc Owlbear /docs/casting) ──
+   * Abre a mesa em VISÃO DE JOGADOR numa segunda tela, para mesa presencial. Usa a
+   * Presentation API quando o navegador oferece (Chrome/Edge com tela ESTENDIDA — espelhada
+   * não conta — ou Chromecast) e cai para uma janela comum, que o mestre arrasta para a TV.
+   * A rota /cast força `isMaster={false}`, então a névoa fica opaca na TV. */
+  function openCastWindow(url) {
+    const w = window.open(url, 'nexus-cast', 'width=1280,height=720');
+    if (!w) { showFlash('O navegador bloqueou a janela — libere pop-ups para este site.'); return; }
+    castRef.current = { close: () => { try { w.close(); } catch (e) { /* já fechada */ } } };
+    setCasting(true);
+    showFlash('Transmissão aberta — arraste a janela para a TV e aperte F11.');
+  }
+
+  function startCast() {
+    if (!campaignId) { showFlash('A transmissão existe só em mesa de campanha.'); return; }
+    const url = `${window.location.origin}/cast/${encodeURIComponent(campaignId)}`;
+    const PR = window.PresentationRequest;
+    if (PR) {
+      try {
+        const req = new PR([url]);
+        req.start().then(conn => {
+          castRef.current = { close: () => { try { conn.terminate(); } catch (e) { /* já encerrada */ } } };
+          setCasting(true);
+          showFlash('Transmitindo — a TV mostra a visão do jogador.');
+        }).catch(() => openCastWindow(url)); // usuário cancelou ou não há tela estendida
+        return;
+      } catch (e) { /* navegador tem a API mas recusou — cai na janela */ }
+    }
+    openCastWindow(url);
+  }
+
+  function stopCast() {
+    castRef.current?.close();
+    castRef.current = null;
+    setCasting(false);
+  }
+
+  /* Encerra a transmissão junto com o editor. Sem isto, sair da tela do mapa com a
+   * transmissão ligada deixa a janela/conexão órfã — e o botão de parar some junto com o
+   * componente, então não sobra caminho para fechá-la. */
+  useEffect(() => () => { castRef.current?.close(); castRef.current = null; }, []);
   function deleteEls(ids)  { dispatch({ type: 'DELETE_ELEMENTS', sceneId: stateRef.current.scene.id, ids }); }
 
   // Persistência local (spec 0019 AC-10): a falha de quota NÃO é mais engolida em silêncio —
@@ -413,6 +558,12 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camOn, pan, scale]);
 
+  /* Se o mestre revogar a permissão enquanto o jogador está com a ferramenta na mão, ela
+   * some da barra — sem isto ele continuaria clicando numa ferramenta que não existe mais. */
+  useEffect(() => {
+    if (viewer && !allowedKey.split(',').includes(tool)) setTool('select');
+  }, [viewer, allowedKey, tool]);
+
   /* jogador: segue a câmera do mestre até pan/zoom manual (AC-6) */
   const masterCam = viewer ? lives.find(l => l.master && l.camOn && isFresh(l)) : null;
   useEffect(() => {
@@ -481,6 +632,18 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
         const ck = 'loadbg:' + imageId; // coalesce as 2 dispatches num único passo de undo
         setImageStore(prev => ({ ...prev, [imageId]: dataUrl }));
         dispatch({ type: 'PATCH_SCENE', sceneId: sc.id, coalesceKey: ck, patch: { bgSize: { w, h } } });
+        /* Alinhamento automático pelo nome do arquivo, como no Owlbear: "mapa_49x28.jpg"
+         * significa 49 colunas por 28 linhas, então a célula sai da divisão. */
+        const fromName = parseGridFromFilename(file.name);
+        if (fromName) {
+          const out = cellSizeFromColumns({ w, h }, fromName.columns);
+          if (out && out.size > 0) {
+            dispatch({ type: 'PATCH_SCENE', sceneId: sc.id, coalesceKey: ck, patch: {
+              grid: { ...(sc.grid || {}), size: out.size, offset: { x: 0, y: 0 } },
+            }});
+            showFlash(`Grade detectada no nome do arquivo: ${fromName.columns}×${fromName.rows} células`);
+          }
+        }
         dispatch({ type: 'ADD_ELEMENT', sceneId: sc.id, coalesceKey: ck, element: {
           id: newElementId(), type: 'image', layerId: 'layer-map',
           x: 0, y: 0, w, h, rotation: 0, imageId,
@@ -699,12 +862,39 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
   }
   /* Cria uma nota no ponto (x,y) do mundo pedindo o texto via modal in-app. */
   async function promptNote(x, y) {
-    const res = await askPrompt('Nova nota', [{ key: 'text', label: 'Texto da nota', placeholder: 'Anotação visível no mapa' }]);
+    const res = await askPrompt('Nova nota', [{ key: 'text', label: 'Texto da nota', placeholder: 'Anotação visível no mapa', multiline: true }]);
     const txt = res?.text?.trim();
     if (txt) addEl({ id: newElementId(), type: 'note', layerId: 'layer-note', x, y, text: txt, hidden: false, locked: false, spectre: false });
   }
-  function coverFog() { upScene({ fog: { v: 2, fillAll: true, shapes: [] } }); }
-  function clearFog() { upScene({ fog: { v: 2, fillAll: false, shapes: [] } }); }
+  /* A nota era um beco sem saída: criada, nunca editável — não tinha menu de contexto, o
+   * duplo-clique só pingava e o clique-direito era engolido pelo `onElementDown`. Texto vazio
+   * apaga a nota, senão ela vira um card amarelo em branco impossível de resolver. */
+  async function editNote(id) {
+    const el = stateRef.current.scene.elements?.find(e => e.id === id);
+    if (!el) return;
+    const res = await askPrompt('Editar nota', [{ key: 'text', label: 'Texto da nota', value: el.text || '', multiline: true }]);
+    if (res == null) return;
+    const txt = res.text.trim();
+    if (txt) updateEl(id, { text: txt });
+    else deleteEl(id);
+  }
+  /* "Cobrir tudo" = Fill Fog do Owlbear: liga a névoa infinita e **preserva as formas**.
+   * Antes isto gravava `shapes: []` e apagava a preparação inteira — com o fluxo de
+   * Cortar/Recobrir isso é destrutivo, porque as salas pré-desenhadas SÃO o trabalho. Com as
+   * formas preservadas, uma sala já cortada continua sendo um buraco na névoa infinita, que é
+   * exatamente o exemplo 1 da doc. */
+  function coverFog() {
+    const sc = stateRef.current.scene;
+    upScene({ fog: { ...(sc.fog || { v: 2 }), v: 2, fillAll: true } });
+  }
+  /* "Revelar tudo" também não apaga nada: desliga a névoa infinita e marca toda forma como
+   * cortada. Some tudo da vista do jogador, mas a geometria sobrevive para você recobrir
+   * sala por sala depois. Para apagar de verdade, use o modo edição (Shift+clique, Delete). */
+  function clearFog() {
+    const sc = stateRef.current.scene;
+    const shapes = (sc.fog?.shapes || []).map(s => (s.op === 'cut' ? s : { ...s, op: 'cut' }));
+    upScene({ fog: { ...(sc.fog || { v: 2 }), v: 2, fillAll: false, shapes } });
+  }
   function autoFog() {
     const { scene: sc, gridSize: gs } = stateRef.current;
     const cols = Math.ceil(sc.bgSize.w / gs), rows = Math.ceil(sc.bgSize.h / gs);
@@ -743,11 +933,13 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
     const members = await getCampaignMembers(db, campaignId);
     setAssignMenu({ elId, members });
   }
-  function cyclePerm(layerId) {
+  function cyclePerm(layerId, action = 'update') {
     const { scene: sc } = stateRef.current;
-    const cur = sc.permissions?.[layerId]?.update || 'none';
-    const next = cur === 'none' ? 'owner' : cur === 'owner' ? 'all' : 'none';
-    upScene({ permissions: { ...(sc.permissions || {}), [layerId]: { ...(sc.permissions?.[layerId] || {}), update: next } } });
+    const cur = action === 'create'
+      ? !!sc.permissions?.[layerId]?.create
+      : (sc.permissions?.[layerId]?.[action] || 'none');
+    const next = nextPerm(action, cur);
+    upScene({ permissions: { ...(sc.permissions || {}), [layerId]: { ...(sc.permissions?.[layerId] || {}), [action]: next } } });
   }
   function dupSelected() {
     const { elements: els, selIds: sids, scene: sc } = stateRef.current;
@@ -770,7 +962,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
         if (e.key === 'Enter') { e.preventDefault(); commitFogPoly(); return; }
         if (e.key === 'Escape') { fogPolyRef.current = null; setFogDraft(null); return; }
       }
-      if (stateRef.current.fogSel && (e.key === 'Delete' || e.key === 'Backspace')) {
+      if (stateRef.current.fogSel?.size && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault(); removeFogShape(stateRef.current.fogSel); return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); dispatch({ type: 'UNDO' }); return; }
@@ -788,7 +980,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
       const tag = e.target?.tagName;
       const typing = tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable;
       if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && !viewer) {
-        const hot = { v: 'select', t: 'token', d: 'draw', f: 'fog', r: 'reveal', n: 'note', m: 'measure' }[e.key.toLowerCase()];
+        const hot = { v: 'select', t: 'token', d: 'draw', f: 'fog', r: 'reveal', n: 'note', e: 'text', m: 'measure' }[e.key.toLowerCase()];
         if (hot) { setTool(hot); return; }
         if (e.key.toLowerCase() === 'g') { setShowGrid(g => !g); return; }
       }
@@ -808,6 +1000,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
   }, []); // eslint-disable-line
 
   function onElementDown(e, el) {
+    modKeyRef.current = !!(e.ctrlKey || e.metaKey);
     const { selIds: sids, elements: els, scene: sc } = stateRef.current;
     const lm = {};
     (sc.layers || DEFAULT_LAYERS_V2).forEach(l => { lm[l.id] = l; });
@@ -901,6 +1094,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
   }
 
   function onDown(e) {
+    modKeyRef.current = !!(e.ctrlKey || e.metaKey);
     // Toque: contabiliza o dedo. Ao chegar no 2º, o container assume o gesto de pinch/pan.
     if (e.pointerId != null) {
       pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -930,7 +1124,14 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
       const fs = stateRef.current.fogShape;
       if (stateRef.current.fogEdit) { // sub-modo edição (spec 0012 AC-7)
         const hitS = hitFogShape(stateRef.current.scene.fog?.shapes || [], wp.x, wp.y);
-        setFogSel(hitS?.id || null);
+        // Shift+clique acumula (necessário para o Join); clique simples troca a seleção.
+        setFogSel(prev => {
+          if (!hitS) return e.shiftKey ? prev : new Set();
+          if (!e.shiftKey) return new Set([hitS.id]);
+          const next = new Set(prev);
+          if (next.has(hitS.id)) next.delete(hitS.id); else next.add(hitS.id);
+          return next;
+        });
         return;
       }
       if (fs === 'poly') { // clique-a-clique (AC-2); fecha perto do 1º ponto
@@ -956,16 +1157,23 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
       const sn = snapToken(wp.x, wp.y);
       addEl({ id: newElementId(), type: 'token', layerId: 'layer-character', x: sn.x, y: sn.y, color: tokColor, label: tokLabel || '?', size: Math.max(18, Math.round(stateRef.current.gridSize * tokSize)), imageId: tokImageId, conditions: [], hidden: false, locked: false, spectre: false });
     } else if (t === 'draw') {
-      drawRef.current = { shape: drawMode, color: drawColor, strokeWidth: drawWidth, pts: [{ x: wp.x, y: wp.y }] };
+      drawRef.current = { shape: drawMode, color: drawColor, strokeWidth: drawWidth, fill: drawFill, fillOpacity: drawFillOpacity, strokeStyle: drawStroke, pts: [{ x: wp.x, y: wp.y }] };
       setDrawLive({ ...drawRef.current, pts: [...drawRef.current.pts] });
     } else if (t === 'note') {
       promptNote(wp.x, wp.y);
+    } else if (t === 'text') {
+      // Clicar cria o item e já abre o editor in-place (doc Owlbear /docs/text).
+      const id = newElementId();
+      addEl({ id, type: 'text', layerId: 'layer-note', x: Math.round(wp.x), y: Math.round(wp.y),
+        text: '', ...DEFAULT_TEXT_STYLE, hidden: false, locked: false, spectre: false });
+      setTextEdit(id);
     } else if (t === 'measure') {
       measureRef.current = { x1: wp.x, y1: wp.y }; setMeasureLine({ x1: wp.x, y1: wp.y, x2: wp.x, y2: wp.y });
     }
   }
 
   function onMove(e) {
+    modKeyRef.current = !!(e.ctrlKey || e.metaKey);
     // Toque: atualiza a posição do dedo; se há gesto de 2 dedos, faz zoom+pan e sai.
     if (e.pointerId != null && pointersRef.current.has(e.pointerId)) {
       pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1061,6 +1269,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
   }
 
   function onUp(e) {
+    modKeyRef.current = false; // o override do snap vale só durante o gesto
     // Toque: baixa o dedo e solta a captura. Encerrando o pinch, não retoma ação de 1 dedo
     // (evita salto) — o dedo restante fica ocioso até nova toque.
     if (e.pointerId != null) {
@@ -1130,6 +1339,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
         addEl({
           id: newElementId(), type: 'drawing', layerId: 'layer-drawing', x: minX, y: minY, w, h,
           shape: d.shape, color: d.color, strokeWidth: d.strokeWidth,
+          fill: d.fill || 'none', fillOpacity: d.fillOpacity ?? 0.25, strokeStyle: d.strokeStyle || 'solid',
           points: d.pts.map(p => ({ x: Math.round(p.x - minX), y: Math.round(p.y - minY) })),
           hidden: false, locked: false, spectre: false,
         });
@@ -1199,15 +1409,31 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
     setPan({ x: (r.width - w * ns) / 2, y: (r.height - h * ns) / 2 });
   }
 
-  const measureDist = measureLine
-    ? Math.round(Math.hypot(measureLine.x2 - measureLine.x1, measureLine.y2 - measureLine.y1) / gridSize * 10) / 10
-    : 0;
+  /* Medição pelo modo da cena (xadrez/alternada/euclidiana/manhattan/hex) — antes era
+   * Math.hypot fixo, ignorando `grid.measurement`. */
+  const measured = measureLine
+    ? measureGrid(scene, { x: measureLine.x1, y: measureLine.y1 }, { x: measureLine.x2, y: measureLine.y2 })
+    : null;
+  const measureDist = measured ? measured.cells : 0;
   const fog        = scene.fog || { v: 2, fillAll: false, shapes: [] };
   const asViewer   = viewer || previewPlayer; // spec 0012 AC-5 (preview visão do jogador)
   const gridHalf   = 50000; // world-px padding in each direction for "infinite" grid illusion
-  const gridPatOff = gridHalf % gridSize; // aligns pattern so world (0,0) stays on a grid line
+  /* Tile do pattern conforme o tipo (quadrado ou favo de mel) e fase que traz a origem do
+   * mundo + o offset de alinhamento para cima de uma linha da grade. */
+  const gridTile   = gridPattern(gridType(scene), gridSize);
+  const gOff       = gridOffset(scene);
+  const gridPatX   = ((gridHalf + gOff.x) % gridTile.w + gridTile.w) % gridTile.w;
+  const gridPatY   = ((gridHalf + gOff.y) % gridTile.h + gridTile.h) % gridTile.h;
+
+  /* Pilha de render — derivada de `layerZIndex` em mapHelpers.js, com teste que trava a
+   * ordem. Ver o comentário longo lá: fixar esses números foi o que deixava a névoa abaixo
+   * dos tokens (inimigo em sala coberta aparecia para o jogador). */
+  const Z_GRID    = gridZIndex();
+  const Z_FOG     = fogZIndex(layers.length);
+  const Z_OVERLAY = overlayZIndex(layers.length);
   const cursor     = panRef.current ? 'grabbing' : tool === 'fog' || tool === 'reveal' ? 'cell' : tool === 'token' || tool === 'note' || tool === 'measure' || tool === 'draw' ? 'crosshair' : 'default';
   const singleSel  = selIds.size === 1 ? elements.find(el => el.id === [...selIds][0]) : null;
+  const textEditEl = textEdit ? elements.find(el => el.id === textEdit) : null;
   const anyHidden  = selIds.size > 0 && [...selIds].some(id => elements.find(e => e.id === id)?.hidden);
   const anyLocked  = selIds.size > 0 && [...selIds].some(id => elements.find(e => e.id === id)?.locked);
   const hasImgEls  = elements.some(el => el.type === 'image');
@@ -1227,12 +1453,12 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
   const actBtn = active => ({ width: 40, height: 40, borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', background: active ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.04)', color: active ? '#a855f7' : 'rgba(255,255,255,0.6)', transition: 'all 0.12s' });
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: '#1e1e2f', display: 'flex', flexDirection: 'column', userSelect: 'none', fontFamily: 'Inter,system-ui,sans-serif' }}
+    <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: '#2e2e42', display: 'flex', flexDirection: 'column', userSelect: 'none', fontFamily: 'Inter,system-ui,sans-serif' }}
       onClick={() => { setCtxMenu(null); setLayerPickerOpen(false); }}>
       <style>{`@keyframes rain{0%{transform:translateY(-10px) rotate(15deg);opacity:0}10%{opacity:0.7}90%{opacity:0.7}100%{transform:translateY(110vh) rotate(15deg);opacity:0}}@keyframes snow{0%{transform:translateY(-10px) translateX(0);opacity:0}10%{opacity:0.85}50%{transform:translateY(50vh) translateX(20px)}90%{opacity:0.85}100%{transform:translateY(110vh) translateX(-10px);opacity:0}}@keyframes fogDrift{0%{transform:translateX(-5%)}50%{transform:translateX(5%)}100%{transform:translateX(-5%)}}.map-toolbar-scroll::-webkit-scrollbar{width:0;height:0;display:none}@keyframes mapspin{to{transform:rotate(360deg)}}.map-top-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex-shrink:1}@media(max-width:720px){.map-top-hide{display:none!important}}@media(max-width:560px){.map-btn-label{display:none}}`}</style>
 
       {/* TOP BAR */}
-      <div style={{ height: 48, background: '#12121e', borderBottom: '1px solid rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', flexShrink: 0, zIndex: 10 }}>
+      <div style={{ height: 48, background: '#22222f', borderBottom: '1px solid rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', flexShrink: 0, zIndex: 10 }}>
         {onBack && (
           <button onClick={onBack} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.45)', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 5, padding: '4px 8px', borderRadius: 6, transition: 'color 0.12s' }}
             onMouseEnter={e => { e.currentTarget.style.color = '#fff'; }} onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.45)'; }}
@@ -1262,7 +1488,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
 
         {/* LEFT PANEL */}
         {showLeft && !viewer && (
-          <div style={{ width: 210, flexShrink: 0, background: '#12121e', borderRight: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ width: 210, flexShrink: 0, background: '#22222f', borderRight: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <div style={{ padding: '10px 12px 6px', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
               <span style={{ flex: 1, fontFamily: 'Cinzel,serif', fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: 1, textTransform: 'uppercase' }}>Cenas</span>
               <button onClick={addScene} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: 20, lineHeight: 1, padding: '0 4px' }} title="Nova cena">+</button>
@@ -1275,7 +1501,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
                 return (
                   <div key={sc.id} onClick={() => switchScene(sc.id)}
                     style={{ flexShrink: 0, width: 72, borderRadius: 6, cursor: 'pointer', border: `1px solid ${sc.id === activeScene ? 'rgba(168,85,247,0.5)' : 'rgba(255,255,255,0.06)'}`, background: sc.id === activeScene ? 'rgba(168,85,247,0.1)' : 'rgba(255,255,255,0.02)', overflow: 'hidden' }}>
-                    <div style={{ aspectRatio: '16/9', background: '#0d0d1a', position: 'relative', overflow: 'hidden' }}>
+                    <div style={{ aspectRatio: '16/9', background: '#1c1c28', position: 'relative', overflow: 'hidden' }}>
                       {thumbSrc ? <img src={thumbSrc} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.8 }} /> : <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.2, color: '#fff' }}><MapIcon name="image" size={16} /></div>}
                       {sc.id === activeScene && <div style={{ position: 'absolute', top: 3, right: 3, width: 5, height: 5, borderRadius: '50%', background: '#a855f7' }} />}
                     </div>
@@ -1304,14 +1530,23 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
                         style={{ ...lbtn, opacity: layer.visible ? 1 : 0.35 }} title={layer.visible ? 'Ocultar camada' : 'Mostrar camada'}><MapIcon name={layer.visible ? 'eye' : 'eyeOff'} size={15} /></button>
                       <button onClick={() => dispatch({ type: 'SET_LAYER_PROP', sceneId: scene.id, layerId: layer.id, prop: 'locked', value: !layer.locked })}
                         style={{ ...lbtn, opacity: layer.locked ? 1 : 0.35, color: layer.locked ? '#fbbf24' : 'rgba(255,255,255,0.7)' }} title={layer.locked ? 'Destravar camada' : 'Travar camada'}><MapIcon name={layer.locked ? 'lock' : 'unlock'} size={15} /></button>
-                      {campaignMode && (() => {
+                      {/* Só o eixo MOVER tem UI, de propósito.
+                          Cheguei a expor "criar" e "apagar" aqui (doc Owlbear /docs/permissions),
+                          mas revertido: o jogador NÃO tem caminho de escrita para criar/apagar —
+                          `publishElements` roda só no efeito `isMaster`, e a única escrita do
+                          jogador é `updateElementPos` (x/y). Ligar esses eixos daria a ferramenta
+                          e o objeto sumiria no próximo snapshot. Expor controle que não funciona é
+                          pior que não ter controle. Reabrir junto com o caminho de escrita do
+                          jogador — ver STATE. */}
+                      {campaignMode && !viewer && (() => {
                         const p = scene.permissions?.[layer.id]?.update || 'none';
                         const icon = p === 'owner' ? 'person' : p === 'all' ? 'group' : 'noentry';
-                        const label = p === 'owner' ? 'dono move' : p === 'all' ? 'todos movem' : 'só o mestre';
+                        const label = PERM_LABELS.update[p];
                         return (
-                          <button onClick={() => cyclePerm(layer.id)}
+                          <button onClick={() => cyclePerm(layer.id, 'update')}
                             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', opacity: p === 'none' ? 0.3 : 1, color: 'rgba(255,255,255,0.7)' }}
-                            title={`Jogadores: ${label} (clique para alternar)`} aria-label={`Permissão da camada ${layer.name}: ${label}`}><MapIcon name={icon} size={14} /></button>
+                            title={`Jogadores: ${label} (clique para alternar)`}
+                            aria-label={`Permissão da camada ${layer.name}: ${label}`}><MapIcon name={icon} size={14} /></button>
                         );
                       })()}
                       <span style={{ flex: 1, fontSize: 11, color: 'rgba(255,255,255,0.65)', marginLeft: 2 }}>{layer.name}</span>
@@ -1336,7 +1571,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
         {/* Alça para reabrir o painel recolhido (spec 0019 AC-13) */}
         {!showLeft && !viewer && (
           <button onClick={() => setShowLeft(true)} title="Mostrar cenas e camadas"
-            style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', zIndex: 30, width: 22, height: 64, borderRadius: '0 10px 10px 0', border: '1px solid rgba(255,255,255,0.14)', borderLeft: 'none', background: 'rgba(22,22,46,0.92)', backdropFilter: 'blur(16px)', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', zIndex: 30, width: 22, height: 64, borderRadius: '0 10px 10px 0', border: '1px solid rgba(255,255,255,0.14)', borderLeft: 'none', background: 'rgba(38,38,62,0.92)', backdropFilter: 'blur(16px)', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <MapIcon name="expandR" size={15} />
           </button>
         )}
@@ -1398,7 +1633,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
                   style={{ position: 'absolute', left: px, top: py, width: pw, height: ph, transform: `rotate(${liveRot}deg)`, transformOrigin: 'center center', opacity, outline: isSel ? '2px solid #a855f7' : 'none', outlineOffset: 1, cursor: (img.locked || layer?.locked) ? 'default' : 'grab', zIndex: layerZIndex(layerOrder[img.layerId] ?? 0, img.z), pointerEvents: (viewer || img.locked || layer?.locked) ? 'none' : 'auto' }}
                   onPointerDown={e => onElementDown(e, img)}
                   onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setSelIds(new Set([img.id])); setCtxMenu({ x: e.clientX, y: e.clientY, type: 'image', elId: img.id }); }}>
-                  <img src={src} draggable={false} style={{ width: '100%', height: '100%', display: 'block', pointerEvents: 'none' }} />
+                  <img src={src} draggable={false} alt={img.alt || ''} style={{ width: '100%', height: '100%', display: 'block', pointerEvents: 'none' }} />
                   {img.locked && <span style={{ position: 'absolute', top: 4, left: 4, fontSize: 10, background: 'rgba(0,0,0,0.7)', borderRadius: '50%', width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fbbf24' }}><MapIcon name="lock" size={9} /></span>}
                   {isSingleSel && !img.locked && (<>
                     {[['NW','nw-resize',{top:-5,left:-5}],['NE','ne-resize',{top:-5,right:-5}],['SW','sw-resize',{bottom:-5,left:-5}],['SE','se-resize',{bottom:-5,right:-5}]].map(([key, cur, pos]) => (
@@ -1433,15 +1668,15 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
 
             {/* GRID — oversized SVG gives seamless coverage 50 000 world-px beyond scene bounds */}
             {showGrid && (
-              <svg style={{ position: 'absolute', top: -gridHalf, left: -gridHalf, width: mapW + 2 * gridHalf, height: mapH + 2 * gridHalf, pointerEvents: 'none', zIndex: 6 }} xmlns="http://www.w3.org/2000/svg">
-                <defs><pattern id="mapgrid" width={gridSize} height={gridSize} patternUnits="userSpaceOnUse" x={gridPatOff} y={gridPatOff}><path d={`M ${gridSize} 0 L 0 0 0 ${gridSize}`} fill="none" stroke="rgba(255,255,255,0.32)" strokeWidth="0.8" /></pattern></defs>
-                <rect width="100%" height="100%" fill="url(#mapgrid)" />
+              <svg style={{ position: 'absolute', top: -gridHalf, left: -gridHalf, width: mapW + 2 * gridHalf, height: mapH + 2 * gridHalf, pointerEvents: 'none', zIndex: Z_GRID }} xmlns="http://www.w3.org/2000/svg">
+                <defs><pattern id="mapgrid" width={gridTile.w} height={gridTile.h} patternUnits="userSpaceOnUse" x={gridPatX} y={gridPatY}><path d={gridTile.d} fill="none" stroke={scene.grid?.color || 'rgba(255,255,255,0.32)'} strokeWidth={scene.grid?.lineWidth ?? 1} /></pattern></defs>
+                <rect width="100%" height="100%" fill="url(#mapgrid)" opacity={scene.grid?.opacity ?? 1} />
               </svg>
             )}
 
             {/* FOG v2 (spec 0012) — mask sequencial + draft + seleção no FogLayer */}
             <FogLayer fog={fog} mapW={mapW} mapH={mapH} gridHalf={gridHalf} asViewer={asViewer}
-              draft={fogDraft} selectedId={fogEdit ? fogSel : null} scale={scale} />
+              draft={fogDraft} selectedIds={fogSel} editMode={fogEdit && !viewer} scale={scale} zIndex={Z_FOG} />
 
             {/* TOKENS */}
             {elements.filter(el => el.type === 'token' && (!asViewer || (!el.hidden && !el.spectre))).sort((a, b) => (a.z ?? 0) - (b.z ?? 0)).map(t => {
@@ -1456,7 +1691,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
               return (
                 <div key={t.id} style={{
                   position: 'absolute', left: px - t.size / 2, top: py - t.size / 2, width: t.size, height: t.size,
-                  borderRadius: '50%', background: tokImg ? '#12121e' : t.color, opacity,
+                  borderRadius: '50%', background: tokImg ? '#22222f' : t.color, opacity,
                   border: isSel ? '2.5px solid #a855f7' : `2.5px solid ${tokImg ? t.color : 'rgba(255,255,255,0.85)'}`,
                   boxShadow: isSel ? `0 0 0 3px rgba(168,85,247,0.5),0 0 14px ${t.color}99` : `0 0 14px ${t.color}99,0 2px 8px rgba(0,0,0,0.5)`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: Math.max(11, Math.round(t.size * 0.3)), fontWeight: 700, color: '#fff',
@@ -1467,7 +1702,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
                   onPointerDown={e => onElementDown(e, t)}
                   onContextMenu={e => { e.preventDefault(); e.stopPropagation(); if (viewer) return; setSelIds(new Set([t.id])); setCtxMenu({ x: e.clientX, y: e.clientY, type: 'token', tokenId: t.id }); }}>
                   {tokImg
-                    ? <img src={tokImg} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%', pointerEvents: 'none' }} />
+                    ? <img src={tokImg} draggable={false} alt={t.label || 'Token'} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%', pointerEvents: 'none' }} />
                     : (t.label || '?').charAt(0).toUpperCase()}
                   {(t.conditions || []).length > 0 && (
                     <div style={{ position: 'absolute', top: -Math.max(10, t.size * 0.22), left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 1, whiteSpace: 'nowrap', fontSize: Math.max(10, Math.round(t.size * 0.26)), filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.9))', pointerEvents: 'none' }}>
@@ -1506,10 +1741,19 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
 
             {/* preview do traço em andamento */}
             {drawLive && drawLive.pts.length > 0 && (
-              <svg style={{ position: 'absolute', top: 0, left: 0, width: mapW, height: mapH, pointerEvents: 'none', zIndex: 205, overflow: 'visible' }} xmlns="http://www.w3.org/2000/svg">
+              <svg style={{ position: 'absolute', top: 0, left: 0, width: mapW, height: mapH, pointerEvents: 'none', zIndex: Z_OVERLAY, overflow: 'visible' }} xmlns="http://www.w3.org/2000/svg">
                 {(() => {
                   const pts = drawLive.pts, a = pts[0], b = pts[pts.length - 1];
-                  const p = { fill: 'none', stroke: drawLive.color, strokeWidth: drawLive.strokeWidth, strokeLinecap: 'round', strokeLinejoin: 'round', opacity: 0.9 };
+                  // O preview precisa mostrar preenchimento e estilo de traço, senão o
+                  // resultado só aparece depois de soltar o mouse e vira tentativa e erro.
+                  const hasFill = drawLive.fill && drawLive.fill !== 'none';
+                  const p = {
+                    fill: hasFill ? drawLive.fill : 'none',
+                    fillOpacity: hasFill ? (drawLive.fillOpacity ?? 0.25) : undefined,
+                    stroke: drawLive.color, strokeWidth: drawLive.strokeWidth,
+                    strokeDasharray: (DASH[drawLive.strokeStyle] || DASH.solid)(drawLive.strokeWidth),
+                    strokeLinecap: 'round', strokeLinejoin: 'round', opacity: 0.9,
+                  };
                   if (drawLive.shape === 'line') return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...p} />;
                   if (drawLive.shape === 'rect') return <rect x={Math.min(a.x, b.x)} y={Math.min(a.y, b.y)} width={Math.abs(b.x - a.x)} height={Math.abs(b.y - a.y)} {...p} />;
                   if (drawLive.shape === 'circle') return <ellipse cx={(a.x + b.x) / 2} cy={(a.y + b.y) / 2} rx={Math.abs(b.x - a.x) / 2} ry={Math.abs(b.y - a.y) / 2} {...p} />;
@@ -1528,21 +1772,57 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
               const py = livePos ? livePos.y : n.y;
               return (
                 <div key={n.id}
-                  style={{ position: 'absolute', left: px, top: py, background: '#fbbf24', color: '#1a1500', padding: '8px 10px', borderRadius: 4, fontSize: 12, maxWidth: 160, wordBreak: 'break-word', boxShadow: isSel ? '0 0 0 2px #a855f7,3px 4px 12px rgba(0,0,0,0.5)' : '3px 4px 12px rgba(0,0,0,0.5)', zIndex: layerZIndex(layerOrder[n.layerId] ?? 0, n.z), opacity: (n.hidden ? 0.35 : 1) * (noteLayer?.opacity ?? 1), cursor: (n.locked || noteLayer?.locked) ? 'default' : 'grab' }}
-                  onPointerDown={e => onElementDown(e, n)}>
+                  style={{ position: 'absolute', left: px, top: py, background: '#fbbf24', color: '#1a1500', padding: '8px 10px', borderRadius: 4, fontSize: 12, maxWidth: 160, whiteSpace: 'pre-wrap', wordBreak: 'break-word', boxShadow: isSel ? '0 0 0 2px #a855f7,3px 4px 12px rgba(0,0,0,0.5)' : '3px 4px 12px rgba(0,0,0,0.5)', zIndex: layerZIndex(layerOrder[n.layerId] ?? 0, n.z), opacity: (n.hidden ? 0.35 : 1) * (noteLayer?.opacity ?? 1), cursor: (n.locked || noteLayer?.locked) ? 'default' : 'grab',
+                    /* `rotation` era campo morto: o migrations gravava e o render nunca lia. */
+                    transform: n.rotation ? `rotate(${n.rotation}deg)` : undefined, transformOrigin: 'top left' }}
+                  onPointerDown={e => onElementDown(e, n)}
+                  onDoubleClick={e => { e.stopPropagation(); if (!viewer && !n.locked && !noteLayer?.locked) editNote(n.id); }}>
                   {n.text}
                   {n.locked && <span style={{ position: 'absolute', top: -5, right: -5, fontSize: 9, background: 'rgba(0,0,0,0.75)', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fbbf24' }}><MapIcon name="lock" size={9} /></span>}
                   {!viewer && <button
                     onPointerDown={e => e.stopPropagation()}
                     onClick={e => { e.stopPropagation(); deleteEl(n.id); }}
-                    style={{ position: 'absolute', top: -7, right: -7, width: 17, height: 17, borderRadius: '50%', background: '#222', border: 'none', color: '#fff', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 11 }}>×</button>}
+                    style={{ position: 'absolute', top: -7, right: -7, width: 17, height: 17, borderRadius: '50%', background: '#33333f', border: 'none', color: '#fff', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 11 }}>×</button>}
                 </div>
               );
             })}
 
+            {/* TEXTO RICO (doc Owlbear /docs/text) — o item em edição some daqui, pois o
+                overlay desenha o textarea no lugar dele. */}
+            {elements.filter(el => el.type === 'text' && (!asViewer || (!el.hidden && !el.spectre)))
+              .sort((a, b) => (a.z ?? 0) - (b.z ?? 0)).map(t => {
+                const tLayer = layers.find(l => l.id === t.layerId);
+                if (tLayer && !tLayer.visible) return null;
+                if (textEdit === t.id) return null;
+                const livePos = dragRef.current?.positions?.[t.id];
+                return (
+                  <TextItem key={t.id}
+                    el={livePos ? { ...t, x: livePos.x, y: livePos.y } : t}
+                    selected={selIds.has(t.id)}
+                    dim={(t.hidden ? 0.35 : 1) * (tLayer?.opacity ?? 1)}
+                    zIndex={layerZIndex(layerOrder[t.layerId] ?? 0, t.z)}
+                    onPointerDown={e => onElementDown(e, t)}
+                    onDoubleClick={e => {
+                      e.stopPropagation();
+                      if (!viewer && !t.locked && !tLayer?.locked) setTextEdit(t.id);
+                    }} />
+                );
+              })}
+
+            {!viewer && textEditEl && (
+              <TextEditorOverlay el={textEditEl} zIndex={Z_OVERLAY}
+                onChange={txt => updateElText(textEditEl.id, txt)}
+                onPatch={p => updateEl(textEditEl.id, p)}
+                onDone={() => {
+                  // Texto vazio não vira item fantasma no canvas.
+                  if (!plainText(textEditEl.text)) deleteEl(textEditEl.id);
+                  setTextEdit(null);
+                }} />
+            )}
+
             {/* MEASURE */}
             {measureLine && (
-              <svg style={{ position: 'absolute', top: 0, left: 0, width: mapW, height: mapH, pointerEvents: 'none', zIndex: 210 }} xmlns="http://www.w3.org/2000/svg">
+              <svg style={{ position: 'absolute', top: 0, left: 0, width: mapW, height: mapH, pointerEvents: 'none', zIndex: Z_OVERLAY }} xmlns="http://www.w3.org/2000/svg">
                 <line x1={measureLine.x1} y1={measureLine.y1} x2={measureLine.x2} y2={measureLine.y2} stroke="#fbbf24" strokeWidth={2 / scale} strokeDasharray={`${6 / scale},${4 / scale}`} />
                 <circle cx={measureLine.x1} cy={measureLine.y1} r={5 / scale} fill="#fbbf24" />
                 <circle cx={measureLine.x2} cy={measureLine.y2} r={5 / scale} fill="#fbbf24" />
@@ -1552,7 +1832,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
 
             {/* PRESENÇA AO VIVO (spec 0010): pings, apontadores e réguas dos participantes */}
             {campaignMode && lives.length > 0 && (
-              <PingsOverlay lives={lives} selfUid={uid} scale={scale} mapW={mapW} mapH={mapH} />
+              <PingsOverlay lives={lives} selfUid={uid} scale={scale} mapW={mapW} mapH={mapH} zIndex={Z_OVERLAY} />
             )}
           </div>
 
@@ -1564,20 +1844,26 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
           {weather === 'snow' && <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 25 }}>{Array.from({ length: 60 }, (_, i) => <div key={i} style={{ position: 'absolute', left: `${(i * 17) % 100}%`, top: `${-(i * 3) % 10}%`, width: `${3 + (i % 4)}px`, height: `${3 + (i % 4)}px`, borderRadius: '50%', background: `rgba(255,255,255,${0.5 + (i % 5) * 0.1})`, animation: `snow ${2 + (i % 6) * 0.5}s ease-in-out ${(i % 8) * 0.5}s infinite` }} />)}</div>}
           {weather === 'fog' && <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 25 }}>{[0, 1, 2].map(i => <div key={i} style={{ position: 'absolute', inset: 0, background: `radial-gradient(ellipse ${150 + i * 60}% ${80 + i * 30}% at ${20 + i * 30}% ${30 + i * 20}%, rgba(180,190,200,0.18) 0%, transparent 70%)`, animation: `fogDrift ${8 + i * 4}s ease-in-out ${i * 3}s infinite` }} />)}<div style={{ position: 'absolute', inset: 0, background: 'rgba(150,170,190,0.08)' }} /></div>}
 
-          <div style={{ position: 'absolute', bottom: 10, left: 10, fontSize: 10, color: 'rgba(255,255,255,0.2)', fontFamily: 'monospace', pointerEvents: 'none' }}>{Math.round(scale * 100)}% · {gridSize}px{snapGrid ? ' · snap' : ''}</div>
+          <div style={{ position: 'absolute', bottom: 10, left: 10, fontSize: 10, color: 'rgba(255,255,255,0.2)', fontFamily: 'monospace', pointerEvents: 'none' }}>{Math.round(scale * 100)}% · {Math.round(gridSize)}px · {GRID_TYPE_LABELS[gridType(scene)]} · {MEASUREMENT_LABELS[measurementMode(scene)]}{snapGrid ? ' · snap' : ''}</div>
 
           {/* Aviso temporário (spec 0019 AC-1/AC-10): camada travada, quota cheia… */}
           {flash && (
-            <div style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 400, background: 'rgba(13,13,24,0.96)', border: '1px solid rgba(251,191,36,0.4)', color: '#fde68a', borderRadius: 10, padding: '9px 18px', fontSize: 12.5, fontFamily: 'Inter,system-ui,sans-serif', boxShadow: '0 8px 30px rgba(0,0,0,0.6)', pointerEvents: 'none', maxWidth: '80%', textAlign: 'center' }}>{flash}</div>
+            <div style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 400, background: 'rgba(29,29,40,0.96)', border: '1px solid rgba(251,191,36,0.4)', color: '#fde68a', borderRadius: 10, padding: '9px 18px', fontSize: 12.5, fontFamily: 'Inter,system-ui,sans-serif', boxShadow: '0 8px 30px rgba(0,0,0,0.6)', pointerEvents: 'none', maxWidth: '80%', textAlign: 'center' }}>{flash}</div>
           )}
         </div>
 
         {/* RIGHT TOOLBAR — nunca corta: limita a altura e rola por dentro (spec 0019 AC-13) */}
-        <div className="map-toolbar-scroll" style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', zIndex: 30, display: 'flex', flexDirection: 'column', gap: 2, background: 'rgba(22,22,46,0.92)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 14, padding: 6, maxHeight: 'calc(100% - 20px)', overflowY: 'auto', overflowX: 'hidden', scrollbarWidth: 'none' }}>
-          {(viewer ? TOOLS.filter(t => VIEWER_TOOLS.includes(t.id)) : TOOLS).map(t => <button key={t.id} title={t.label} onClick={() => setTool(t.id)} style={TB(tool === t.id)}><MapIcon name={t.icon} size={20} /></button>)}
+        <div className="map-toolbar-scroll" style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', zIndex: 30, display: 'flex', flexDirection: 'column', gap: 2, background: 'rgba(38,38,62,0.92)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 14, padding: 6, maxHeight: 'calc(100% - 20px)', overflowY: 'auto', overflowX: 'hidden', scrollbarWidth: 'none' }}>
+          {allowedTools.map(t => <button key={t.id} title={t.label} onClick={() => setTool(t.id)} style={TB(tool === t.id)}><MapIcon name={t.icon} size={20} /></button>)}
           <div style={{ height: 1, background: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
           {!viewer && campaignMode && (
             <button title={camOn ? 'Parar transmissão de câmera' : 'Sync View — transmitir minha câmera'} onClick={() => setCamOn(v => !v)} style={TB(camOn)}><MapIcon name="cast" size={20} /></button>
+          )}
+          {!viewer && campaignMode && (
+            <button
+              title={casting ? 'Parar a transmissão na segunda tela' : 'Transmitir numa segunda tela / TV (visão de jogador)'}
+              aria-label={casting ? 'Parar transmissão' : 'Transmitir numa segunda tela'}
+              onClick={() => (casting ? stopCast() : startCast())} style={TB(casting)}><MapIcon name="panel" size={20} /></button>
           )}
           {viewer && masterCam && !followMaster && (
             <button title="Seguir a câmera do mestre" onClick={() => setFollowMaster(true)} style={TB(false)}><MapIcon name="follow" size={20} /></button>
@@ -1586,6 +1872,10 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
           <button title="Afastar (zoom −)" onClick={() => zoomButton(1 / 1.2)} style={TB(false)}><MapIcon name="zoomOut" /></button>
           <div style={{ height: 1, background: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
           <button title="Mostrar/ocultar grade" onClick={() => setShowGrid(g => !g)} style={TB(showGrid)}><MapIcon name="grid" size={20} /></button>
+          {!viewer && (
+            <button title="Controles de grade (tipo, alinhamento, medição, escala)" aria-label="Controles de grade"
+              onClick={() => setGridPanel(v => !v)} style={TB(gridPanel)}><MapIcon name="target" size={19} /></button>
+          )}
           {!viewer && (<>
           <button title={snapGrid ? 'Snap à grade: ligado' : 'Snap à grade: desligado'} onClick={() => setSnapGrid(g => !g)} style={TB(snapGrid)}><MapIcon name="snap" size={19} /></button>
           <button title="Revelar toda a névoa" onClick={clearFog} style={TB(false)}><MapIcon name="revealAll" size={20} /></button>
@@ -1598,7 +1888,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
         </div>
 
         {tool === 'token' && (
-          <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 30, background: 'rgba(22,22,46,0.95)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 14, padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 30, background: 'rgba(38,38,62,0.95)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 14, padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>Cor:</span>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{COLORS.map(c => <button key={c} onClick={() => setTokColor(c)} style={{ width: 22, height: 22, borderRadius: '50%', background: c, border: tokColor === c ? '2px solid #fff' : '2px solid transparent', cursor: 'pointer' }} />)}</div>
             <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.1)' }} />
@@ -1620,7 +1910,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
         )}
 
         {tool === 'draw' && !viewer && (
-          <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 30, background: 'rgba(22,22,46,0.95)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 14, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 30, background: 'rgba(38,38,62,0.95)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 14, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             {[['free', 'draw', 'Traço livre'], ['line', 'shapeLine', 'Linha'], ['rect', 'shapeRect', 'Retângulo'], ['circle', 'shapeCircle', 'Círculo']].map(([m, ic, tt]) => (
               <button key={m} title={tt} aria-label={tt} onClick={() => setDrawMode(m)} style={{ ...TB(drawMode === m), width: 30, height: 30, borderRadius: 8 }}><MapIcon name={ic} size={16} /></button>
             ))}
@@ -1634,20 +1924,194 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
                 <div style={{ width: 14, height: w, background: '#fff', borderRadius: w }} />
               </button>
             ))}
+
+            {/* Estilo do traço (doc /docs/drawing → Stroke Style) */}
+            <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.1)' }} />
+            {[['solid', '───'], ['dashed', '╌╌╌'], ['dotted', '·····']].map(([s, glyph]) => (
+              <button key={s} title={`Traço ${s === 'solid' ? 'sólido' : s === 'dashed' ? 'tracejado' : 'pontilhado'}`}
+                aria-label={`Estilo de traço ${s}`} onClick={() => setDrawStroke(s)}
+                style={{ ...TB(drawStroke === s), width: 32, height: 26, borderRadius: 8, fontSize: 11, letterSpacing: -1 }}>{glyph}</button>
+            ))}
+
+            {/* Preenchimento — o que transforma desenho em área de efeito de magia */}
+            <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.1)' }} />
+            <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>Preencher:</span>
+            <button title="Sem preenchimento" aria-label="Sem preenchimento" onClick={() => setDrawFill('none')}
+              style={{ width: 20, height: 20, borderRadius: '50%', cursor: 'pointer', background: 'transparent', border: drawFill === 'none' ? '2px solid #fff' : '2px solid rgba(255,255,255,0.25)', color: 'rgba(255,255,255,0.5)', fontSize: 11, lineHeight: 1, padding: 0 }}>∅</button>
+            <button title="Preencher com a cor do traço" aria-label="Preencher com a cor do traço" onClick={() => setDrawFill(drawColor)}
+              style={{ width: 20, height: 20, borderRadius: '50%', cursor: 'pointer', background: drawColor, opacity: 0.55, border: drawFill === drawColor ? '2px solid #fff' : '2px solid transparent' }} />
+            {drawFill !== 'none' && (
+              <input type="range" min="0.05" max="0.9" step="0.05" value={drawFillOpacity}
+                title={`Opacidade do preenchimento: ${Math.round(drawFillOpacity * 100)}%`}
+                aria-label="Opacidade do preenchimento"
+                onChange={e => setDrawFillOpacity(Number(e.target.value))}
+                style={{ width: 70, accentColor: '#a855f7' }} />
+            )}
+          </div>
+        )}
+
+        {/* CONTROLES DE GRADE — tipo, alinhamento (linhas×colunas + offset), medição e escala.
+            Antes disto o único ajuste de grade era o tamanho de célula escondido na
+            sub-toolbar de névoa, e type/offset/measurement/color/opacity eram config morta. */}
+        {gridPanel && !viewer && (
+          <div onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}
+            style={{ position: 'absolute', top: 16, right: 68, zIndex: 45, width: 264, maxHeight: 'calc(100% - 32px)', overflowY: 'auto', background: 'rgba(38,38,62,0.97)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 14, padding: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 11, letterSpacing: 1.5, color: 'rgba(255,255,255,0.45)', fontWeight: 600 }}>CONTROLES DE GRADE</span>
+              <button title="Fechar" aria-label="Fechar controles de grade" onClick={() => setGridPanel(false)}
+                style={{ ...TB(false), width: 24, height: 24, borderRadius: 6 }}><MapIcon name="close" size={13} /></button>
+            </div>
+
+            {/* Tipo de grade. Ao trocar, o modo de medição é normalizado para um válido do tipo. */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>TIPO</span>
+              {GRID_TYPES.map(t => (
+                <button key={t} onClick={() => {
+                  const allowed = measurementsFor(t);
+                  const cur = scene.grid?.measurement;
+                  upScene({ grid: { ...scene.grid, type: t, measurement: allowed.includes(cur) ? cur : allowed[0] } });
+                }} style={{ ...TB(gridType(scene) === t), width: '100%', height: 30, borderRadius: 8, fontSize: 11, justifyContent: 'flex-start', padding: '0 10px' }}>
+                  {GRID_TYPE_LABELS[t]}
+                </button>
+              ))}
+            </div>
+
+            {/* Alinhamento manual do Owlbear: informe quantas células a imagem tem. */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>ALINHAMENTO — CÉLULAS NA CENA</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {[['Colunas', 'columns'], ['Linhas', 'rows']].map(([label, kind]) => {
+                  const across = cellsAcross(scene);
+                  const val = across[kind] == null ? '' : Math.round(across[kind] * 100) / 100;
+                  return (
+                    <label key={kind} style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)' }}>{label}</span>
+                      <input key={`${kind}-${Math.round(gridSize * 100)}`} type="number" min="1" max="400" defaultValue={val}
+                        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                        onBlur={e => {
+                          const n = Number(e.target.value);
+                          const out = kind === 'columns' ? cellSizeFromColumns(scene.bgSize, n) : cellSizeFromRows(scene.bgSize, n);
+                          if (out && out.size > 0) upScene({ grid: { ...scene.grid, size: out.size } });
+                        }}
+                        style={{ width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, color: '#fff', fontSize: 12, padding: '5px 7px', fontFamily: 'monospace' }} />
+                    </label>
+                  );
+                })}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', flex: 1 }}>Célula</span>
+                <button title="Diminuir célula" onClick={() => upScene({ grid: { ...scene.grid, size: Math.max(8, gridSize - 1) } })} style={{ ...TB(false), width: 24, height: 24, borderRadius: 6, fontSize: 13 }}>-</button>
+                <span style={{ fontSize: 12, color: '#fff', fontFamily: 'monospace', minWidth: 46, textAlign: 'center' }}>{Math.round(gridSize * 10) / 10}px</span>
+                <button title="Aumentar célula" onClick={() => upScene({ grid: { ...scene.grid, size: Math.min(400, gridSize + 1) } })} style={{ ...TB(false), width: 24, height: 24, borderRadius: 6, fontSize: 13 }}>+</button>
+              </div>
+            </div>
+
+            {/* Offset: desloca a origem da grade para casar com a grade desenhada na imagem. */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>OFFSET (PX)</span>
+              {[['X', 'x'], ['Y', 'y']].map(([label, axis]) => (
+                <div key={axis} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', width: 12 }}>{label}</span>
+                  {[-5, -1, 1, 5].map(step => (
+                    <button key={step} title={`${step > 0 ? '+' : ''}${step}px em ${label}`}
+                      onClick={() => upScene({ grid: { ...scene.grid, offset: { ...gOff, [axis]: gOff[axis] + step } } })}
+                      style={{ ...TB(false), flex: 1, height: 24, borderRadius: 6, fontSize: 10, fontFamily: 'monospace' }}>
+                      {step > 0 ? `+${step}` : step}
+                    </button>
+                  ))}
+                  <span style={{ fontSize: 11, color: '#fff', fontFamily: 'monospace', minWidth: 34, textAlign: 'right' }}>{Math.round(gOff[axis] * 10) / 10}</span>
+                </div>
+              ))}
+              {(gOff.x !== 0 || gOff.y !== 0) && (
+                <button onClick={() => upScene({ grid: { ...scene.grid, offset: { x: 0, y: 0 } } })}
+                  style={{ ...TB(false), width: '100%', height: 24, borderRadius: 6, fontSize: 10 }}>Zerar offset</button>
+              )}
+            </div>
+
+            {/* Modo de medição — só os válidos para o tipo de grade atual. */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>MEDIÇÃO</span>
+              {measurementsFor(gridType(scene)).map(m => (
+                <button key={m} onClick={() => upScene({ grid: { ...scene.grid, measurement: m } })}
+                  style={{ ...TB(measurementMode(scene) === m), width: '100%', height: 28, borderRadius: 8, fontSize: 11, justifyContent: 'flex-start', padding: '0 10px' }}>
+                  {MEASUREMENT_LABELS[m]}
+                </button>
+              ))}
+            </div>
+
+            {/* Escala: quanto vale 1 célula. A precisão vem dos decimais digitados. */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>ESCALA POR CÉLULA</span>
+              <input key={`scale-${scene.id}-${gridScale(scene).value}-${gridScale(scene).unit}`}
+                defaultValue={formatScale(gridScale(scene))} placeholder="1.5m"
+                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                onBlur={e => {
+                  const p = parseScale(e.target.value);
+                  if (p) upScene({ grid: { ...scene.grid, scale: p } });
+                  else { e.target.value = formatScale(gridScale(scene)); showFlash('Escala inválida — use algo como 1.5m, 5ft ou 5.00mi'); }
+                }}
+                style={{ width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, color: '#fff', fontSize: 12, padding: '6px 8px', fontFamily: 'monospace' }} />
+              <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', lineHeight: 1.4 }}>
+                Os decimais definem a precisão: "5.00mi" mede com 2 casas.
+              </span>
+            </div>
+
+            {/* Aparência da grade — campos que existiam no schema mas ninguém lia. */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>APARÊNCIA</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', flex: 1 }}>Opacidade</span>
+                <input type="range" min="0" max="1" step="0.05" value={scene.grid?.opacity ?? 1}
+                  onChange={e => upScene({ grid: { ...scene.grid, opacity: Number(e.target.value) } })}
+                  style={{ flex: 2, accentColor: '#a855f7' }} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', flex: 1 }}>Espessura</span>
+                <input type="range" min="0.4" max="4" step="0.2" value={scene.grid?.lineWidth ?? 1}
+                  onChange={e => upScene({ grid: { ...scene.grid, lineWidth: Number(e.target.value) } })}
+                  style={{ flex: 2, accentColor: '#a855f7' }} />
+              </div>
+            </div>
           </div>
         )}
 
         {(tool === 'fog' || tool === 'reveal') && (
-          <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 30, background: 'rgba(22,22,46,0.95)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 14, padding: '10px 18px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 30, background: 'rgba(38,38,62,0.95)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 14, padding: '10px 18px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             {/* Formas (spec 0012 AC-1..3) */}
             {[['rect', 'shapeRect', 'Retângulo (células)'], ['circle', 'shapeCircle', 'Círculo'], ['poly', 'shapePoly', 'Polígono (clique a clique; Enter/duplo-clique fecha; Esc cancela)'], ['free', 'draw', 'Traço livre']].map(([m, ic, tt]) => (
               <button key={m} title={tt} aria-label={tt} onClick={() => { setFogShape(m); setFogEdit(false); fogPolyRef.current = null; setFogDraft(null); }} style={{ ...TB(fogShape === m && !fogEdit), width: 30, height: 30, borderRadius: 8 }}><MapIcon name={ic} size={16} /></button>
             ))}
             <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.1)' }} />
-            <button title="Editar formas de fog (clique seleciona; Delete apaga)" onClick={() => { setFogEdit(v => !v); setFogSel(null); fogPolyRef.current = null; setFogDraft(null); }} style={{ ...TB(fogEdit), width: 30, height: 30, borderRadius: 8 }}><MapIcon name="brush" size={17} /></button>
-            {fogEdit && fogSel && (
-              <button title="Apagar forma selecionada" onClick={() => removeFogShape(fogSel)} style={{ ...TB(false), width: 'auto', padding: '0 10px', height: 30, borderRadius: 8, fontSize: 11, color: 'rgba(248,113,113,0.85)', gap: 6 }}><MapIcon name="trash" size={14} /> Apagar forma</button>
-            )}
+            <button title="Editar formas de fog (clique seleciona, Shift+clique acumula; Delete apaga). Âmbar = coberta, verde = revelada." onClick={() => { setFogEdit(v => !v); setFogSel(new Set()); fogPolyRef.current = null; setFogDraft(null); }} style={{ ...TB(fogEdit), width: 30, height: 30, borderRadius: 8 }}><MapIcon name="brush" size={17} /></button>
+            {fogEdit && fogSel.size > 0 && (<>
+              {/* Cortar/Recobrir — o fluxo de encontro do Owlbear: a forma fica, só troca de papel. */}
+              <button
+                title="Cortar (revelar) ou recobrir a seleção — a forma continua lá para você alternar quando quiser"
+                onClick={toggleFogCut}
+                style={{ ...TB(false), width: 'auto', padding: '0 10px', height: 30, borderRadius: 8, fontSize: 11, gap: 6, color: '#4ade80' }}>
+                <MapIcon name="reveal" size={14} /> Cortar / Recobrir
+              </button>
+              <button title="Juntar as formas selecionadas: cortar uma passa a revelar todas" onClick={joinFogShapes}
+                style={{ ...TB(false), width: 'auto', padding: '0 9px', height: 30, borderRadius: 8, fontSize: 11, gap: 5 }}>
+                <MapIcon name="target" size={13} /> Juntar
+              </button>
+              <button title="Separar o grupo das formas selecionadas" onClick={splitFogShapes}
+                style={{ ...TB(false), width: 'auto', padding: '0 9px', height: 30, borderRadius: 8, fontSize: 11, gap: 5 }}>
+                <MapIcon name="unlink" size={13} /> Separar
+              </button>
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace' }}>{fogSel.size} sel</span>
+              <button title="Apagar formas selecionadas" onClick={() => removeFogShape(fogSel)} style={{ ...TB(false), width: 'auto', padding: '0 10px', height: 30, borderRadius: 8, fontSize: 11, color: 'rgba(248,113,113,0.85)', gap: 6 }}><MapIcon name="trash" size={14} /> Apagar</button>
+            </>)}
+            {!fogEdit && (<>
+              <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.1)' }} />
+              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>Cor:</span>
+              {['#000000', '#0d0d1a', '#1e1b4b', '#3b0764', '#422006'].map(c => (
+                <button key={c} title={`Cor da névoa ${c}`} aria-label={`Cor da névoa ${c}`}
+                  onClick={() => upScene({ fog: { ...scene.fog, color: c } })}
+                  style={{ width: 18, height: 18, borderRadius: '50%', border: 'none', cursor: 'pointer', background: c, flexShrink: 0, boxShadow: (scene.fog?.color || '#000000') === c ? '0 0 0 2px #a855f7' : '0 0 0 1px rgba(255,255,255,0.25)' }} />
+              ))}
+            </>)}
             <button title={previewPlayer ? 'Voltar à visão do mestre' : 'Ver como o jogador vê (preview)'} onClick={() => setPreviewPlayer(v => !v)} style={{ ...TB(previewPlayer), width: 30, height: 30, borderRadius: 8 }}><MapIcon name="eye" size={17} /></button>
             {fogShape === 'rect' && !fogEdit && (<>
               <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.1)' }} />
@@ -1661,13 +2125,13 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
 
         {measureLine && measureDist > 0 && (
           <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 30, background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 10, padding: '8px 18px', fontSize: 13, color: '#fbbf24', fontFamily: 'monospace' }}>
-            {measureDist} cel ({Math.round(measureDist * (scene.grid?.scale?.value ?? 1.5) * 10) / 10} {scene.grid?.scale?.unit || 'm'})
+            {measured.cells} {isHex(scene) ? 'hex' : 'cel'} ({measured.dist} {measured.unit}) · {MEASUREMENT_LABELS[measured.mode]}
           </div>
         )}
 
         {/* UNIFIED ACTION TOOLBAR */}
         {!viewer && selIds.size > 0 && !measureLine && tool === 'select' && (
-          <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 50, background: 'rgba(13,13,24,0.95)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 14, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 4 }}
+          <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 50, background: 'rgba(29,29,40,0.95)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 14, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 4 }}
             onClick={e => e.stopPropagation()}>
 
             {selIds.size > 1 && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginRight: 4, whiteSpace: 'nowrap' }}>{selIds.size} sel</span>}
@@ -1682,7 +2146,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
                 {layers.find(l => l.id === singleSel?.layerId)?.name || 'Camada'} ▾
               </button>
               {layerPickerOpen && (
-                <div style={{ position: 'absolute', bottom: '110%', left: 0, background: 'rgba(13,13,24,0.98)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '4px 0', zIndex: 60, minWidth: 130 }}
+                <div style={{ position: 'absolute', bottom: '110%', left: 0, background: 'rgba(29,29,40,0.98)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '4px 0', zIndex: 60, minWidth: 130 }}
                   onClick={e => e.stopPropagation()}>
                   {layers.map(l => (
                     <button key={l.id} onClick={() => { batchSetLayer(l.id); setLayerPickerOpen(false); }}
@@ -1736,8 +2200,19 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
               </div>
             </>)}
 
+            {/* Editar nota/texto pela barra de ações — o duplo-clique também abre, mas em
+                elemento pequeno ou em toque acertar o duplo-clique é frustrante. */}
+            {(singleSel?.type === 'note' || singleSel?.type === 'text') && (
+              <button title={singleSel.type === 'note' ? 'Editar nota' : 'Editar texto'}
+                aria-label={singleSel.type === 'note' ? 'Editar nota' : 'Editar texto'}
+                onClick={() => (singleSel.type === 'note' ? editNote(singleSel.id) : setTextEdit(singleSel.id))}
+                style={actBtn(false)}><MapIcon name="text" /></button>
+            )}
             {singleSel?.type === 'note' && (
-              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 4 }}>{singleSel.text}</span>
+              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 4 }}>{previewLabel(singleSel.text)}</span>
+            )}
+            {singleSel?.type === 'text' && (
+              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 4 }}>{previewLabel(singleSel.text)}</span>
             )}
           </div>
         )}
@@ -1746,7 +2221,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
         {assignMenu && (
           <div style={{ position: 'absolute', inset: 0, zIndex: 2100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)' }}
             onClick={() => setAssignMenu(null)}>
-            <div style={{ background: 'rgba(13,13,24,0.98)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 12, padding: '14px 0', minWidth: 240, maxHeight: '60%', overflowY: 'auto' }}
+            <div style={{ background: 'rgba(29,29,40,0.98)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 12, padding: '14px 0', minWidth: 240, maxHeight: '60%', overflowY: 'auto' }}
               onClick={e => e.stopPropagation()}>
               <div style={{ padding: '0 18px 10px', fontSize: 11, color: 'rgba(255,255,255,0.4)', letterSpacing: 1, textTransform: 'uppercase' }}>Atribuir token a…</div>
               {assignMenu.members.map(m => {
@@ -1774,7 +2249,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
         )}
 
         {ctxMenu && (
-          <div style={{ position: 'fixed', left: Math.min(ctxMenu.x, window.innerWidth - 220), top: Math.min(ctxMenu.y, window.innerHeight - 340), zIndex: 2000, background: 'rgba(13,13,24,0.97)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '6px 0', minWidth: 210, boxShadow: '0 8px 32px rgba(0,0,0,0.6)', fontFamily: 'Inter,system-ui,sans-serif' }}
+          <div style={{ position: 'fixed', left: Math.min(ctxMenu.x, window.innerWidth - 220), top: Math.min(ctxMenu.y, window.innerHeight - 340), zIndex: 2000, background: 'rgba(29,29,40,0.97)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '6px 0', minWidth: 210, boxShadow: '0 8px 32px rgba(0,0,0,0.6)', fontFamily: 'Inter,system-ui,sans-serif' }}
             onClick={e => e.stopPropagation()}>
             {ctxMenu.type === 'token' ? (<>
               {[
@@ -1857,7 +2332,7 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
       </div>
 
       {hydrating && (
-        <div style={{ position: 'absolute', inset: 0, zIndex: 650, background: 'rgba(18,18,30,0.96)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+        <div style={{ position: 'absolute', inset: 0, zIndex: 650, background: 'rgba(34,34,46,0.96)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
           <div style={{ width: 34, height: 34, borderRadius: '50%', border: '3px solid rgba(168,85,247,0.2)', borderTopColor: '#a855f7', animation: 'mapspin 0.8s linear infinite' }} />
           <div style={{ fontFamily: 'Cinzel,serif', fontSize: 13, color: 'rgba(233,213,255,0.7)', letterSpacing: 1 }}>Carregando a mesa…</div>
         </div>
@@ -1865,17 +2340,34 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
 
       {promptModal && (
         <div onPointerDown={e => { if (e.target === e.currentTarget) closePrompt(null); }}
-          style={{ position: 'absolute', inset: 0, zIndex: 700, background: 'rgba(6,6,14,0.72)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Inter,system-ui,sans-serif' }}>
+          style={{ position: 'absolute', inset: 0, zIndex: 700, background: 'rgba(20,20,28,0.72)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Inter,system-ui,sans-serif' }}>
           <form onSubmit={e => { e.preventDefault(); closePrompt(Object.fromEntries(promptModal.fields.map(f => [f.key, f.value]))); }}
             style={{ width: 'min(92vw, 380px)', background: 'linear-gradient(180deg,#1a1a34,#131327)', border: '1px solid rgba(168,85,247,0.25)', borderRadius: 14, padding: 20, boxShadow: '0 20px 60px rgba(0,0,0,0.7)' }}>
             <div style={{ fontFamily: 'Cinzel,serif', fontSize: 15, color: '#e9d5ff', marginBottom: 14, letterSpacing: 0.5 }}>{promptModal.title}</div>
             {promptModal.fields.map((f, i) => (
               <label key={f.key} style={{ display: 'block', marginBottom: 12 }}>
                 <span style={{ display: 'block', fontSize: 11, color: 'rgba(255,255,255,0.55)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: 1 }}>{f.label}</span>
-                <input autoFocus={i === 0} value={f.value} placeholder={f.placeholder || ''}
-                  onChange={e => { const v = e.target.value; setPromptModal(m => m && ({ ...m, fields: m.fields.map(x => x.key === f.key ? { ...x, value: v } : x) })); }}
-                  onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); closePrompt(null); } }}
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '9px 11px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: '#fff', fontSize: 14, outline: 'none' }} />
+                {(() => {
+                  const onEdit = e => { const v = e.target.value; setPromptModal(m => m && ({ ...m, fields: m.fields.map(x => x.key === f.key ? { ...x, value: v } : x) })); };
+                  const box = { width: '100%', boxSizing: 'border-box', padding: '9px 11px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: '#fff', fontSize: 14, outline: 'none' };
+                  /* Campo multilinha: nota de mesa em uma linha é limitante demais. Aqui Enter
+                   * quebra linha e Ctrl/Cmd+Enter confirma — Enter sozinho não pode submeter. */
+                  if (f.multiline) return (
+                    <textarea autoFocus={i === 0} value={f.value} placeholder={f.placeholder || ''} rows={5}
+                      onChange={onEdit}
+                      onKeyDown={e => {
+                        if (e.key === 'Escape') { e.preventDefault(); closePrompt(null); return; }
+                        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); }
+                      }}
+                      style={{ ...box, minHeight: 96, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.45 }} />
+                  );
+                  return (
+                    <input autoFocus={i === 0} value={f.value} placeholder={f.placeholder || ''}
+                      onChange={onEdit}
+                      onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); closePrompt(null); } }}
+                      style={box} />
+                  );
+                })()}
               </label>
             ))}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 6 }}>

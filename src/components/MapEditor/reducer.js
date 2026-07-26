@@ -1,5 +1,5 @@
 import { newScene } from './schema';
-import { migrateSceneV2 } from './migrations';
+import { migrateSceneV2, migrateSceneV3 } from './migrations';
 
 /* Camadas v1 — mantidas só para as fases 1/2 da migração (cenas pré-v2). */
 export const DEFAULT_LAYERS = [
@@ -32,6 +32,9 @@ export function migrateScene(sc) {
   if (!out.layers) out = { ...out, layers: DEFAULT_LAYERS };
   // Phase 3: schema v2 (spec 0009 / ADR 0006) — 7 camadas, fog shapes, grid objeto
   out = migrateSceneV2(out);
+  // Phase 4: schema v3 — grid ganha offset de alinhamento, precisão de escala e modo de
+  // medição de verdade (o 'euclidean' da v2 era config morta).
+  out = migrateSceneV3(out);
   return out;
 }
 

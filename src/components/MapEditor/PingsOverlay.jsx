@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { isFresh, STALE_MS, PING_MS } from './sync/live';
 
-export default function PingsOverlay({ lives, selfUid, scale, mapW, mapH }) {
+export default function PingsOverlay({ lives, selfUid, scale, mapW, mapH, zIndex = 300 }) {
   const [, setTick] = useState(0);
   const hasContent = lives.some(l => l.ping || l.pointer || l.ruler);
   useEffect(() => {
@@ -26,7 +26,7 @@ export default function PingsOverlay({ lives, selfUid, scale, mapW, mapH }) {
   );
 
   return (
-    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 300 }}>
+    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex }}>
       <style>{`@keyframes nxPing{0%{transform:scale(0.3);opacity:1}100%{transform:scale(2.2);opacity:0}}`}</style>
       <svg style={{ position: 'absolute', top: 0, left: 0, width: mapW, height: mapH, overflow: 'visible' }} xmlns="http://www.w3.org/2000/svg">
         {rulers.map(l => (

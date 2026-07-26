@@ -6,6 +6,7 @@ import {
   tCardTitle, tBody, tStat, tEmpty, FONT,
 } from "./shared/modalStyles";
 import { CLASS_POWERS, CLASS_TRAILS, TRAIL_ABILITIES, CLASSES_OP } from "../rules";
+import PODERES_PARANORMAIS from "../../../../data/ordemParanormal/poderes-paranormais.json";
 
 /* ── image downscale ── */
 const downscale = (file, max = 360) => new Promise((res) => {
@@ -196,18 +197,34 @@ function AdicionarHabilidadesModal({ onClose, onAdd, habilidades, nex, classe })
     return () => document.removeEventListener("keydown", esc);
   }, [onClose]);
 
-  useEffect(() => { setChip("__base__"); setSearch(""); }, [cat]);
+  useEffect(() => { setChip(cat === "poderes_paranormais" ? "geral" : "__base__"); setSearch(""); }, [cat]);
 
   /* build chips for selected category */
-  const isSpecial = cat === "origens" || cat === "poderes_paranormais";
-  const trails = !isSpecial ? (CLASS_TRAILS[cat] || []) : [];
-  const chips = !isSpecial
-    ? [{ id: "__base__", label: `Poderes de ${CLASSES_OP.find(c => c.id === cat)?.name || cat}` }, ...trails.map(t => ({ id: t.id, label: t.name }))]
-    : [];
+  const isOrigens = cat === "origens";
+  const isPoderes = cat === "poderes_paranormais";
+  const ELEM_CHIPS = [
+    { id: "geral", label: "Gerais" }, { id: "conhecimento", label: "Conhecimento" },
+    { id: "energia", label: "Energia" }, { id: "morte", label: "Morte" }, { id: "sangue", label: "Sangue" },
+  ];
+  const trails = (!isOrigens && !isPoderes) ? (CLASS_TRAILS[cat] || []) : [];
+  const chips = isOrigens
+    ? []
+    : isPoderes
+    ? ELEM_CHIPS
+    : [{ id: "__base__", label: `Poderes de ${CLASSES_OP.find(c => c.id === cat)?.name || cat}` }, ...trails.map(t => ({ id: t.id, label: t.name }))];
 
   /* build ability list for selected chip */
   const abilities = (() => {
-    if (isSpecial) return [];
+    if (isOrigens) return [];
+    if (isPoderes) {
+      /* Poderes Paranormais do livro v1.4 (spec 0026) — obtidos via Transcender. */
+      return PODERES_PARANORMAIS.filter(p => p.elemento === chip).map(p => ({
+        id: p.id,
+        name: p.nome,
+        cost: "—",
+        desc: `${p.prereq && p.prereq !== "—" ? `Pré-requisito: ${p.prereq}. ` : ""}${p.descricao}${p.afinidade ? ` — Afinidade: ${p.afinidade}` : ""}`,
+      }));
+    }
     if (chip === "__base__") return CLASS_POWERS[cat] || [];
     const ta = TRAIL_ABILITIES[chip];
     if (!ta) return [];
@@ -268,14 +285,6 @@ function AdicionarHabilidadesModal({ onClose, onAdd, habilidades, nex, classe })
               {cat === "origens" ? (
                 <div style={{ ...tEmpty, textAlign:"center", padding: "40px 0", fontFamily:"Inter,system-ui,sans-serif", fontSize: 13 }}>
                   Origens são configuradas na aba Descrição.
-                </div>
-              ) : cat === "poderes_paranormais" ? (
-                <div style={{ textAlign:"center", padding: "40px 20px", fontFamily:"Inter,system-ui,sans-serif", fontSize: 13, color:"rgba(168,85,247,0.5)" }}>
-                  <div style={{ fontSize: 32, marginBottom: 12, opacity: 0.4 }}>✦</div>
-                  Poderes Paranormais são desbloqueados conforme o NEX e o Elemento de Afinidade.<br/>
-                  <span style={{ fontSize: 11, color:"rgba(255,255,255,0.25)", marginTop: 8, display:"block" }}>
-                    Adicione via "Nova Habilidade" ou aguarde a expansão do conteúdo do livro base.
-                  </span>
                 </div>
               ) : filtered.length === 0 ? (
                 <div style={{ ...tEmpty, textAlign:"center", padding: "40px 0", fontFamily:"Inter,system-ui,sans-serif", fontSize: 13 }}>

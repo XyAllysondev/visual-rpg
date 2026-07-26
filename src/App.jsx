@@ -22,6 +22,7 @@ import { doc, setDoc, getDoc, updateDoc, deleteField, collection, addDoc, query,
 import { roadmapData } from './roadmapData';
 import { useLocale } from "./i18n/useLocale";
 import MapEditor from './components/MapEditor';
+import { saveAsset } from './components/MapEditor/assets/assetLib';
 import LicencaOP, { TEXTO_IA } from "./components/LicencaOP";
 import { getActiveAvatar } from "./domain/character";
 import REGRAS_OFICIAIS from "./data/ordemParanormal/regras-oficiais.json";
@@ -32,6 +33,8 @@ import TOKENS_LIB from "./data/ordemParanormal/tokens-oficiais.json";
 
 // System-specific sheets are code-split (Phase 3 theming architecture).
 const OrdemParanormalSheet = lazy(() => import("./components/systems/OrdemParanormal/OrdemParanormalSheet"));
+// Construtor de tokens (paper-doll) — pesado em assets, carrega só quando aberto
+const TokenBuilder = lazy(() => import("./components/systems/OrdemParanormal/TokenBuilder"));
 const DungeonsAndDragonsSheet = lazy(() => import("./components/systems/DungeonsAndDragons/DungeonsAndDragonsSheet"));
 
 const googleProvider = new GoogleAuthProvider();
@@ -2902,23 +2905,146 @@ function CampaignRollDrawer({ campaign, onClose }) {
 /* ── CAMPAIGN MAP TAB ── */
 /* ── Mesa tática (spec 0007 / ADR 0005): o MapEditor é o mapa oficial da campanha.
    O tile-based foi aposentado; o doc legado map/current é ignorado. */
-function CampaignMapTab({ campaignId, uid, isMaster }) {
-  const [mesaAberta, setMesaAberta] = useState(false);
-  return (
-    <div style={{ display:'flex', flexDirection:'column', flex:1, overflow:'hidden' }}>
-      <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', flex:1, gap:16, textAlign:'center' }}>
-        <div style={{ fontSize:58, opacity:0.35 }}>🗺️</div>
-        <div style={{ fontFamily:'Cinzel Decorative,serif', fontSize:17, color:'var(--gold)', opacity:0.7 }}>Mesa tática</div>
-        <div style={{ fontFamily:"var(--font-body,'Crimson Pro',serif)", fontSize:14, color:'var(--muted)', maxWidth:380, lineHeight:1.8 }}>
-          {isMaster
-            ? 'Monte o mapa com imagens, tokens, camadas e névoa — os jogadores acompanham cada mudança ao vivo.'
-            : 'O mapa da sessão abre aqui em tempo real, conforme o Mestre edita.'}
+/* Tela de Mapas do menu lateral: escolhe entre a mesa tática e o construtor
+   de tokens. Fora de campanha o construtor salva na biblioteca do usuário. */
+function MapaScreen({ uid, onBack }) {
+  const [modo, setModo] = useState(null);   // null | 'mesa' | 'builder'
+  const [flash, setFlash] = useState("");
+
+  const salvarToken = async ({ nome, dataUrl }) => {
+    if (!uid) { setFlash('Faça login para salvar na biblioteca. Use "Baixar PNG" enquanto isso.'); return; }
+    try {
+      await saveAsset(db, uid, { type:'character', name:nome, tags:['construtor'], folder:null, data:dataUrl, w:512, h:512 });
+      setFlash(`"${nome}" salvo — abra a mesa tática e use a Biblioteca de assets.`);
+      setModo(null);
+    } catch (e) {
+      console.error('[construtor] salvar token falhou:', e);
+      setFlash('Não foi possível salvar. Use "Baixar PNG" como alternativa.');
+    }
+  };
+
+  if (modo === 'mesa') return <MapEditor uid={uid} db={db} onBack={()=>setModo(null)} />;
+
+  if (modo === 'builder') return (
+    <div className="fade" style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 160px)', minHeight:460, gap:12 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontFamily:'Cinzel Decorative,serif', fontSize:20, color:'#e0c8ff' }}>Construtor de Tokens</div>
+          <div style={{ fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1.4, textTransform:'uppercase', color:'var(--muted)' }}>
+            Monte o agente camada por camada
+          </div>
         </div>
-        <button onClick={() => setMesaAberta(true)}
-          style={{ padding:'10px 22px', borderRadius:8, border:'1px solid rgba(176,48,216,0.5)', background:'rgba(176,48,216,0.15)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:1, marginTop:8 }}>
-          🗺️ Abrir mesa tática
+        <button onClick={()=>setModo(null)}
+          style={{ padding:'8px 16px', borderRadius:8, border:'1px solid var(--border)', background:'transparent', color:'var(--muted)', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1 }}>
+          ← Voltar
         </button>
       </div>
+      <Suspense fallback={<div style={{ padding:40, textAlign:'center', color:'var(--muted)', fontFamily:'Crimson Pro,serif' }}>Carregando peças…</div>}>
+        <TokenBuilder onSalvar={salvarToken} onFechar={()=>setModo(null)} />
+      </Suspense>
+    </div>
+  );
+
+  const Card = ({ icone, titulo, texto, cor, onClick }) => (
+    <button onClick={onClick} style={{
+      flex:'1 1 260px', maxWidth:340, padding:'28px 24px', borderRadius:14, cursor:'pointer', textAlign:'left',
+      background:`linear-gradient(160deg, ${cor}18, transparent)`, border:`1px solid ${cor}44`, transition:'all .18s',
+    }}
+      onMouseEnter={e=>{ e.currentTarget.style.transform='translateY(-3px)'; e.currentTarget.style.borderColor=`${cor}99`; e.currentTarget.style.boxShadow=`0 8px 26px rgba(0,0,0,0.45)`; }}
+      onMouseLeave={e=>{ e.currentTarget.style.transform='none'; e.currentTarget.style.borderColor=`${cor}44`; e.currentTarget.style.boxShadow='none'; }}>
+      <div style={{ fontSize:40, marginBottom:12 }}>{icone}</div>
+      <div style={{ fontFamily:'Cinzel Decorative,serif', fontSize:18, color:cor, marginBottom:8 }}>{titulo}</div>
+      <div style={{ fontFamily:"var(--font-body,'Crimson Pro',serif)", fontSize:15, color:'var(--muted2)', lineHeight:1.6 }}>{texto}</div>
+    </button>
+  );
+
+  return (
+    <div className="fade" style={{ display:'flex', flexDirection:'column', gap:22 }}>
+      <div>
+        <div style={{ fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:'0.14em', color:'var(--muted)', textTransform:'uppercase', marginBottom:6 }}>Mesa & Tokens</div>
+        <h1 style={{ fontFamily:"'Cinzel Decorative',serif", fontSize:'clamp(20px,2.4vw,26px)', fontWeight:700,
+          background:'linear-gradient(135deg,#c9a84c,#e8c96d)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text' }}>Mapas</h1>
+      </div>
+      <div style={{ display:'flex', gap:14, flexWrap:'wrap' }}>
+        <Card icone="🗺️" titulo="Mesa Tática" cor="#b030d8" onClick={()=>setModo('mesa')}
+          texto="Monte o mapa com imagens, tokens, camadas de névoa e grade — tudo sincronizado com a mesa." />
+        <Card icone="🎭" titulo="Construtor de Tokens" cor="#c9a84c" onClick={()=>setModo('builder')}
+          texto="Monte agentes e NPCs camada por camada: molde, roupas, cabelo, armas e mais. Exporta PNG ou vai direto para a biblioteca do mapa." />
+      </div>
+      {flash && (
+        <div style={{ padding:'10px 16px', borderRadius:8, background:'rgba(106,170,122,0.12)', border:'1px solid rgba(106,170,122,0.35)',
+          color:'#8fd3a0', fontFamily:'Crimson Pro,serif', fontSize:15, maxWidth:520 }}>{flash}</div>
+      )}
+    </div>
+  );
+}
+
+function CampaignMapTab({ campaignId, uid, isMaster }) {
+  const [mesaAberta, setMesaAberta] = useState(false);
+  const [builderAberto, setBuilder] = useState(false);
+  const [flash, setFlash] = useState("");
+
+  /* Token construído entra na biblioteca de assets do usuário como
+     'character' — o mesmo tipo que o MapEditor coloca na mesa (spec 0013). */
+  const salvarTokenNaBiblioteca = async ({ nome, dataUrl }) => {
+    try {
+      await saveAsset(db, uid, {
+        type: 'character', name: nome, tags: ['construtor'], folder: null,
+        data: dataUrl, w: 512, h: 512,
+      });
+      setFlash(`"${nome}" salvo na biblioteca — abra a mesa tática e use a Biblioteca de assets.`);
+      setBuilder(false);
+    } catch (e) {
+      console.error('[construtor] salvar token falhou:', e);
+      setFlash('Não foi possível salvar. Use "Baixar PNG" como alternativa.');
+    }
+  };
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', flex:1, overflow:'hidden' }}>
+      {builderAberto ? (
+        <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0, gap:10 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontFamily:'Cinzel Decorative,serif', fontSize:17, color:'#e0c8ff' }}>Construtor de Tokens</div>
+              <div style={{ fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1.4, textTransform:'uppercase', color:'var(--muted)' }}>
+                Monte o agente camada por camada
+              </div>
+            </div>
+            <button onClick={()=>setBuilder(false)}
+              style={{ padding:'7px 14px', borderRadius:7, border:'1px solid var(--border)', background:'transparent', color:'var(--muted)', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1 }}>
+              ← Voltar
+            </button>
+          </div>
+          <Suspense fallback={<div style={{ padding:40, textAlign:'center', color:'var(--muted)', fontFamily:'Crimson Pro,serif' }}>Carregando peças…</div>}>
+            <TokenBuilder onSalvar={salvarTokenNaBiblioteca} onFechar={()=>setBuilder(false)} />
+          </Suspense>
+        </div>
+      ) : (
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', flex:1, gap:16, textAlign:'center' }}>
+          <div style={{ fontSize:58, opacity:0.35 }}>🗺️</div>
+          <div style={{ fontFamily:'Cinzel Decorative,serif', fontSize:17, color:'var(--gold)', opacity:0.7 }}>Mesa tática</div>
+          <div style={{ fontFamily:"var(--font-body,'Crimson Pro',serif)", fontSize:14, color:'var(--muted)', maxWidth:380, lineHeight:1.8 }}>
+            {isMaster
+              ? 'Monte o mapa com imagens, tokens, camadas e névoa — os jogadores acompanham cada mudança ao vivo.'
+              : 'O mapa da sessão abre aqui em tempo real, conforme o Mestre edita.'}
+          </div>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap', justifyContent:'center', marginTop:8 }}>
+            <button onClick={() => setMesaAberta(true)}
+              style={{ padding:'10px 22px', borderRadius:8, border:'1px solid rgba(176,48,216,0.5)', background:'rgba(176,48,216,0.15)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:1 }}>
+              🗺️ Abrir mesa tática
+            </button>
+            <button onClick={() => setBuilder(true)}
+              style={{ padding:'10px 22px', borderRadius:8, border:'1px solid rgba(201,168,76,0.5)', background:'rgba(201,168,76,0.12)', color:'var(--gold2)', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:1 }}>
+              🎭 Construtor de Tokens
+            </button>
+          </div>
+          {flash && (
+            <div style={{ marginTop:6, padding:'8px 14px', borderRadius:8, background:'rgba(106,170,122,0.12)', border:'1px solid rgba(106,170,122,0.35)',
+              color:'#8fd3a0', fontFamily:'Crimson Pro,serif', fontSize:14, maxWidth:420 }}>{flash}</div>
+          )}
+        </div>
+      )}
       {mesaAberta && (
         <MapEditor campaignId={campaignId} uid={uid} isMaster={isMaster} db={db}
           onBack={() => setMesaAberta(false)} />
@@ -12363,7 +12489,7 @@ export default function App() {
     switch(screen){
       case "dashboard": return <Dashboard system={activeSystem} onCreateChar={()=>setCreatingChar(true)} characters={characters} sessions={sessions} onSelectChar={c=>{ setCreatedChar(c); setScreen("sheet"); }} onNav={setScreen} userPlans={userPlans} onShowUpgrade={()=>setScreen("planos")}/>;
       case "sheet":     return <SheetList characters={characters} system={activeSystem} onCreateChar={()=>setCreatingChar(true)} onSelectChar={c=>{ setCreatedChar(c); }} onDeleteChar={(c)=>{ deleteCharacter(c); if (createdChar && ((createdChar.id && createdChar.id===c.id) || (!createdChar.id && createdChar.createdAt===c.createdAt))) setCreatedChar(null); }} onUpdateChar={(c)=>saveCharacter(c)}/>;
-      case "map":       return <MapEditor onBack={()=>setScreen("dashboard")} />;
+      case "map":       return <MapaScreen uid={currentUser?.uid || ""} onBack={()=>setScreen("dashboard")} />;
       case "master":    return <MasterAssistant system={activeSystem} onAddSession={()=>setSessions(prev=>[...prev,{id:Date.now(),date:new Date().toLocaleDateString('pt-BR')}])} />;
       case "roadmap":   return <RoadmapScreen />;
       case "planos":    return <PlansScreen userPlans={userPlans} currentUser={currentUser}/>;

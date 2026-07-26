@@ -14,17 +14,20 @@ const SELO_SRC = process.env.PUBLIC_URL + "/selo-conteudo-nao-oficial.png";
 export default function LicencaOP({ variant = "footer", style }) {
   const ficha = variant === "ficha";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: ficha ? 12 : 8, opacity: 1, ...style }}>
+    <div style={{ display: "flex", alignItems: "center", gap: ficha ? 12 : 10, minWidth: 0, opacity: 1, ...style }}>
       <img
         src={SELO_SRC}
         alt="Selo Conteúdo Não Oficial — Licença da Comunidade de Ordem Paranormal"
         style={ficha
           ? { width: "10%", minWidth: 48, maxWidth: 120, height: "auto", flexShrink: 0 }
-          : { width: 26, height: "auto", flexShrink: 0 }}
+          : { width: 30, height: "auto", flexShrink: 0 }}
       />
+      {/* Aviso legal: prioriza legibilidade (fonte de texto, não a display/mono
+       * decorativa) — a licença exige que a frase seja lida, não enfeitada. */}
       <span style={{
-        fontSize: ficha ? 11 : 9, lineHeight: 1.45, color: "var(--muted, #9a93a5)",
-        fontFamily: ficha ? "var(--font-data,'Share Tech Mono',monospace)" : "inherit",
+        fontSize: ficha ? 12 : 11.5, lineHeight: 1.5, color: "var(--muted2, #c8b48e)",
+        fontFamily: "var(--font-body,'Inter','Segoe UI',sans-serif)",
+        letterSpacing: "0.01em", minWidth: 0,
       }}>
         {TEXTO_NAO_OFICIAL}
       </span>

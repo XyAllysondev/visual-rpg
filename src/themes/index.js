@@ -22,10 +22,10 @@ export const SYSTEM_THEMES = {
     dashboardStyle: "dossier",
     sidebarStyle: "runes",
     colors: {
-      bg: "#07070d",
-      surface: "#0c0c14",
-      card: "#121220",
-      card2: "#181828",
+      bg: "#14141c",
+      surface: "#1c1c26",
+      card: "#24242f",
+      card2: "#2c2c39",
       border: "rgba(201,168,76,0.18)",
       border2: "rgba(201,168,76,0.34)",
       accent: "#c9a84c",          // corrupted gold
@@ -41,7 +41,7 @@ export const SYSTEM_THEMES = {
       dangerText: "#d85a5a",
       glitch: "#8b0000",
       text: "#e8e4d9",            // aged paper
-      muted: "#9c8e70",
+      muted: "#a89a7c",           // spec 0023: subiu p/ manter AA 4,5:1 sobre o card2 grafite
       muted2: "#c8b48e",
     },
     fonts: {
@@ -63,10 +63,10 @@ export const SYSTEM_THEMES = {
     dashboardStyle: "tavern-board",
     sidebarStyle: "heraldic",
     colors: {
-      bg: "#0d0a07",
-      surface: "#14100b",
-      card: "#1a1410",
-      card2: "#221a13",
+      bg: "#1a140f",
+      surface: "#231b13",
+      card: "#2d231a",
+      card2: "#372b1f",
       border: "rgba(192,57,43,0.20)",
       border2: "rgba(192,57,43,0.38)",
       accent: "#c0392b",
@@ -80,7 +80,7 @@ export const SYSTEM_THEMES = {
       dangerText: "#e07a5a",
       glitch: "#c0392b",
       text: "#f0e6d2",
-      muted: "#9c8a6a",
+      muted: "#a89678",           // spec 0023: AA sobre o card2 grafite
       muted2: "#cdb98e",
     },
     fonts: {
@@ -102,10 +102,10 @@ export const SYSTEM_THEMES = {
     dashboardStyle: "scroll",
     sidebarStyle: "fantasy",
     colors: {
-      bg: "#0a0d07",
-      surface: "#0f1310",
-      card: "#141a13",
-      card2: "#1a221a",
+      bg: "#10170f",
+      surface: "#161f15",
+      card: "#1e281d",
+      card2: "#243023",
       border: "rgba(46,125,50,0.22)",
       border2: "rgba(46,125,50,0.40)",
       accent: "#2e7d32",
@@ -119,7 +119,7 @@ export const SYSTEM_THEMES = {
       dangerText: "#e08a4a",
       glitch: "#2e7d32",
       text: "#e6f0d8",
-      muted: "#8a9c70",
+      muted: "#94a87a",           // spec 0023: AA sobre o card2 grafite
       muted2: "#bcd098",
     },
     fonts: {

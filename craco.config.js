@@ -11,4 +11,19 @@ module.exports = {
   webpack: {
     alias: { '@': path.resolve(__dirname, 'src') },
   },
+  // public/ tem milhares de assets estáticos (bestiary-tokens, token-builder);
+  // vigiá-los estoura os file-watchers no Windows e mata o dev server minutos
+  // após compilar. Servir sem watch resolve — os assets não mudam em runtime.
+  devServer: (config) => {
+    const publicDir = path.join(__dirname, 'public');
+    const norm = (s) => {
+      if (typeof s === 'string') return { directory: s, watch: false };
+      if (s && typeof s === 'object') return { ...s, watch: false };
+      return { directory: publicDir, watch: false };   // static indefinido → aponta pro public
+    };
+    config.static = Array.isArray(config.static) && config.static.length
+      ? config.static.map(norm)
+      : [norm(config.static)];
+    return config;
+  },
 };

@@ -1,6 +1,7 @@
 import {
   simplify, strokeToPoly, shapeBBox, containsShape, pruneContained,
   pointInShape, hitFogShape,
+  expandGroups, toggleCut, joinShapes, splitShapes, fogFill,
 } from '../fog';
 
 const rect = (id, x, y, w, h, op = 'add') => ({ id, op, type: 'rect', x, y, w, h });
@@ -82,5 +83,126 @@ describe('hitFogShape (AC-7)', () => {
     expect(hitFogShape(shapes, 50, 50)?.id).toBe('top');
     expect(hitFogShape(shapes, 5, 5)?.id).toBe('below');
     expect(hitFogShape(shapes, 500, 500)).toBeNull();
+  });
+});
+
+/* ───── Cortar / Recobrir e grupos (doc Owlbear /docs/fog) ───── */
+
+const ids = arr => arr.map(s => s.id);
+const ops = arr => arr.map(s => s.op);
+
+describe('toggleCut — o fluxo de encontro', () => {
+  it('sala coberta vira cortada (revelada)', () => {
+    const out = toggleCut([rect('a', 0, 0, 10, 10)], ['a']);
+    expect(out[0].op).toBe('cut');
+  });
+
+  it('e cortada volta a cobrir', () => {
+    const out = toggleCut([rect('a', 0, 0, 10, 10, 'cut')], ['a']);
+    expect(out[0].op).toBe('add');
+  });
+
+  it('sobe a forma tocada para o TOPO da pilha — senão o cut não revela nada', () => {
+    // 'a' no índice 0 e 'b' cobrindo a mesma área depois: cortar 'a' sem reordenar seria no-op visual
+    const before = [rect('a', 0, 0, 10, 10), rect('b', 0, 0, 10, 10)];
+    const out = toggleCut(before, ['a']);
+    expect(ids(out)).toEqual(['b', 'a']);
+    expect(out[1].op).toBe('cut');
+  });
+
+  it('preserva a ordem relativa das formas não tocadas', () => {
+    const before = [rect('a', 0, 0, 1, 1), rect('b', 0, 0, 1, 1), rect('c', 0, 0, 1, 1)];
+    expect(ids(toggleCut(before, ['b']))).toEqual(['a', 'c', 'b']);
+  });
+
+  it('seleção mista vira TODA cortada (revelar é a intenção dominante)', () => {
+    const before = [rect('a', 0, 0, 1, 1, 'add'), rect('b', 0, 0, 1, 1, 'cut')];
+    expect(ops(toggleCut(before, ['a', 'b']))).toEqual(['cut', 'cut']);
+  });
+
+  it('seleção toda cortada volta toda a cobrir', () => {
+    const before = [rect('a', 0, 0, 1, 1, 'cut'), rect('b', 0, 0, 1, 1, 'cut')];
+    expect(ops(toggleCut(before, ['a', 'b']))).toEqual(['add', 'add']);
+  });
+
+  it('id inexistente ou seleção vazia não muda nada', () => {
+    const before = [rect('a', 0, 0, 1, 1)];
+    expect(toggleCut(before, [])).toBe(before);
+    expect(toggleCut(before, ['zzz'])).toBe(before);
+    expect(toggleCut(undefined, ['a'])).toEqual([]);
+  });
+});
+
+describe('grupos (Join) — alternar junto', () => {
+  const trio = () => [
+    rect('a', 0, 0, 1, 1), rect('b', 5, 0, 1, 1), rect('c', 9, 0, 1, 1),
+  ];
+
+  it('join marca as selecionadas com o mesmo groupId', () => {
+    const out = joinShapes(trio(), ['a', 'b'], 'g1');
+    expect(out.find(s => s.id === 'a').groupId).toBe('g1');
+    expect(out.find(s => s.id === 'b').groupId).toBe('g1');
+    expect(out.find(s => s.id === 'c').groupId).toBeUndefined();
+  });
+
+  it('join com menos de 2 formas é no-op', () => {
+    const before = trio();
+    expect(joinShapes(before, ['a'], 'g1')).toBe(before);
+    expect(joinShapes(before, [], 'g1')).toBe(before);
+  });
+
+  it('expandGroups puxa os irmãos do grupo', () => {
+    const joined = joinShapes(trio(), ['a', 'b'], 'g1');
+    expect([...expandGroups(joined, ['a'])].sort()).toEqual(['a', 'b']);
+    expect([...expandGroups(joined, ['c'])]).toEqual(['c']);
+  });
+
+  it('cortar UM membro corta o grupo inteiro', () => {
+    const joined = joinShapes(trio(), ['a', 'b'], 'g1');
+    const out = toggleCut(joined, ['a']);
+    expect(out.find(s => s.id === 'a').op).toBe('cut');
+    expect(out.find(s => s.id === 'b').op).toBe('cut');
+    expect(out.find(s => s.id === 'c').op).toBe('add'); // fora do grupo, intacta
+  });
+
+  it('grupo já cortado volta inteiro a cobrir', () => {
+    const joined = joinShapes(trio(), ['a', 'b'], 'g1');
+    const cut = toggleCut(joined, ['a']);
+    const back = toggleCut(cut, ['b']);
+    expect(back.find(s => s.id === 'a').op).toBe('add');
+    expect(back.find(s => s.id === 'b').op).toBe('add');
+  });
+
+  it('split remove o groupId do grupo inteiro', () => {
+    const joined = joinShapes(trio(), ['a', 'b'], 'g1');
+    const out = splitShapes(joined, ['a']);
+    expect(out.find(s => s.id === 'a').groupId).toBeUndefined();
+    expect(out.find(s => s.id === 'b').groupId).toBeUndefined();
+  });
+
+  it('split em forma sem grupo é no-op', () => {
+    const before = trio();
+    expect(splitShapes(before, ['a'])).toBe(before);
+  });
+
+  it('juntar num grupo existente absorve os dois grupos', () => {
+    let s = joinShapes(trio(), ['a', 'b'], 'g1');
+    s = joinShapes(s, ['b', 'c'], 'g2'); // b já era de g1 → puxa 'a' junto
+    expect(new Set(s.map(x => x.groupId))).toEqual(new Set(['g2']));
+  });
+});
+
+describe('fogFill — cor da névoa', () => {
+  it('converte hex de 6 dígitos', () => {
+    expect(fogFill('#000000', 0.88)).toBe('rgba(0,0,0,0.88)');
+    expect(fogFill('#7c3aed', 1)).toBe('rgba(124,58,237,1)');
+  });
+  it('aceita hex curto', () => {
+    expect(fogFill('#fff', 0.5)).toBe('rgba(255,255,255,0.5)');
+  });
+  it('valor inválido cai no preto (nunca deixa a névoa transparente por erro de cor)', () => {
+    expect(fogFill('roxo', 0.9)).toBe('rgba(0,0,0,0.9)');
+    expect(fogFill(undefined, 0.9)).toBe('rgba(0,0,0,0.9)');
+    expect(fogFill('', 0.9)).toBe('rgba(0,0,0,0.9)');
   });
 });

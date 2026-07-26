@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { DnDSheetStyles } from "./DnDSheetStyles";
+import { useSlidingPill } from "../../../hooks/useSlidingPill";
+import SlidingTabPill from "../../SlidingTabPill";
 import talentos   from "../../../data/dungeonsAndDragons/talentos.json";
 import magiasData from "../../../data/dungeonsAndDragons/magias.json";
 import regrasData from "../../../data/dungeonsAndDragons/regras.json";
@@ -536,6 +538,8 @@ export default function DungeonsAndDragonsSheet({ character, onBack, onUpdate, o
   const [resists,    setResists]    = useState(character.resistencias ?? []);
 
   const [activeTab, setActiveTab]  = useState("pericias");
+  /* Indicador deslizante da barra de abas (spec 0022 AC-1). */
+  const tabsPill = useSlidingPill(activeTab);
   const [mobileSec, setMobileSec]  = useState("ficha");
   const [editMode,  setEditMode]   = useState(false);
   const [skillQ,    setSkillQ]     = useState("");
@@ -1323,9 +1327,11 @@ export default function DungeonsAndDragonsSheet({ character, onBack, onUpdate, o
         <div className={`dnd-main${mobileSec==="ficha"&&typeof window!=="undefined"&&window.innerWidth<=768?" dnd-mob-hide":""}`}
           style={{ border:"1px solid rgba(201,168,76,0.14)",borderRadius:2,
             background:"rgba(6,4,12,0.7)",overflow:"hidden" }}>
-          <div className="dnd-tabs" style={{ position:"sticky",top:0,zIndex:5 }}>
+          <div className="dnd-tabs" ref={tabsPill.containerRef} style={{ position:"sticky",top:0,zIndex:5 }}>
+            <SlidingTabPill pill={tabsPill.pill} background="rgba(201,168,76,0.08)"
+              underline="var(--gold)" topLine="linear-gradient(90deg,transparent,var(--gold-hi),transparent)" />
             {TABS.map(([id,lbl])=>(
-              <button key={id} className={`dnd-tab${activeTab===id?" on":""}`} onClick={()=>setActiveTab(id)}>{lbl}</button>
+              <button key={id} ref={tabsPill.setItemRef(id)} className={`dnd-tab${activeTab===id?" on":""}`} onClick={()=>setActiveTab(id)}>{lbl}</button>
             ))}
           </div>
           {(TAB_RENDER[activeTab]||TAB_RENDER.pericias)()}

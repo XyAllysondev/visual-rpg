@@ -9,7 +9,7 @@
 export const ELEMENTOS = {
   morte: {
     id: "morte", name: "Morte", symbolType: "spiral", gmOnly: false,
-    primary: "#c8c8c8", accent: "#f0f0f0", glow: "rgba(200,200,200,0.45)", bg: "#0d0d0f", border: "#888888",
+    primary: "#c8c8c8", accent: "#f0f0f0", glow: "rgba(200,200,200,0.45)", bg: "#151518", border: "#888888",
     emphasis: [], sectionTitle: "Manifestações da Morte",
     sectionHint: "Registre poderes necróticos, contatos com o além e estados transitórios entre vida e morte.",
     description: "Formas espirais. A linha entre vivo e morto se torna permeável.",
@@ -18,7 +18,7 @@ export const ELEMENTOS = {
   },
   sangue: {
     id: "sangue", name: "Sangue", symbolType: "blood-cross", gmOnly: false,
-    primary: "#cc0000", accent: "#ff2a2a", glow: "rgba(204,0,0,0.5)", bg: "#1a0000", border: "#8b0000",
+    primary: "#cc0000", accent: "#ff2a2a", glow: "rgba(204,0,0,0.5)", bg: "#2c0a0a", border: "#8b0000",
     emphasis: ["VIG"], sectionTitle: "Laços de Sangue",
     sectionHint: "Mapeie pactos de sangue, vínculos rituais com aliados e inimigos.",
     description: "Quadrados em várias posições com finas linhas onduladas.",
@@ -27,7 +27,7 @@ export const ELEMENTOS = {
   },
   conhecimento: {
     id: "conhecimento", name: "Conhecimento", symbolType: "triangle-rune", gmOnly: false,
-    primary: "#c9a84c", accent: "#d4a017", glow: "rgba(201,168,76,0.5)", bg: "#0d0a00", border: "#8b7000",
+    primary: "#c9a84c", accent: "#d4a017", glow: "rgba(201,168,76,0.5)", bg: "#1b1404", border: "#8b7000",
     emphasis: ["INT"], sectionTitle: "Arquivos Proibidos",
     sectionHint: "Anote pesquisas, sigilos e verdades proibidas que o agente decifrou.",
     description: "Sigilos e letras que formam frases pelos símbolos.",
@@ -36,7 +36,7 @@ export const ELEMENTOS = {
   },
   energia: {
     id: "energia", name: "Energia", symbolType: "diamond", gmOnly: false,
-    primary: "#8844cc", accent: "#9b59b6", glow: "rgba(136,68,204,0.5)", bg: "#0a0014", border: "#5b0099",
+    primary: "#8844cc", accent: "#9b59b6", glow: "rgba(136,68,204,0.5)", bg: "#1f0c31", border: "#5b0099",
     emphasis: ["FOR", "VIG"], sectionTitle: "Surtos de Energia",
     sectionHint: "Acompanhe explosões de energia, sobrecargas e descargas paranormais.",
     description: "Diamante elétrico. O símbolo aparece em vários rituais de Energia.",
@@ -45,7 +45,7 @@ export const ELEMENTOS = {
   },
   medo: {
     id: "medo", name: "Medo", symbolType: "fear-glyph", gmOnly: true,
-    primary: "#4466cc", accent: "#5b8dd9", glow: "rgba(68,102,204,0.6)", bg: "#000814", border: "#1a3399",
+    primary: "#4466cc", accent: "#5b8dd9", glow: "rgba(68,102,204,0.6)", bg: "#0c162c", border: "#1a3399",
     emphasis: [], sectionTitle: "Vestígios do Medo",
     sectionHint: "Registre vislumbres do Pavor Anormal e da Névoa do Outro Lado.",
     description: "Apenas o próprio símbolo. Névoa do Outro Lado e Pavor Anormal.",
@@ -57,7 +57,7 @@ export const ELEMENTOS = {
 /* Base "Ordem" identity before any element (NEX < 50%). */
 export const DEFAULT_ELEMENT_THEME = {
   id: null, name: "Ordem", symbolType: null, gmOnly: false,
-  primary: "#c9a84c", accent: "#e8c96d", glow: "rgba(201,168,76,0.4)", bg: "#07070d", border: "rgba(201,168,76,0.34)",
+  primary: "#c9a84c", accent: "#e8c96d", glow: "rgba(201,168,76,0.4)", bg: "#14141c", border: "rgba(201,168,76,0.34)",
   emphasis: [], crisis: { watermark: "Estado Crítico", vignette: "rgba(229,57,53,0.42)" },
 };
 

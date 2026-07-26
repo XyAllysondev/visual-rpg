@@ -25,5 +25,34 @@ export function canDelete(scene, el, uid, isMaster) {
   if (isMaster) return true;
   if (!el || el.locked || !uid) return false;
   if (layerOf(scene, el.layerId)?.locked) return false;
-  return perm(scene, el.layerId, 'delete') === 'owner' && el.ownerId === uid;
+  const p = perm(scene, el.layerId, 'delete');
+  if (p === 'all') return true;
+  if (p === 'owner') return el.ownerId === uid;
+  return false;
+}
+
+/* Modos por eixo, na ordem em que a UI cicla. `create` é booleano (a doc do Owlbear trata
+ * criar como sim/não; não existe "criar só o que é seu"). */
+export const UPDATE_MODES = ['none', 'owner', 'all'];
+export const DELETE_MODES = ['none', 'owner', 'all'];
+
+export const PERM_LABELS = {
+  update: { none: 'só o mestre move', owner: 'dono move o próprio', all: 'todos movem' },
+  delete: { none: 'só o mestre apaga', owner: 'dono apaga o próprio', all: 'todos apagam' },
+  create: { false: 'só o mestre cria', true: 'jogadores criam' },
+};
+
+/** Próximo valor do ciclo de um eixo de permissão da camada. */
+export function nextPerm(action, current) {
+  if (action === 'create') return !current;
+  const modes = action === 'delete' ? DELETE_MODES : UPDATE_MODES;
+  const i = modes.indexOf(current);
+  return modes[(i < 0 ? 0 : i + 1) % modes.length];
+}
+
+/** Camadas em que o jogador pode criar — define quais ferramentas ele recebe. */
+export function creatableLayers(scene, uid, isMaster) {
+  return (scene?.layers || [])
+    .filter(l => canCreate(scene, l.id, uid, isMaster))
+    .map(l => l.id);
 }

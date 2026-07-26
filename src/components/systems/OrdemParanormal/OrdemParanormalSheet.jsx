@@ -32,6 +32,8 @@ import {
   TIPOS_DANO, ALCANCES, PERICIAS_ATAQUE, critMargin, isCritical, combineDamage,
 } from "./rules";
 import { ModalShell, inputS, fieldLabel, btnGold, btnGhost } from "./Tabs/shared/modalStyles";
+import { useSlidingPill } from "../../../hooks/useSlidingPill";
+import SlidingTabPill from "../../SlidingTabPill";
 import RichTextEditor from "./Tabs/shared/RichTextEditor";
 
 const downscale = (file, max = 420) =>
@@ -160,7 +162,7 @@ function buildDiff(base, proposed) {
   });
 
   // Perícias treino
-  const tLabel = v => v === 0 || v === false ? "Destreinado" : v === 1 || v === true ? "Treinado" : v === 2 ? "Veterano" : v === 3 ? "Expert" : String(v ?? "—");
+  const tLabel = v => v === 0 || v === false ? "Destreinado" : v === 1 || v === true ? "Treinado" : v === 2 ? "Competente" : v === 3 ? "Expert" : String(v ?? "—");
   const allTreino = new Set([...Object.keys(base.skillTreino || {}), ...Object.keys(proposed.skillTreino || {})]);
   allTreino.forEach(sid => {
     const o = base.skillTreino?.[sid], n = proposed.skillTreino?.[sid];
@@ -268,6 +270,9 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
   /* ── UI state ── */
   const [editMode, setEditMode] = useState(!!defaultEditMode);
   const [activeTab, setActiveTab] = useState("combate");
+  /* Indicadores deslizantes das duas barras desta ficha (spec 0022 AC-1). */
+  const tabsPill = useSlidingPill(activeTab);
+  const secPill = useSlidingPill(mobileSec);
   const [diceInput, setDiceInput] = useState("");
   const [roll, setRoll] = useState(null);
   const [showNex, setShowNex] = useState(false);
@@ -622,10 +627,18 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
           <button className="btn-ghost" onClick={handleBack} aria-label="Voltar">← {t("common.back")}</button>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="op-label" style={{ marginBottom: 2 }}>{t("op.sheet.subtitle")}</div>
-            <h1 className={`op-glitch ${wounded ? "on" : ""}`}
-              style={{ fontFamily: "var(--font-display,'Cinzel Decorative',serif)", fontSize: "clamp(22px,3.4vw,38px)", color: "var(--el-glow)", lineHeight: 1.05, margin: 0, textShadow: "0 0 18px var(--el-glow)" }}>
-              {charName}
-            </h1>
+            {editMode ? (
+              <input className="op-name-input" value={form.personagem ?? character.name ?? ""}
+                onChange={(e) => setForm((f) => ({ ...f, personagem: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur(); }}
+                placeholder="Nome do agente" aria-label="Nome do agente" maxLength={40} />
+            ) : (
+              <h1 className={`op-glitch op-name-edit ${wounded ? "on" : ""}`} title="Duplo clique para editar o nome"
+                onDoubleClick={() => setEditMode(true)}
+                style={{ fontFamily: "var(--font-display,'Cinzel Decorative',serif)", fontSize: "clamp(22px,3.4vw,38px)", color: "var(--el-glow)", lineHeight: 1.05, margin: 0, textShadow: "0 0 18px var(--el-glow)" }}>
+                {charName}
+              </h1>
+            )}
           </div>
           {elementoAfinidade && (
             <span title={isMedo && elementoGmOverride ? "Elemento concedido pelo Mestre da Campanha" : theme.name}
@@ -730,9 +743,10 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
         )}
 
         {/* ── Mobile section switcher — hidden on desktop ── */}
-        <div className="op-mobile-secnav">
+        <div className="op-mobile-secnav" ref={secPill.containerRef}>
+          <SlidingTabPill pill={secPill.pill} underline="var(--el-accent)" />
           {[["ficha","◈ Ficha"],["pericias","⬢ Perícias"],["abas","⚔ Ações"]].map(([id, lbl]) => (
-            <button key={id} className={`op-mobile-secbtn${mobileSec === id ? " active" : ""}`}
+            <button key={id} ref={secPill.setItemRef(id)} className={`op-mobile-secbtn${mobileSec === id ? " active" : ""}`}
               onClick={() => setMobileSec(id)}>
               {lbl}
             </button>
@@ -931,7 +945,7 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
 
         {/* ── CENTER: perícias ── */}
         <div className={`op-ink op-col-panel${mobileSec !== "pericias" ? " op-mobile-hidden" : ""}`} style={{ display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden", background: "rgba(0,0,0,0.22)" }}>
-          <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border2)", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border2)", display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span className="op-label" style={{ color: "var(--el-glow)" }}>{t("op.sheet.skills.title")}</span>
               <span className="op-data" style={{ fontSize: 9, color: "var(--muted)" }}>{trained.size} {t("op.sheet.skills.actives")}</span>
@@ -947,7 +961,7 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
             <span className="op-label" style={{ fontSize: 8, textAlign: "center" }}>{t("op.sheet.skills.outros")}</span>
             <span />
           </div>
-          <div className="op-col-rows" style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
+          <div className="op-col-rows" style={{ overflowY: "auto", flex: "0 1 auto", minHeight: 0 }}>
             {PERICIA_GRUPOS.map((g) => {
               const rows = filteredPericias.filter((p) => p.categoria === g.id);
               if (rows.length === 0) return null;
@@ -968,16 +982,17 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
               );
             })}
           </div>
-          <div className="op-data" style={{ padding: "8px 12px", fontSize: 9, color: "var(--muted)", borderTop: "1px solid var(--border)" }}>
+          <div className="op-data" style={{ padding: "8px 12px", fontSize: 9, color: "var(--muted)", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
             {t("op.sheet.skills.footnote")}
           </div>
         </div>
 
         {/* ── RIGHT: tabs ── */}
         <div className={`op-col${mobileSec !== "abas" ? " op-mobile-hidden" : ""}`} style={{ minWidth: 0 }}>
-          <div className="op-tabs-row" style={{ borderBottom: "1px solid var(--border2)", position: "sticky", top: 0, zIndex: 2, background: "var(--bg)" }} role="tablist">
+          <div className="op-tabs-row" ref={tabsPill.containerRef} style={{ borderBottom: "1px solid var(--border2)", position: "sticky", top: 0, zIndex: 2, background: "var(--bg)" }} role="tablist">
+            <SlidingTabPill pill={tabsPill.pill} background="rgba(201,168,76,0.08)" underline="var(--el-accent)" />
             {TABS.map(([id, lbl]) => (
-              <div key={id} className={`op-tab ${activeTab === id ? "active" : ""}`} role="tab" aria-selected={activeTab === id} tabIndex={0}
+              <div key={id} ref={tabsPill.setItemRef(id)} className={`op-tab ${activeTab === id ? "active" : ""}`} role="tab" aria-selected={activeTab === id} tabIndex={0}
                 onClick={() => setActiveTab(id)} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setActiveTab(id)}>{lbl}</div>
             ))}
           </div>
