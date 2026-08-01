@@ -14,7 +14,7 @@ export const roadmapData = [
           { nome: "Criador de personagem 4 etapas (Ordem Paranormal)", status: "done" },
           { nome: "Ficha completa FullSheet 3 colunas", status: "done" },
           { nome: "Progressão de atributos por NEX", status: "done" },
-          { nome: "Ajudante do Mestre com IA", status: "done" },
+          { nome: "Ajudante do Mestre (suíte de mundo)", status: "done" },
         ],
       },
     ],

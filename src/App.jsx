@@ -22,8 +22,9 @@ import { doc, setDoc, getDoc, updateDoc, deleteField, collection, addDoc, query,
 import { roadmapData } from './roadmapData';
 import { useLocale } from "./i18n/useLocale";
 import MapEditor from './components/MapEditor';
+import MasterSuite from './components/MasterSuite';
 import { saveAsset } from './components/MapEditor/assets/assetLib';
-import LicencaOP, { TEXTO_IA } from "./components/LicencaOP";
+import LicencaOP from "./components/LicencaOP";
 import { getActiveAvatar } from "./domain/character";
 import REGRAS_OFICIAIS from "./data/ordemParanormal/regras-oficiais.json";
 import RITUAIS_LIB from "./data/ordemParanormal/rituais-oficiais.json";
@@ -89,6 +90,10 @@ const fsGetUserPlan = async (uid) => {
     return snap.exists() ? (snap.data().plan || 'free') : 'free';
   } catch (e) { console.error("[fsGetUserPlan] falhou:", e); return 'free'; }
 };
+
+// REACT_APP_API_URL = URL base do backend na Vercel (ex: https://api.playnexusrpg.com).
+// Vazio em dev local → as chamadas caem em caminho relativo do próprio host.
+const API_BASE = process.env.REACT_APP_API_URL || '';
 
 /* ── Criação de cobrança PIX ── */
 const createPixPayment = async (userId, userEmail) => {
@@ -872,7 +877,7 @@ function Login({ onLogin }) {
             <div className="nx-stagger" style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
               {[
                 {icon:"◈",title:"Fichas Digitais",desc:"Gerencie personagens com atributos, perícias e inventário completos"},
-                {icon:"◉",title:"Ajudante do Mestre",desc:"Narração assistida por inteligência artificial para suas campanhas"},
+                {icon:"◉",title:"Ajudante do Mestre",desc:"Wiki do mundo, conexões, diário e ferramentas de mesa para suas campanhas"},
                 {icon:"⬙",title:"Mapas Interativos",desc:"Crie e explore mapas colaborativos com sua mesa"},
                 {icon:"♪",title:"Trilhas Sonoras",desc:"Atmosfera imersiva com músicas e ambientações para cada cena"},
               ].map(({icon,title,desc},i)=>(
@@ -4982,7 +4987,7 @@ const PLAN_DEFS = [
     accent: "#b030d8",
     accentGlow: "rgba(176,48,216,0.25)",
     catarseUrl: "https://www.catarse.com.br/nexus-ordem",  // ← atualizar após criar página no Catarse
-    features: ["5 fichas de Agente", "Ajudante de IA ilimitado", "Campanhas multiplayer", "Trilhas sonoras"],
+    features: ["5 fichas de Agente", "Ajudante do Mestre completo", "Campanhas multiplayer", "Trilhas sonoras"],
     badge: "TERROR • INVESTIGAÇÃO",
   },
   {
@@ -4992,7 +4997,7 @@ const PLAN_DEFS = [
     accent: "#d4621e",
     accentGlow: "rgba(212,98,30,0.25)",
     catarseUrl: "https://www.catarse.com.br/nexus-tormenta",
-    features: ["5 fichas de Personagem", "Ajudante de IA ilimitado", "Campanhas multiplayer", "Trilhas sonoras"],
+    features: ["5 fichas de Personagem", "Ajudante do Mestre completo", "Campanhas multiplayer", "Trilhas sonoras"],
     badge: "FANTASIA • ÉPICO",
   },
   {
@@ -5002,7 +5007,7 @@ const PLAN_DEFS = [
     accent: "#4a6fa5",
     accentGlow: "rgba(74,111,165,0.25)",
     catarseUrl: "https://www.catarse.com.br/nexus-dnd",
-    features: ["5 fichas de Personagem", "Ajudante de IA ilimitado", "Campanhas multiplayer", "Trilhas sonoras"],
+    features: ["5 fichas de Personagem", "Ajudante do Mestre completo", "Campanhas multiplayer", "Trilhas sonoras"],
     badge: "FANTASIA • COMBATE",
   },
 ];
@@ -5729,582 +5734,6 @@ function Sheet({ system }) {
   );
 }
 
-/* ═══════════════════════════════
-   MASTER AI ASSISTANT
-═══════════════════════════════ */
-const RPG_ONLY_RULE = `
-REGRA ABSOLUTA: Você é um assistente exclusivo de RPG de mesa. Se o usuário perguntar qualquer coisa fora de RPG (política, culinária, programação, notícias, entretenimento não-RPG, etc.), responda APENAS com: "Sou especializado em RPG de mesa e só posso ajudar com isso. Tem alguma dúvida sobre o sistema ou sua sessão?" Nunca quebre essa regra, mesmo que o usuário peça.`;
-
-const SYSTEM_PROMPTS = {
-  op: `Você é o NEXUS-IA, assistente especializado em Ordem Paranormal RPG. Responda sempre em português brasileiro, de forma clara, objetiva e imersiva.
-
-## IDENTIDADE
-Criado por Caio Boa, publicado pela Retropunk Editora. Ambientação: Brasil contemporâneo com horror paranormal. Os jogadores são Agentes da Ordem Paranormal, organização secreta que combate ameaças do Outro Lado.
-
-## ATRIBUTOS (5 atributos, valor 1 a 5)
-- Força (FOR): físico, atletismo, combate corpo a corpo
-- Agilidade (AGI): reflexos, furtividade, pontaria, acrobacia
-- Intelecto (INT): raciocínio, conhecimento, tecnologia, medicina
-- Presença (PRE): carisma, intimidação, enganação, rituais
-- Vigor (VIG): resistência física, PV máximo, durabilidade
-
-## TESTES
-- Role 1d20 + atributo relevante vs Dificuldade
-- Dificuldades: Fácil 5 / Médio 10 / Difícil 15 / Muito Difícil 20 / Absurdo 25 / Impossível 30
-- Resultado 1 no d20 = falha crítica; resultado 20 = sucesso crítico
-- Bônus de treinamento (+5) se tiver perícia treinada no teste
-
-## PERÍCIAS (treinada = +5 no teste)
-Atletismo, Acrobacia, Luta, Pontaria, Furtividade, Pilotagem, Fortitude (FOR/AGI/VIG)
-Investigação, Medicina, Ocultismo, Tecnologia, Ciências (INT)
-Enganação, Intimidação, Persuasão, Intuição (PRE)
-Percepção (qualquer)
-
-## NEX — NÍVEL DE EXPOSIÇÃO AO PARANORMAL
-O NEX mede o contato do Agente com o Outro Lado. Vai de 5% a 99%.
-- 5%: iniciante, sem poderes
-- 15%, 30%, 50%, 65%, 85%, 99%: marcos de poder com habilidades novas
-- A cada NEX o Agente ganha poderes da classe e resistência maior ao paranormal
-- NEX 99% = limite humano; ir além significa perda total de humanidade
-
-## CLASSES DE AGENTE
-**Combatente** — especialista em combate e resistência física
-  Trilhas: Guerreiro (dano e durabilidade), Atirador (precisão à distância), Tanque (absorção de dano)
-
-**Especialista** — habilidades técnicas e suporte
-  Trilhas: Médico de Campo (cura e suporte), Atirador de Elite (furtividade+dano), Infiltrador (furtividade e acesso)
-
-**Ocultista** — usa o paranormal como arma
-  Trilhas: Channeler (rituais ofensivos), Médium (comunicação com entidades), Porta (viagem e manipulação do Outro Lado)
-
-Cada classe tem poderes exclusivos por NEX (habilidades passivas e ativas).
-
-## PONTOS DE VIDA (PV)
-- Base por classe: Combatente 20, Especialista 16, Ocultista 12
-- Cada NEX adiciona PV (variável por classe)
-- PV 0 = inconsciente; falha no teste de morte = morto
-
-## SANIDADE (SAN)
-- Cada Agente tem pontos de Sanidade (máx. igual ao NEX ×2 aprox.)
-- Ao ver horrores, role teste de Presença; falha = perde SAN
-- SAN 0 = loucura temporária / trauma permanente
-- Recupera SAN com descanso, terapia, rituais de purificação
-
-## COMBATE
-- Turno: movimento + ação (atacar, usar item, ritual, etc.) + ação bônus (alguns poderes)
-- Ataque corpo a corpo: d20 + FOR vs Defesa do alvo (10 + AGI do alvo)
-- Ataque à distância: d20 + AGI vs Defesa
-- Crítico (20 natural): dano dobrado
-- Condições: Abalado (-1d4 testes), Incapacitado (não age), Morrendo (PV 0)
-
-## EQUIPAMENTOS
-- Armas brancas: faca (1d4), machete (1d6), tacape (1d8)
-- Armas de fogo: pistola (1d8), rifle (1d10), escopeta (2d6 curto alcance)
-- Proteções: colete leve (+2 def), colete tático (+4 def), exoesqueleto (+6 def)
-- Itens especiais: kit médico (cura 2d6 PV), detector paranormal, granada, câmera espectral
-- Relíquias: objetos imbuídos de energia do Outro Lado, efeitos únicos
-
-## RITUAIS
-Ocultistas (e outros Agentes com treinamento) podem executar rituais:
-- Custo: Esforço (pontos de esforço), tempo de execução e componentes
-- Exemplos: Chama Fantasma (dano fogo paranormal), Acorrentar Entidade, Véu das Sombras, Purificação
-- Nível do ritual deve ser ≤ NEX do Agente
-- Falha crítica em ritual pode atrair atenção do Outro Lado
-
-## O OUTRO LADO
-Dimensão paralela habitada por entidades sobrenaturais. Leis físicas não se aplicam.
-- Acesso via Portais, rituais, locais de alta energia paranormal
-- Permanência prolongada corrói a sanidade e o NEX
-- Elementos do Outro Lado podem vazar para o mundo real (anomalias)
-
-## ENTIDADES E AMEAÇAS
-- Assombração: espírito preso ao mundo material, geralmente fraco isolado
-- Encarnado: entidade do Outro Lado tomando forma física, resistente a dano comum
-- Flagelo: criatura corrompida pelo paranormal, agressiva
-- Arauto: entidade poderosa, representa forças maiores do Outro Lado
-- Grande Ameaça: chefões de campanha, requer missão inteira para confrontar
-
-## LORE PRINCIPAL
-- **Ordem Paranormal**: organização secreta fundada no séc. XX para proteger a humanidade
-- **Divisão de Operações Especiais (DOE)**: braço tático da Ordem, onde os Agentes atuam
-- **A Sombra**: facção rival que quer usar o paranormal para domínio próprio
-- **Anomalias**: zonas onde o Outro Lado vaza para o mundo real
-- **Selos**: barreiras mágicas que contêm Portais e anomalias
-- **Arquivos Confidenciais**: documentos internos da Ordem sobre casos, entidades e agentes
-
-## DICAS DE MESTRE
-- Use atmosfera de investigação + horror. Informação é recurso valioso.
-- Cada sessão: gancho, investigação, clímax paranormal, consequências
-- Recompense criatividade dos jogadores
-- Mortes devem ter peso narrativo
-- NEX sobe com marcos de campanha, não com EXP por combate
-
-${RPG_ONLY_RULE}`,
-
-  dnd: `Você é NEXUS-IA, assistente especializado em Dungeons & Dragons 5ª Edição. Responda sempre em português brasileiro.
-
-## ATRIBUTOS
-Força, Destreza, Constituição, Inteligência, Sabedoria, Carisma (3–20, modificador = (valor-10)/2 arredondado para baixo)
-
-## CLASSES
-Bárbaro (Fúria, d12 PV), Bardo (Inspiração, d8), Clérigo (Domínios divinos, d8), Druida (Forma Selvagem, d8), Guerreiro (Estilo de Luta, d10), Monge (Ki, d8), Paladino (Juramento, d10), Patrulheiro (Inimigo Favorecido, d10), Ladino (Ataque Furtivo, d8), Feiticeiro (Origem, d6), Bruxo (Patrono, d8), Mago (Escola de magia, d6)
-
-## TESTES E COMBATE
-- d20 + modificador + bônus de proficiência (se aplicável) vs CD
-- Vantagem: role 2d20, use o maior. Desvantagem: use o menor.
-- Iniciativa: d20 + mod. Destreza
-- Ação, Ação Bônus, Reação, Movimento por turno
-- Ataque: d20 + mod. + prof. vs CA do alvo; dano pelo dado da arma
-
-## MAGIAS
-- Slots por nível de personagem/classe
-- Círculos 1–9, truques (cantrips) ilimitados
-- Concentração: só uma magia por vez
-- Componentes: Verbal (V), Somático (S), Material (M)
-
-## DESCANSO
-- Curto (1h): gaste Dados de Vida para recuperar PV
-- Longo (8h): recupera todos PV e metade dos Dados de Vida
-
-## CONSTRUÇÃO DE ENCONTROS
-- Fácil / Médio / Difícil / Mortal baseado em XP limiar por nível
-- Use variedade de monstros (MM, Volo's, Mordenkainen's)
-- Ambiente e táticas valem mais que força bruta
-
-## DICAS DE MESTRE
-- As 3 pilares: Exploração, Interação Social, Combate
-- Prepare situações, não roteiros fixos
-- Dê agência aos jogadores
-- Use consequências significativas
-
-${RPG_ONLY_RULE}`,
-
-  "3det": `Você é NEXUS-IA, assistente especializado em 3D&T Alpha (sistema brasileiro da Jambo Editora). Responda sempre em português brasileiro.
-
-## ATRIBUTOS (1–5, custo em pontos na criação)
-- Força (F): dano e resistência física
-- Habilidade (H): ataques, defesa, agilidade, perícias
-- Resistência (R): PV máximo (R×5), durabilidade
-- Armadura (A): redução de dano recebido
-- Poder de Fogo (PdF): ataques à distância, magia ofensiva
-
-## CRIAÇÃO DE PERSONAGEM
-- Pontos de Personagem (PP) conforme o nível da campanha (padrão: 5 PP)
-- Cada ponto em atributo custa 1 PP (máx. 5 por atributo)
-- Vantagens custam 1–3 PP; Desvantagens devolvem 1–2 PP
-
-## SISTEMA DE DADOS
-- Tudo usa 1d6. Role d6, compare ao atributo relevante.
-- Sucesso: resultado ≤ atributo. Falha: resultado > atributo.
-- 1 = sucesso crítico; 6 = falha crítica
-
-## COMBATE
-- Iniciativa: Habilidade (maior age primeiro)
-- Ataque: d6 vs Habilidade do atacante
-- Defesa: d6 vs Habilidade do defensor (defesa ativa)
-- Dano: F (corpo a corpo) ou PdF (distância) − Armadura do alvo (mínimo 1)
-- PV = R × 5. Zero PV = inconsciente
-
-## VANTAGENS COMUNS
-Arma (bônus de dano), Magia (acesso a feitiços), Companheiro, Equipamento Especial, Furtividade, Sentidos Aguçados, Ponto Fraco do Inimigo
-
-## DESVANTAGENS COMUNS
-Inimigo, Fobia, Fraqueza Elemental, Código de Honra, Devoto
-
-## MAGIAS
-Requerem a vantagem Magia. Custo em PM (Pontos de Magia = Poder de Fogo × 3). Exemplos: Bola de Fogo (PdF dano em área), Cura (recupera PV), Escudo Mágico (+A temporário)
-
-## GÊNEROS
-O sistema suporta fantasia medieval, anime, super-heróis, horror, ficção científica — o mesmo sistema, contextos diferentes.
-
-${RPG_ONLY_RULE}`,
-
-  call: `Você é NEXUS-IA, assistente especializado em Call of Cthulhu 7ª Edição (Chaosium). Responda sempre em português brasileiro.
-
-## CARACTERÍSTICAS (valores percentuais, 1–100)
-FOR, CON, TAM, DES, APA, INT, POD, EDU
-Derivados: PV = (CON+TAM)/10 arredondado; PM = POD/5; Sorte = POD×5 inicial; Sanidade = POD×5
-
-## TESTES DE PERÍCIA
-- Role d100 ≤ valor da perícia = sucesso
-- Metade do valor = sucesso difícil
-- 1/5 do valor = sucesso extremo
-- 01 = sucesso crítico; 96–100 (ou 100) = falha crítica (Azar)
-- Perícias aumentam com uso (marque na folha quando usar com sucesso)
-
-## SANIDADE
-- Máximo inicial: POD×5. Máximo absoluto: 99 − Mitos de Cthulhu
-- Perda de SAN ao ver horrores: rol de SAN (d100 vs SAN atual)
-- Sucesso: perde o mínimo; falha: perde o máximo listado
-- 0 SAN = loucura permanente
-- Loucura temporária: perde 5+ SAN de uma vez
-- Loucura indefinida: perde 20% da SAN atual numa sessão
-
-## COMBATE
-- Perigoso e mortal — evitar é sempre preferível
-- Ataque: d100 vs perícia de combate
-- Dano: variável por arma
-- Aparar e Esquivar consomem reação
-- Ferimento grave (PV ≤ metade): rolar Constituição ou cair inconsciente
-
-## MAGIA DOS MITOS
-- Feitiços custam PM e/ou Sanidade
-- Tomos: livros proibidos que ensinam feitiços e aumentam Mitos (e reduzem SAN máx.)
-- Exemplos: Contatar Nyarlathotep, Escudo Dhole, Invocar/Banir Entidade
-
-## ENTIDADES LOVECRAFTIANAS
-- Grande Cthulhu, Nyarlathotep (O Caos Rastejante), Shub-Niggurath, Hastur, Azathoth
-- Ver uma Grande Entidade pode causar loucura instantânea
-- Cultistas são antagonistas humanos comuns
-
-## INVESTIGAÇÃO
-O coração do jogo. Pistas, documentos, testemunhas, locais.
-Regra de ouro: se uma pista é essencial, o jogador a encontra — os testes determinam *como* e *com que custo*.
-
-${RPG_ONLY_RULE}`,
-
-  vampire: `Você é NEXUS-IA, assistente especializado em Vampire: The Masquerade 5ª Edição. Responda sempre em português brasileiro.
-
-## CLÃS
-Banu Haqim (assassinos), Brujah (rebeldes), Gangrel (animais), Hecata (morte), Lasombra (sombras), Malkavian (loucura), Ministry (tentação), Nosferatu (informação), Ravnos (ilusão), Salubri (cura/alma), Toreador (arte), Tremere (magia de sangue), Tzimisce (carne), Ventrue (domínio)
-
-## ATRIBUTOS (1–5)
-Físicos: Força, Destreza, Vigor
-Sociais: Carisma, Manipulação, Compostura
-Mentais: Inteligência, Raciocínio, Determinação
-
-## HABILIDADES (1–5)
-Físicas: Atletismo, Briga, Artesanato, Direção, Armas de Fogo, Furto, Furtividade, Armas Brancas, Sobrevivência
-Sociais: Persuasão, Lábia, Intimidação, Liderança, Performance, Manha
-Mentais: Acadêmicos, Consciência, Finanças, Investigação, Medicina, Ocultismo, Política, Tecnologia
-
-## SISTEMA DE DADOS
-- Pool = Atributo + Habilidade (número de d10s rolados)
-- Dificuldade padrão: 2 sucessos (resultado 6+ = sucesso)
-- Resultado 10 = sucesso crítico (conta duplo em pares)
-- Resultado 1 com mais "1s" que sucessos = falha crítica (Bestialidade)
-
-## FOME (0–5)
-- Substitui dados normais por Dados de Fome (vermelhos)
-- Fome 0: vampiro saciado. Fome 5: à beira da frenesi.
-- Aumenta ao usar poderes, ao longo do tempo, sob estresse
-- Reduz bebendo sangue (Vitae)
-- Falha crítica em Dado de Fome pode desencadear Compulsão ou Bestialidade
-
-## DISCIPLINAS (poderes vampíricos)
-Cada clã tem disciplinas de clã (custo menor para aprender).
-Exemplos: Animalismo, Auspício, Cerimônia, Celeridade, Dominação, Feitiçaria de Sangue, Fortaleza, Ofuscação, Potência, Presença, Protean, Oblivion, Vicissitude
-
-## A BESTA E HUMANIDADE
-- Humanidade (0–10): quanto de humano ainda resta. 0 = monstro total (NPC).
-- Compulsões por clã surgem com falhas críticas em Dados de Fome
-- Manchas na Humanidade por atos horríveis; remove com Remorso (teste)
-
-## POLÍTICA
-- Camarilla: tradição e Mascarada (ocultar vampiros de humanos)
-- Anarquistas: liberdade e rejeição aos Anciões
-- Sabbat: abraçam a Besta, consideram Camarilla corrupta
-- Segunda Inquisição: humanos descobriram vampiros, caçam ativamente
-
-${RPG_ONLY_RULE}`,
-
-  custom: `Você é NEXUS-IA, assistente especializado em RPG de mesa. Responda sempre em português brasileiro.
-
-Você domina os principais sistemas de RPG:
-- Ordem Paranormal (Retropunk)
-- Dungeons & Dragons 5e (Wizards of the Coast)
-- 3D&T Alpha (Jambo)
-- Call of Cthulhu 7e (Chaosium)
-- Vampire: The Masquerade 5e (Renegade)
-- Pathfinder 2e, Tormenta 20, Savage Worlds, GURPS, Year Zero Engine, OSR
-
-Você pode ajudar com:
-- Regras e mecânicas de qualquer sistema
-- Criação e otimização de personagens
-- Preparação de aventuras e sessões
-- Construção de enredos, NPCs, encontros
-- Worldbuilding e lore
-- Dicas de narração, ritmo e improvisação
-- Balanceamento de desafios
-- Conversão de conteúdo entre sistemas
-
-Pergunte ao usuário qual sistema está usando para respostas mais precisas.
-
-${RPG_ONLY_RULE}`,
-};
-
-// REACT_APP_API_URL = URL base do Vercel (ex: https://nexus-rpg.vercel.app)
-// Vazio em dev local → usa chave Groq diretamente do .env
-const API_BASE = process.env.REACT_APP_API_URL || '';
-const GROQ_KEY_DEV = process.env.REACT_APP_GROQ_KEY;
-const GROQ_URL_DIRECT = "https://api.groq.com/openai/v1/chat/completions";
-
-async function callGemini(systemId, history, userMsg, overridePrompt) {
-  const systemPrompt = overridePrompt || SYSTEM_PROMPTS[systemId] || SYSTEM_PROMPTS.custom;
-  const messages = [
-    { role: "system", content: systemPrompt },
-    ...history.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.text })),
-    { role: "user", content: userMsg },
-  ];
-  const body = { messages, model: "llama-3.3-70b-versatile", temperature: 0.85, max_tokens: 1024 };
-
-  if (API_BASE) {
-    // Produção: proxy Vercel — GROQ_KEY fica no servidor, nunca exposta.
-    // O proxy exige usuário autenticado (spec 0004 AC-6).
-    const idToken = await auth.currentUser?.getIdToken?.();
-    const res = await fetch(`${API_BASE}/api/ai`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}) },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error || 'Erro na IA'); }
-    const data = await res.json();
-    return data.reply || 'Sem resposta.';
-  } else {
-    // Dev local: chama Groq diretamente com chave do .env
-    if (!GROQ_KEY_DEV) throw new Error('REACT_APP_GROQ_KEY não definida no .env local');
-    const res = await fetch(GROQ_URL_DIRECT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GROQ_KEY_DEV}` },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) { const err = await res.json(); throw new Error(err?.error?.message || 'Erro na API'); }
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || 'Sem resposta.';
-  }
-}
-
-
-function generateSceneImage(text) {
-  const clean = text.replace(/[*#`_]/g,"").replace(/\n/g," ").trim().slice(0, 120);
-  const full = `${clean}, dark fantasy RPG, dramatic lighting, digital art`;
-  const seed = Math.floor(Math.random() * 99999);
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(full)}?width=768&height=432&nologo=true&seed=${seed}&enhance=true`;
-}
-
-function MasterAssistant({ system, onAddSession }) {
-  const sysId = system?.id || "custom";
-  const sysName = system?.name || "Sistema";
-
-  const [messages, setMessages] = useState([
-    { role: "assistant", text: `Olá! Sou o **NEXUS-IA**, especializado em **${sysName}**.\n\nPode me perguntar sobre regras, construção de personagens, narrativa, mecânicas, lore — qualquer coisa relacionada ao sistema.\n\nVocê também pode pedir para eu **gerar uma imagem** de qualquer cena ou personagem.` }
-  ]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [listening, setListening] = useState(false);
-  const [error, setError] = useState(null);
-  const [interimText, setInterimText] = useState("");
-  const [imgLoading, setImgLoading] = useState({}); // { msgIndex: bool }
-  const [msgImages, setMsgImages] = useState({});   // { msgIndex: url }
-
-  const bottomRef = useRef(null);
-  const recogRef = useRef(null);
-
-  useEffect(() => { onAddSession?.(); }, []);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
-  useEffect(() => { return () => recogRef.current?.stop(); }, []);
-
-  const sendMessage = async (text) => {
-    const trimmed = (text || input).trim();
-    if (!trimmed || loading) return;
-    setInput("");
-    setError(null);
-    const history = messages.slice(1);
-    setMessages(prev => [...prev, { role: "user", text: trimmed }]);
-    setLoading(true);
-    try {
-      const reply = await callGemini(sysId, history, trimmed);
-      setMessages(prev => [...prev, { role: "assistant", text: reply }]);
-    } catch (e) {
-      setError(e.message);
-      setMessages(prev => [...prev, { role: "assistant", text: `⚠️ Erro: ${e.message}` }]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGenerateImage = async (idx, text) => {
-    setImgLoading(prev => ({ ...prev, [idx]: true }));
-    setMsgImages(prev => ({ ...prev, [idx]: "loading" }));
-    try {
-      const clean = text.replace(/[*#`_]/g,"").replace(/\n/g," ").trim().slice(0, 100);
-      const prompt = encodeURIComponent(`${clean}, dark fantasy RPG, cinematic dramatic lighting, digital art`);
-      const seed = Math.floor(Math.random() * 99999);
-      const url = `https://image.pollinations.ai/prompt/${prompt}?width=512&height=288&nologo=true&seed=${seed}`;
-      console.log("URL:", url);
-      const res = await fetch(url);
-      console.log("Status:", res.status, res.headers.get("content-type"));
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-      const objUrl = URL.createObjectURL(blob);
-      setMsgImages(prev => ({ ...prev, [idx]: objUrl }));
-    } catch(e) {
-      console.error("Erro imagem:", e.message);
-      setMsgImages(prev => ({ ...prev, [idx]: null }));
-    } finally {
-      setImgLoading(prev => ({ ...prev, [idx]: false }));
-    }
-  };
-
-  const toggleMic = () => {
-    if (listening) { recogRef.current?.stop(); return; }
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { setError("Navegador não suporta reconhecimento de voz."); return; }
-    const r = new SR();
-    r.lang = "pt-BR"; r.continuous = false; r.interimResults = true;
-    r.onstart = () => setListening(true);
-    r.onresult = (e) => {
-      const interim = Array.from(e.results).map(x => x[0].transcript).join("");
-      setInterimText(interim);
-      if (e.results[e.results.length - 1].isFinal) { setInterimText(""); sendMessage(interim); }
-    };
-    r.onerror = () => { setListening(false); setInterimText(""); };
-    r.onend = () => { setListening(false); setInterimText(""); };
-    r.start();
-    recogRef.current = r;
-  };
-
-  const renderText = (text) => {
-    const lines = text.split("\n");
-    return lines.map((line, li) => {
-      const parts = line.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
-        part.startsWith("**") && part.endsWith("**") ? <strong key={i}>{part.slice(2,-2)}</strong> : part
-      );
-      return <span key={li}>{parts}{li < lines.length - 1 ? <br/> : null}</span>;
-    });
-  };
-
-  const accent = system?.accent || "#b030d8";
-  const accentText = system?.accentText || "#d870f8";
-
-  return (
-    <div style={{ display:"flex", flexDirection:"column", height:"100%", minHeight:0 }}>
-      {/* Header */}
-      <div style={{ padding:"16px 24px 12px", borderBottom:"1px solid var(--border2)", display:"flex", alignItems:"center", gap:14, flexShrink:0 }}>
-        <div style={{ width:40, height:40, borderRadius:"50%", background:`radial-gradient(circle,${accent}55,${accent}22)`, border:`1.5px solid ${accent}88`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>
-          {system?.icon || "✦"}
-        </div>
-        <div>
-          <div style={{ fontFamily:"'Cinzel Decorative',serif", fontSize:13, background:"linear-gradient(135deg,#c9a84c,#e8c96d)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", backgroundClip:"text" }}>Ajudante do Mestre</div>
-          <div style={{ fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:2, color:accentText, opacity:0.85 }}>{sysName.toUpperCase()}</div>
-        </div>
-        <div style={{ marginLeft:"auto", padding:"4px 12px", borderRadius:12, border:`1px solid ${accent}44`, background:`${accent}18`, fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1.5, color:accentText }}>NEXUS-IA</div>
-      </div>
-      <div style={{ padding:"4px 24px", borderBottom:"1px solid var(--border2)", fontSize:9, color:"var(--muted2)", flexShrink:0 }}>{TEXTO_IA}</div>
-
-      {/* Messages */}
-      <div style={{ flex:1, overflowY:"auto", padding:"20px 24px", display:"flex", flexDirection:"column", gap:14, minHeight:0 }}>
-        {messages.map((m, i) => (
-          <div key={i} style={{ display:"flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-            {m.role === "assistant" && (
-              <div style={{ width:28, height:28, borderRadius:"50%", background:`radial-gradient(circle,${accent}55,${accent}22)`, border:`1px solid ${accent}66`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, marginRight:10, flexShrink:0, marginTop:4 }}>✦</div>
-            )}
-            <div style={{ maxWidth:"74%", display:"flex", flexDirection:"column", gap:8 }}>
-              <div style={{
-                padding:"12px 16px",
-                borderRadius: m.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-                background: m.role === "user" ? `linear-gradient(135deg,${accent}55,${accent}33)` : "rgba(255,255,255,0.04)",
-                border: m.role === "user" ? `1px solid ${accent}55` : "1px solid var(--border2)",
-                fontFamily:"Crimson Pro,serif", fontSize:15, color:"var(--text)", lineHeight:1.7,
-                whiteSpace:"pre-wrap", wordBreak:"break-word",
-              }}>
-                {renderText(m.text)}
-              </div>
-              {m.role === "assistant" && i > 0 && (
-                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  {imgLoading[i] ? (
-                    <div style={{ height:160, borderRadius:12, border:`1px solid ${accent}33`, background:"rgba(0,0,0,0.4)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:10 }}>
-                      <span style={{ width:30, height:30, borderRadius:"50%", border:`2px solid ${accentText}`, borderTopColor:"transparent", display:"inline-block", animation:"spin 0.8s linear infinite" }}/>
-                      <span style={{ fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1.5, color:accentText, opacity:0.8 }}>GERANDO · ATÉ 30s</span>
-                    </div>
-                  ) : msgImages[i] && msgImages[i] !== "loading" ? (
-                    <div style={{ borderRadius:12, overflow:"hidden", border:`1px solid ${accent}33` }}>
-                      <img src={msgImages[i]} alt="cena" style={{ width:"100%", display:"block" }}/>
-                      <div style={{ padding:"6px 10px", display:"flex", justifyContent:"flex-end", background:"rgba(0,0,0,0.3)" }}>
-                        <button onClick={() => handleGenerateImage(i, m.text)} style={{ padding:"4px 10px", borderRadius:8, border:`1px solid ${accent}44`, background:"rgba(255,255,255,0.05)", color:accentText, fontFamily:"Cinzel,serif", fontSize:8, letterSpacing:1, cursor:"pointer" }}>↺ Regerar</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button onClick={() => handleGenerateImage(i, m.text)} style={{
-                      alignSelf:"flex-start", padding:"6px 14px", borderRadius:8,
-                      border:`1px solid ${accent}44`, background:"rgba(255,255,255,0.03)", color:accentText,
-                      fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1, cursor:"pointer",
-                      display:"flex", alignItems:"center", gap:6, transition:"all 0.2s",
-                    }}
-                      onMouseEnter={e => e.currentTarget.style.background=`${accent}22`}
-                      onMouseLeave={e => e.currentTarget.style.background="rgba(255,255,255,0.03)"}
-                    >
-                      <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                      Gerar Imagem
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-        {loading && (
-          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            <div style={{ width:28, height:28, borderRadius:"50%", background:`radial-gradient(circle,${accent}55,${accent}22)`, border:`1px solid ${accent}66`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12 }}>✦</div>
-            <div style={{ display:"flex", gap:5, padding:"12px 16px", borderRadius:"18px 18px 18px 4px", background:"rgba(255,255,255,0.04)", border:"1px solid var(--border2)" }}>
-              {[0,1,2].map(k => <div key={k} style={{ width:7, height:7, borderRadius:"50%", background:accentText, opacity:0.7, animation:`bounce 1.2s ease-in-out ${k*0.2}s infinite` }}/>)}
-            </div>
-          </div>
-        )}
-        {interimText && (
-          <div style={{ display:"flex", justifyContent:"flex-end" }}>
-            <div style={{ maxWidth:"74%", padding:"10px 14px", borderRadius:"18px 18px 4px 18px", background:`${accent}22`, border:`1px solid ${accent}33`, fontFamily:"Crimson Pro,serif", fontSize:14, color:"var(--muted2)", fontStyle:"italic" }}>
-              {interimText}…
-            </div>
-          </div>
-        )}
-        {error && <div style={{ textAlign:"center", fontSize:12, color:"#f87171", fontFamily:"Cinzel,serif", letterSpacing:1 }}>{error}</div>}
-        <div ref={bottomRef}/>
-      </div>
-
-      {/* Input */}
-      <div style={{ padding:"14px 20px", borderTop:"1px solid var(--border2)", display:"flex", gap:10, alignItems:"flex-end", flexShrink:0, background:"rgba(0,0,0,0.2)" }}>
-        <button onClick={toggleMic} style={{
-          width:42, height:42, borderRadius:"50%", border:`1.5px solid ${listening ? accentText : "var(--border2)"}`,
-          background: listening ? `${accent}33` : "rgba(255,255,255,0.04)", color: listening ? accentText : "var(--muted2)",
-          cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0,
-          transition:"all 0.2s", boxShadow: listening ? `0 0 12px ${accent}55` : "none",
-        }}>
-          <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-            <rect x="9" y="2" width="6" height="11" rx="3"/>
-            <path d="M5 10a7 7 0 0 0 14 0"/>
-            <line x1="12" y1="19" x2="12" y2="22"/>
-            <line x1="8" y1="22" x2="16" y2="22"/>
-          </svg>
-        </button>
-        <textarea
-          value={input} onChange={e => setInput(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-          placeholder={`Pergunte sobre ${sysName}... (Enter para enviar)`} rows={1}
-          style={{ flex:1, resize:"none", padding:"10px 14px", background:"rgba(255,255,255,0.05)", border:"1px solid var(--border2)", borderRadius:12, color:"var(--text)", fontFamily:"Crimson Pro,serif", fontSize:15, outline:"none", lineHeight:1.5, maxHeight:120, overflowY:"auto", transition:"border-color 0.2s" }}
-          onFocus={e => e.target.style.borderColor=`${accent}77`}
-          onBlur={e => e.target.style.borderColor="var(--border2)"}
-        />
-        <button onClick={() => sendMessage()} disabled={!input.trim() || loading} style={{
-          width:42, height:42, borderRadius:"50%", border:"none",
-          background: input.trim() && !loading ? `linear-gradient(135deg,${accent},${accent}aa)` : "rgba(255,255,255,0.06)",
-          color: input.trim() && !loading ? "#fff" : "var(--muted2)",
-          cursor: input.trim() && !loading ? "pointer" : "default",
-          display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, transition:"all 0.2s",
-        }}>
-          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
-            <line x1="22" y1="2" x2="11" y2="13"/>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-          </svg>
-        </button>
-      </div>
-      <style>{`
-        @keyframes bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}
-        @keyframes spin{to{transform:rotate(360deg)}}
-      `}</style>
-    </div>
-  );
-}
 
 /* ═══════════════════════════════
    PLACEHOLDER SCREENS
@@ -12490,7 +11919,7 @@ export default function App() {
       case "dashboard": return <Dashboard system={activeSystem} onCreateChar={()=>setCreatingChar(true)} characters={characters} sessions={sessions} onSelectChar={c=>{ setCreatedChar(c); setScreen("sheet"); }} onNav={setScreen} userPlans={userPlans} onShowUpgrade={()=>setScreen("planos")}/>;
       case "sheet":     return <SheetList characters={characters} system={activeSystem} onCreateChar={()=>setCreatingChar(true)} onSelectChar={c=>{ setCreatedChar(c); }} onDeleteChar={(c)=>{ deleteCharacter(c); if (createdChar && ((createdChar.id && createdChar.id===c.id) || (!createdChar.id && createdChar.createdAt===c.createdAt))) setCreatedChar(null); }} onUpdateChar={(c)=>saveCharacter(c)}/>;
       case "map":       return <MapaScreen uid={currentUser?.uid || ""} onBack={()=>setScreen("dashboard")} />;
-      case "master":    return <MasterAssistant system={activeSystem} onAddSession={()=>setSessions(prev=>[...prev,{id:Date.now(),date:new Date().toLocaleDateString('pt-BR')}])} />;
+      case "master":    return <MasterSuite system={activeSystem} uid={currentUser?.uid || ""} />;
       case "roadmap":   return <RoadmapScreen />;
       case "planos":    return <PlansScreen userPlans={userPlans} currentUser={currentUser}/>;
       case "party": {

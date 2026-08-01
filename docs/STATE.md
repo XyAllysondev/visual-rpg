@@ -10,7 +10,54 @@ alwaysApply: true
 > todo. Diferente do **ADR** (decisão durável e imutável). Decisão estrutural → ADR; estado do
 > trabalho → aqui. Atualize ao **pausar/encerrar**; leia ao **retomar**. Use a skill `/handoff`.
 
-**Última atualização:** 2026-07-25 por Claude (SPEC 0026 — conteúdo do livro v1.4; 28 suítes/324 testes + build exit 0; NÃO commitado/deployado)
+**Última atualização:** 2026-07-31 por Claude (SPEC 0027 — Forja do Mestre Fase 1; IA removida do App.jsx, 460 testes verdes)
+
+> **2026-07-31: SPEC 0027 — FORJA DO MESTRE (Ajudante do Mestre 2.0), FASE 1.** Andre pediu que
+> o Ajudante do Mestre deixe de ser IA e vire uma suíte de worldbuilding/sessão "igual ao
+> WorldCraft" (worldcraft.com.br), clonando TODAS as funcionalidades. O site foi explorado
+> logado (mundo demo) e o inventário está na spec. Fase 1 (Fundação) em andamento:
+> - **IA REMOVIDA**: 577 linhas do App.jsx (bloco MASTER AI ASSISTANT: RPG_ONLY_RULE,
+>   SYSTEM_PROMPTS, callGemini, generateSceneImage, MasterAssistant). App.jsx 12.586 → 12.011.
+>   Cópia de produto ajustada (card do dashboard, 3 planos, roadmapData). Gate
+>    impede o retorno da IA.
+>   **ARMADILHA**:  vivia DENTRO desse bloco e é usado pelo fluxo PIX
+>   (createPixPayment) — foi restaurado perto do uso. Confira antes de remover blocos grandes.
+> - **Camadas prontas** ():  puro (entityTypes 11 tipos,
+>   entityFilters, connections, dashboardStats, demoWorld) +  (Firestore:
+>   worlds/{id}/{entities,connections,folders}, hooks onSnapshot, seedDemoWorld em writeBatch).
+> - **UI ENTREGUE**: casca (seletor de mundo, rail de 9 ferramentas com 7 marcadas "Em breve",
+>   estado vazio, React.lazy + error boundary), Painel (11 contadores, recentes, primeiros passos)
+>   e Wiki completa (grade/lista, filtros, busca sem acento, pastas, detalhe com conexões pelo
+>   lado certo, modal de criar/editar). 27 arquivos em `src/components/MasterSuite/`.
+> - **Gate final: 36 suítes / 485 testes PASS**, build "Compiled" (warnings pré-existentes de
+>   outros arquivos). Testes da suíte: 161 (91 lógica pura + 36 store + 25 renderização + 9 anti-IA).
+> - **ARMADILHA DE PARALELISMO**: dois agentes na mesma pasta se atropelaram — o da casca gravou
+>   um placeholder por cima do `Wiki/index.jsx` do outro. Ao paralelizar, dê a cada agente uma
+>   pasta exclusiva.
+> - **ARMADILHA DE TESTE**: o preset Jest do CRA usa `resetMocks: true` — implementações passadas
+>   na fábrica do `jest.mock` são apagadas antes de cada teste; reinstale no `beforeEach`.
+> - **Correção de bug pré-existente**:  (peer do RTL 16) não estava
+>   instalado — 3 suítes RTL estavam vermelhas. Instalado em devDependencies.
+> - **PENDÊNCIAS MANUAIS DO ANDRE (não feitas por mim):**
+>   1. [1m[37m===[39m Deploying to 'nexus-rpg-app'...[22m
+
+[36m[1mi [22m[39m deploying [1mfirestore[22m
+[36m[1mi  firestore:[22m[39m ensuring required API [1mfirestore.googleapis.com[22m is enabled...
+[36m[1mi  firestore:[22m[39m ensuring required API [1mfirestore.googleapis.com[22m is enabled...
+[36m[1mi  cloud.firestore:[22m[39m checking [1mfirestore.rules[22m for compilation errors...
+[32m[1m+  cloud.firestore:[22m[39m rules file [1mfirestore.rules[22m compiled successfully
+[36m[1mi  firestore:[22m[39m uploading rules [1mfirestore.rules[22m...
+[36m[1mi [22m[39m [1m[36mfirestore: [39m[22mdeploying indexes...
+[32m[1m+  firestore:[22m[39m released rules [1mfirestore.rules[22m to [1mcloud.firestore[22m
+
+[32m[1m+ [22m[39m [1m[4mDeploy complete![24m[22m
+
+[1mProject Console:[22m https://console.firebase.google.com/project/nexus-rpg-app/overview — as regras novas do bloco  só valem
+>      após o deploy.
+>   2. **Índice composto** no Firestore: coleção , .
+>      Sem ele o  falha (o erro traz o link de criação).
+> - **Próximo passo:** Andre validar no navegador (E4, único item aberto da Fase 1); depois
+>   Fase 2 (Grafo interativo de conexões).
 
 > **2026-07-25 (11): SPEC 0026 — CONTEÚDO DO LIVRO v1.4 (itens antes bloqueados por fonte).**
 > Andre forneceu o PDF oficial ("Ordem Paranormal 1.4 (2).pdf", Desktop/livros ordem paranormal,
