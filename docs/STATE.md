@@ -10,7 +10,47 @@ alwaysApply: true
 > todo. Diferente do **ADR** (decisão durável e imutável). Decisão estrutural → ADR; estado do
 > trabalho → aqui. Atualize ao **pausar/encerrar**; leia ao **retomar**. Use a skill `/handoff`.
 
-**Última atualização:** 2026-07-31 por Claude (SPEC 0027 — Forja do Mestre Fase 1; IA removida do App.jsx, 460 testes verdes)
+**Última atualização:** 2026-08-01 por Claude (SPEC 0028 — fundo do mapa-múndi decidido: base64 no Firestore, plano B; 627 testes / 40 suítes verdes)
+
+> **2026-08-01 (tarde): SPEC 0028 — FUNDO DO MAPA-MÚNDI DESTRAVADO PELO PLANO B.** O Andre decidiu:
+> *"vamos fazer no gratuito hoje, quando estivermos finalizando o desenvolvimento do projeto eu faço
+> isso"* (subir para Blaze). Registrado no **ADR-0009**, que resolve o ADR-0008 escolhendo a opção B.
+> - `uploadBackground` agora tem **dois caminhos** com o mesmo contrato
+>   (`{url, path, width, height}`), escolhidos por `fundoDisponivel()`: Storage (escrito, com
+>   `import()` dinâmico, esperando o Blaze) e **base64 no Firestore** (o que roda hoje).
+> - Base64 segue o padrão da casa (`campaignSync2.js`): dois estágios de redução (1600/q0.82 →
+>   1200/q0.7), teto `LIMITE_FUNDO_BYTES = 900.000`, dedup por hash SHA-256, cache de módulo.
+>   Acima do teto, **recusa em PT-BR** — nada é gravado pela metade.
+> - A ilustração mora em documento **separado** (`.../worldmaps/{mapId}/media/background`); o doc
+>   raiz guarda só `backgroundRef` + miniatura de ~200px. Isso é o que impede `useWorldMaps` de
+>   trafegar todos os fundos inteiros a cada snapshot — **tem teste de regressão dedicado**.
+> - **Lacuna fechada:** `WorldMap/__tests__/worldMapStore.test.js` existe (29 testes). Total:
+>   **627 testes / 40 suítes**, build Compiled, `MapEditor/` intocado (AC-12).
+> - **Próximo passo:** F2 (editor de grafo — nós e trilhas). Quando o Andre subir para Blaze, ver a
+>   lista de 5 itens em ADR-0009 §"O que muda quando o Andre subir para o Blaze".
+
+> **2026-08-01: SPEC 0028 — MAPA-MÚNDI (exploração + névoa), FASE 1 ENTREGUE.** Briefing do Andre
+> pedindo mapa-múndi estilo Pathfinder: WotR, com visão de mestre e de jogador.
+> - **F0 (descoberta)** achou 5 contradições com o briefing. A maior: **não existe servidor** — sem
+>   Cloud Functions, cliente fala direto com o Firestore, e rules são tudo-ou-nada por documento.
+>   Hoje o Nexus **não tem segredo real**: névoa e tokens `hidden` viajam inteiros ao jogador e são
+>   só filtrados no render.
+> - **Arquitetura ATELIÊ/MESA** (design.md), aprovada pelo Andre: o molde vive em
+>   `users/{uid}/worldmaps` (privado; a aba Mapas vira a oficina do mestre) e a campanha recebe uma
+>   INSTÂNCIA com só o que foi revelado. **A separação de documento É o mecanismo de segredo** —
+>   satisfaz o AC-1 sem servidor e sem Blaze.
+> - **F1 entregue:** aba Mapas com 3 sub-abas (Mesas Táticas / Mapas-Múndi / Tokens), CRUD do molde,
+>   cotas por plano, rules do ateliê. **595 testes / 39 suítes verdes**, build Compiled,
+>   `MapEditor/` intocado (git diff vazio — AC-12).
+> - **BLOQUEIO PARA O ANDRE — Firebase Storage não existe.** Provado por HTTP cru: 404 (bucket
+>   inexistente), não 403. `firebase.js:9` declara um bucket nunca provisionado; criar exige
+>   **plano Blaze** (projeto está no Spark). Opções no ADR-0008: (A) subir para Blaze — destrava
+>   também Cloud Functions e a exploração assíncrona; (B) base64 no Firestore, teto ~900 KB.
+>   O upload está implementado atrás de `fundoDisponivel()`; quando o bucket subir, o flag vira.
+> - **Achado:** não existe string de plano pago no código. Só `'free'` é real; quem pagou é
+>   detectado por `users/{uid}.subscribedSystems`. `fsGetUserPlan` (App.jsx:86) é código morto.
+> - **Lacuna assumida:** falta `worldMapStore.test.js` (o gate do AC-2 pede).
+> - **Próximo passo:** decisão do Andre sobre Blaze; depois F2 (editor de grafo).
 
 > **2026-07-31: SPEC 0027 — FORJA DO MESTRE (Ajudante do Mestre 2.0), FASE 1.** Andre pediu que
 > o Ajudante do Mestre deixe de ser IA e vire uma suíte de worldbuilding/sessão "igual ao

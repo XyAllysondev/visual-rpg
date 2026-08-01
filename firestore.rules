@@ -26,6 +26,29 @@ service cloud.firestore {
       match /assets/{assetId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
+
+      // ── Mapas-múndi · ATELIÊ (spec 0028 / AC-1) ──────────────────────────────
+      // O MOLDE do mapa-múndi é privado do mestre: nós ocultos, trilhas secretas,
+      // `gmNotes` e `gmText` moram aqui. Só o dono lê e escreve — jogadores nunca
+      // leem daqui, como em `assets` acima.
+      //
+      // ISTO É O MECANISMO DE SEGREDO INTEIRO, não uma trava a mais: o AC-1 exige
+      // que um jogador com DevTools não consiga obter nome, posição ou descrição de
+      // nó `hidden` inspecionando o tráfego real. Isso só se sustenta porque o dado
+      // NUNCA sai deste caminho. O que a mesa enxerga é cópia criada no ato da
+      // revelação, em `campaigns/{cid}/worldmaps/...` (F4).
+      //
+      // NÃO abra leitura aqui para membro de campanha por conveniência — seria
+      // vazar o molde inteiro e derrubar o AC-1.
+      match /worldmaps/{mapId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+
+        // nodes / edges / events (F2 em diante). Regra explícita porque
+        // subcoleção NÃO herda a regra do documento pai.
+        match /{document=**} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+      }
     }
 
     // ── Campaigns ─────────────────────────────────────────────────────────────
