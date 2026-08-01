@@ -23,6 +23,16 @@ jest.mock("../worldMapStore", () => ({
   uploadBackground: jest.fn(),
   getBackground: jest.fn(),
   fundoDisponivel: jest.fn(),
+  /* F2: o molde aberto agora monta o editor do grafo, que também lê o store.
+     A fronteira mockada continua sendo só o I/O — o editor roda de verdade. */
+  useGrafo: jest.fn(),
+  createNode: jest.fn(),
+  updateNode: jest.fn(),
+  deleteNode: jest.fn(),
+  createEdge: jest.fn(),
+  updateEdge: jest.fn(),
+  deleteEdge: jest.fn(),
+  semearGrafo: jest.fn(),
   LIMITE_FUNDO_BYTES: 900_000,
   AVISO_FUNDO_NO_DOCUMENTO:
     "Enquanto o armazenamento de arquivos do Nexus não é ligado, a ilustração fica guardada dentro do próprio mapa. Ela é reduzida automaticamente e precisa caber em cerca de 0,9 MB.",
@@ -31,7 +41,7 @@ jest.mock("../worldMapStore", () => ({
 import Atelier from "../Atelier";
 import {
   useWorldMaps, createWorldMap, updateWorldMap, deleteWorldMap, uploadBackground,
-  getBackground, fundoDisponivel,
+  getBackground, fundoDisponivel, useGrafo,
 } from "../worldMapStore";
 
 /* ── Acervo de teste ────────────────────────────────────────────────── */
@@ -58,6 +68,7 @@ beforeEach(() => {
   deleteWorldMap.mockResolvedValue(undefined);
   uploadBackground.mockResolvedValue({ url: "https://exemplo/f.png", path: "p", width: 10, height: 10 });
   getBackground.mockResolvedValue(null);
+  useGrafo.mockReturnValue({ nos: [], trilhas: [], loading: false, error: null });
   /* Padrão dos testes: o mundo em que o Storage está de pé (plano Blaze). O
    * mundo de HOJE — Storage indisponível, ilustração em base64 dentro do
    * documento (ADR-0008, opção B) — tem testes próprios mais abaixo, porque as
@@ -303,12 +314,13 @@ describe("Ateliê · molde aberto (AC-2)", () => {
   const arquivo = (nome = "mapa.png", tipo = "image/png") =>
     new File(["conteudo-binario"], nome, { type: tipo });
 
-  it("abre o molde e é honesto sobre o que ainda não existe (Fase 2)", () => {
+  it("abre o molde com o editor de lugares e trilhas montado (F2 · AC-4)", () => {
     abrirMolde();
 
     expect(screen.getByRole("heading", { name: "As Terras Partidas" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /nós e trilhas/i })).toBeInTheDocument();
-    expect(screen.getByText(/chega na\s+próxima fase/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /lugares e trilhas/i })).toBeInTheDocument();
+    /* O que era placeholder da F2 agora é o editor de verdade. */
+    expect(screen.getByRole("toolbar", { name: /ferramentas do mapa/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /todos os mapas/i })).toBeInTheDocument();
   });
 

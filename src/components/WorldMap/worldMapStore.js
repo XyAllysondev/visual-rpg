@@ -72,12 +72,13 @@
  */
 import { useState, useEffect } from "react";
 import {
-  doc, getDoc, getDocs, setDoc, updateDoc, collection, addDoc, query, orderBy,
-  onSnapshot, serverTimestamp, writeBatch,
+  doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, addDoc, query, orderBy,
+  onSnapshot, serverTimestamp, writeBatch, increment,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import { mensagemDeErro } from "../MasterSuite/model/erros";
-import { canCreateMap, quotaFor } from "./model/quotas";
+import { canAddNode, canCreateMap, quotaFor } from "./model/quotas";
+import { criarNo, criarTrilha, pontasDaTrilha, trilhaDuplicada } from "./model/graph";
 
 /* ── Constantes ──────────────────────────────────────────────────────────── */
 
@@ -86,6 +87,10 @@ export const WORLDMAPS = "worldmaps";
 
 /** Subcoleções do molde, na ordem em que devem ser varridas ao apagar (F2+). */
 export const SUBCOLECOES = ["nodes", "edges", "events"];
+
+/** Nomes das subcoleções do grafo (design §3). Um documento por nó / por trilha. */
+export const NODES = "nodes";
+export const EDGES = "edges";
 
 /**
  * Subcoleção de mídia do molde e o id fixo do documento do fundo.
@@ -675,4 +680,326 @@ export function useWorldMaps(uid) {
   }, [uid]);
 
   return { maps, loading, error };
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+ *  O GRAFO DO MOLDE — nós e trilhas  (F2 · AC-4)
+ *  ---------------------------------------------------------------------------
+ *  Um documento por item, nas subcoleções `nodes` e `edges` do molde — o padrão
+ *  da casa (`MapEditor/sync/campaignSync2.js` faz o mesmo com os elementos da
+ *  cena). Documento por item, e não um array dentro do doc do mapa, por três
+ *  motivos que a F4 vai cobrar:
+ *
+ *   1. **Escala**: 500 nós (cota do plano pago, AC-3) num campo array estouraria
+ *      o teto de 1 MiB do documento e reescreveria tudo a cada arraste.
+ *   2. **Granularidade**: mover UM nó grava UM documento. É o que permite o
+ *      debounce do arraste custar quase nada.
+ *   3. **Revelação (F4)**: a projeção pública copia documento a documento. Com
+ *      array não haveria o que copiar sem ler o resto — e o resto é segredo.
+ *
+ *  A VALIDAÇÃO NÃO MORA AQUI. Quem diz o que é um nó válido é `model/graph.js`
+ *  (`criarNo`, `criarTrilha`, `trilhaDuplicada`), lógica pura já testada. Este
+ *  módulo só a chama e deixa o `Error` em PT-BR subir. Não há uma segunda régua.
+ *
+ *  `nodeCount` no doc raiz é DENORMALIZADO de propósito: é o que a cota (AC-3) e
+ *  as rules consultam sem varrer a subcoleção. Toda criação/remoção de nó mexe
+ *  nele no mesmo fluxo — `increment()` para não perder contagem quando o mestre
+ *  edita em duas abas.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+const nodeRef = (uid, mapId, nodeId) => doc(db, USERS, uid, WORLDMAPS, mapId, NODES, nodeId);
+const edgeRef = (uid, mapId, edgeId) => doc(db, USERS, uid, WORLDMAPS, mapId, EDGES, edgeId);
+
+/** `id` é a chave do documento, nunca um campo dentro dele. */
+const semId = (obj) => { const { id, ...resto } = obj; return resto; };
+
+/**
+ * O `increment` do SDK, com degradação honesta.
+ *
+ * Existe porque o dublê de `firebase/firestore` de uma suíte pode não trazer o
+ * `increment` (é uma função nova aqui). Sem ele, cai no valor absoluto que o
+ * chamador já tem em mãos — o contador continua certo, só perde a proteção
+ * contra duas abas gravando ao mesmo tempo.
+ */
+function passoDaContagem(delta, absoluto) {
+  if (typeof increment === "function") return increment(delta);
+  return Math.max(0, asNumber(absoluto, 0) + delta);
+}
+
+/* ── Nós ─────────────────────────────────────────────────────────────────── */
+
+/**
+ * Planta um nó no molde (AC-4) respeitando a cota do plano (AC-3).
+ *
+ * A cota é conferida ANTES de escrever, com a contagem que o chamador já tem na
+ * tela — evita uma leitura da subcoleção inteira a cada nó plantado. Plano
+ * ausente é tratado como `free`, o mais restritivo (mesma regra de `createWorldMap`).
+ *
+ * @param {string} uid dono do mapa.
+ * @param {string} mapId id do mapa.
+ * @param {{x:number,y:number,type?:string,name?:string}} dados ver `criarNo`.
+ * @param {{plan?:string, nodeCount?:number}} [opcoes] insumos da cota.
+ * @returns {Promise<string>} id do nó criado.
+ * @throws {Error} em PT-BR: dados inválidos (via `criarNo`) ou cota estourada.
+ */
+export async function createNode(uid, mapId, dados, opcoes = {}) {
+  const ownerUid = requireText(uid, "É preciso estar autenticado para plantar um nó.");
+  const id = requireText(mapId, "Informe em qual mapa-múndi o nó deve ser plantado.");
+
+  const quantos = asNumber(opcoes.nodeCount, 0);
+  const veredito = canAddNode(asText(opcoes.plan), quantos);
+  if (!veredito.ok) throw new Error(veredito.motivo);
+
+  const no = criarNo(dados); // valida e normaliza — a régua é o `model/graph.js`
+  const ref = await addDoc(subCol(ownerUid, id, NODES), {
+    ...semId(no),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  await updateDoc(mapRef(ownerUid, id), {
+    nodeCount: passoDaContagem(1, quantos),
+    updatedAt: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+/**
+ * Altera campos de um nó. Não mexe em `nodeCount` (a quantidade não mudou).
+ *
+ * O patch é aplicado como veio — quem chama é o painel de edição, que já
+ * conhece os campos do design §3. As coordenadas, quando presentes, passam pela
+ * mesma régua do resto: número finito ou recusa em português.
+ *
+ * @param {string} uid dono do mapa.
+ * @param {string} mapId id do mapa.
+ * @param {string} nodeId id do nó.
+ * @param {object} patch campos a alterar.
+ */
+export async function updateNode(uid, mapId, nodeId, patch = {}) {
+  const ownerUid = requireText(uid, "É preciso estar autenticado para editar um nó.");
+  const id = requireText(mapId, "Informe de qual mapa-múndi é o nó.");
+  const noId = requireText(nodeId, "Informe qual nó deve ser atualizado.");
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+    throw new Error("Informe os campos do nó que devem ser atualizados.");
+  }
+  if (("x" in patch || "y" in patch)
+    && !(Number.isFinite(patch.x) && Number.isFinite(patch.y))) {
+    throw new Error("O nó precisa de coordenadas x e y numéricas para ser movido.");
+  }
+  const data = { ...semId(patch), updatedAt: serverTimestamp() };
+  await updateDoc(nodeRef(ownerUid, id, noId), data);
+  // O doc raiz também envelhece: é o `updatedAt` que ordena a lista do ateliê.
+  await updateDoc(mapRef(ownerUid, id), { updatedAt: serverTimestamp() });
+}
+
+/**
+ * Apaga um nó **e todas as trilhas que o tocam** — trilha órfã não sobrevive a
+ * um nó apagado (mesma regra de `removerNo` em `model/graph.js`, aqui aplicada
+ * ao banco). Tudo num lote só: ou o nó e as trilhas somem juntos, ou nada some.
+ *
+ * As trilhas incidentes são calculadas a partir da lista que a tela já tem —
+ * o Firestore não faz `OR` entre dois campos numa query, e varrer a subcoleção
+ * a cada exclusão seria caro. Sem a lista, cai numa varredura de segurança.
+ *
+ * @param {string} uid dono do mapa.
+ * @param {string} mapId id do mapa.
+ * @param {string} nodeId id do nó.
+ * @param {{trilhas?:Array, nodeCount?:number}} [opcoes]
+ * @returns {Promise<{trilhasRemovidas:number}>}
+ */
+export async function deleteNode(uid, mapId, nodeId, opcoes = {}) {
+  const ownerUid = requireText(uid, "É preciso estar autenticado para remover um nó.");
+  const id = requireText(mapId, "Informe de qual mapa-múndi é o nó.");
+  const noId = requireText(nodeId, "Informe qual nó deve ser removido.");
+
+  let trilhas = Array.isArray(opcoes.trilhas) ? opcoes.trilhas : null;
+  if (!trilhas) {
+    const snap = await getDocs(subCol(ownerUid, id, EDGES));
+    trilhas = snapToList(snap);
+  }
+  const incidentes = trilhas.filter((t) => {
+    const [de, para] = pontasDaTrilha(t);
+    return de === noId || para === noId;
+  });
+
+  const ops = incidentes
+    .filter((t) => asText(t?.id))
+    .map((t) => ({ type: "delete", ref: edgeRef(ownerUid, id, t.id) }));
+  ops.push({ type: "delete", ref: nodeRef(ownerUid, id, noId) });
+  ops.push({
+    type: "update",
+    ref: mapRef(ownerUid, id),
+    data: {
+      nodeCount: passoDaContagem(-1, asNumber(opcoes.nodeCount, 0)),
+      updatedAt: serverTimestamp(),
+    },
+  });
+  await commitOps(ops);
+  return { trilhasRemovidas: incidentes.length };
+}
+
+/* ── Trilhas ─────────────────────────────────────────────────────────────── */
+
+/**
+ * Liga dois nós (AC-4). Autoligação e duplicata são recusadas em PT-BR — a
+ * primeira por `criarTrilha`, a segunda por `trilhaDuplicada`, ambas de
+ * `model/graph.js`. A tela só mostra a frase; não reimplementa a checagem.
+ *
+ * @param {string} uid dono do mapa.
+ * @param {string} mapId id do mapa.
+ * @param {object} dados ver `criarTrilha` (`fromId`/`toId` ou `fromNodeId`/`toNodeId`).
+ * @param {{trilhas?:Array}} [opcoes] trilhas já existentes, para a checagem de duplicata.
+ * @returns {Promise<string>} id da trilha criada.
+ * @throws {Error} em PT-BR.
+ */
+export async function createEdge(uid, mapId, dados, opcoes = {}) {
+  const ownerUid = requireText(uid, "É preciso estar autenticado para criar uma trilha.");
+  const id = requireText(mapId, "Informe em qual mapa-múndi a trilha deve ser criada.");
+
+  const trilha = criarTrilha(dados); // recusa autoligação e dados inválidos
+  const existentes = Array.isArray(opcoes.trilhas) ? opcoes.trilhas : [];
+  if (trilhaDuplicada(existentes, trilha)) {
+    throw new Error("Já existe uma trilha ligando esses dois lugares. Edite a que existe em vez de criar outra.");
+  }
+
+  const ref = await addDoc(subCol(ownerUid, id, EDGES), {
+    ...semId(trilha),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  await updateDoc(mapRef(ownerUid, id), { updatedAt: serverTimestamp() });
+  return ref.id;
+}
+
+/**
+ * Altera campos de uma trilha (horas, segredo, teste de descoberta, perigo,
+ * mão única, pontos de controle).
+ *
+ * @param {string} uid dono do mapa.
+ * @param {string} mapId id do mapa.
+ * @param {string} edgeId id da trilha.
+ * @param {object} patch campos a alterar.
+ */
+export async function updateEdge(uid, mapId, edgeId, patch = {}) {
+  const ownerUid = requireText(uid, "É preciso estar autenticado para editar uma trilha.");
+  const id = requireText(mapId, "Informe de qual mapa-múndi é a trilha.");
+  const trilhaId = requireText(edgeId, "Informe qual trilha deve ser atualizada.");
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+    throw new Error("Informe os campos da trilha que devem ser atualizados.");
+  }
+  if ("pathPoints" in patch && !Array.isArray(patch.pathPoints)) {
+    throw new Error("Os pontos de controle da trilha precisam ser uma lista de { x, y } numéricos.");
+  }
+  await updateDoc(edgeRef(ownerUid, id, trilhaId), { ...semId(patch), updatedAt: serverTimestamp() });
+  await updateDoc(mapRef(ownerUid, id), { updatedAt: serverTimestamp() });
+}
+
+/**
+ * Apaga uma trilha. Os nós continuam onde estavam — apagar o caminho não apaga
+ * os lugares.
+ *
+ * @param {string} uid dono do mapa.
+ * @param {string} mapId id do mapa.
+ * @param {string} edgeId id da trilha.
+ */
+export async function deleteEdge(uid, mapId, edgeId) {
+  const ownerUid = requireText(uid, "É preciso estar autenticado para remover uma trilha.");
+  const id = requireText(mapId, "Informe de qual mapa-múndi é a trilha.");
+  const trilhaId = requireText(edgeId, "Informe qual trilha deve ser removida.");
+  await deleteDoc(edgeRef(ownerUid, id, trilhaId));
+  await updateDoc(mapRef(ownerUid, id), { updatedAt: serverTimestamp() });
+}
+
+/**
+ * Grava um grafo inteiro de uma vez, com ids explícitos.
+ *
+ * É o que a **cópia ao usar** do mapa padrão precisa (AC-13): `clonarMapaPadrao()`
+ * devolve nós e trilhas já batizados e coerentes entre si, e eles têm de entrar
+ * no molde novo em bloco — não um `addDoc` por vez, que deixaria o mapa meio
+ * semeado se a rede caísse no meio.
+ *
+ * Itens sem `id` são ignorados: sem id não há documento a criar, e inventar um
+ * aqui quebraria as pontas das trilhas que apontam para o id combinado.
+ *
+ * @param {string} uid dono do mapa.
+ * @param {string} mapId id do mapa (já criado).
+ * @param {{nos?:Array, trilhas?:Array}} grafo
+ * @returns {Promise<{nos:number, trilhas:number}>} quantos foram gravados.
+ */
+export async function semearGrafo(uid, mapId, grafo = {}) {
+  const ownerUid = requireText(uid, "É preciso estar autenticado para semear o mapa.");
+  const id = requireText(mapId, "Informe qual mapa-múndi deve receber o grafo.");
+
+  const nos = (Array.isArray(grafo.nos) ? grafo.nos : []).filter((n) => asText(n?.id));
+  const trilhas = (Array.isArray(grafo.trilhas) ? grafo.trilhas : []).filter((t) => asText(t?.id));
+
+  const ops = [
+    ...nos.map((n) => ({
+      type: "set",
+      ref: nodeRef(ownerUid, id, n.id),
+      data: { ...semId(n), createdAt: serverTimestamp(), updatedAt: serverTimestamp() },
+    })),
+    ...trilhas.map((t) => ({
+      type: "set",
+      ref: edgeRef(ownerUid, id, t.id),
+      data: { ...semId(t), createdAt: serverTimestamp(), updatedAt: serverTimestamp() },
+    })),
+    {
+      type: "update",
+      ref: mapRef(ownerUid, id),
+      data: { nodeCount: nos.length, updatedAt: serverTimestamp() },
+    },
+  ];
+  await commitOps(ops);
+  return { nos: nos.length, trilhas: trilhas.length };
+}
+
+/**
+ * O grafo do molde em tempo real: nós e trilhas das duas subcoleções.
+ *
+ * Duas assinaturas, não uma: são coleções diferentes, e o Firestore não junta
+ * subcoleções num listener só. `loading` só cai quando as DUAS chegaram — meio
+ * grafo na tela desenharia trilha sem nó, que é pior do que um instante de
+ * espera.
+ *
+ * Sem uid ou sem mapId, devolve grafo vazio e não assina nada (não é erro: é
+ * "ainda não há mapa aberto"). Isso é o que permite a tela do mapa PADRÃO
+ * chamar o hook sem condicional — ele não existe no Firestore (AC-13), o grafo
+ * dele vem de `construirMapaPadrao()`.
+ *
+ * @param {string} uid dono do mapa.
+ * @param {string} mapId id do mapa.
+ * @returns {{nos:object[], trilhas:object[], loading:boolean, error:Error|null}}
+ */
+export function useGrafo(uid, mapId) {
+  const [nos, setNos] = useState([]);
+  const [trilhas, setTrilhas] = useState([]);
+  /* Duas bandeiras, não um contador: o listener de nós pode disparar três vezes
+     antes de o de trilhas disparar uma — um contador acharia que chegou tudo. */
+  const [chegada, setChegada] = useState({ nos: false, trilhas: false });
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!uid || !mapId) {
+      setNos([]); setTrilhas([]); setChegada({ nos: true, trilhas: true }); setError(null);
+      return undefined;
+    }
+    setNos([]); setTrilhas([]); setChegada({ nos: false, trilhas: false }); setError(null);
+
+    const falhou = (err) => { setError(err); setChegada({ nos: true, trilhas: true }); };
+
+    const unsubNos = onSnapshot(
+      subCol(uid, mapId, NODES),
+      (snap) => { setNos(snapToList(snap)); setChegada((c) => (c.nos ? c : { ...c, nos: true })); },
+      falhou,
+    );
+    const unsubTrilhas = onSnapshot(
+      subCol(uid, mapId, EDGES),
+      (snap) => { setTrilhas(snapToList(snap)); setChegada((c) => (c.trilhas ? c : { ...c, trilhas: true })); },
+      falhou,
+    );
+    return () => { unsubNos(); unsubTrilhas(); };
+  }, [uid, mapId]);
+
+  return { nos, trilhas, loading: !(chegada.nos && chegada.trilhas), error };
 }

@@ -62,6 +62,19 @@ eventos escondidos disparam. O mestre orquestra; os jogadores veem e participam.
 - **E** ao atingir o limite, a interface explica o limite e o caminho, sem falhar em silêncio
 - **Gate:** `quotas.test.js` (lógica pura) + rules recusando além do teto
 
+### AC-13: Mapa padrão pronto para usar `[F2]`
+- **Dado** um mestre que abre **Mapas-Múndi** pela primeira vez
+- **Então** já existe **um mapa padrão** disponível, com ilustração e um grafo autoral pronto
+  (nós e trilhas), utilizável na hora — sem precisar desenhar nem subir arte
+- **E** ele pode **criar o seu próprio** mapa a qualquer momento, ou trocar a ilustração do padrão
+- **E** o mapa padrão **não consome a cota** do plano free (senão o mestre free ficaria sem poder
+  criar o dele — a cota é 1 mapa)
+- **E** o padrão é **cópia ao usar**: mexer nele não altera o original, e sempre dá para recomeçar
+- **E** a ilustração do padrão é **vetorial embutida no app** (SVG), não dado de usuário: não pesa
+  no Firestore, não tem o teto de 900 KB e fica nítida em qualquer zoom
+- **Gate:** `mapaPadrao.test.js` — o seed tem ≥8 nós e ≥8 trilhas, nenhuma trilha aponta para nó
+  inexistente, nenhuma autoligação, e ≥1 trilha secreta (para exercitar a mecânica da F4)
+
 ### AC-4: Grafo — nós e trilhas `[F2]`
 - **Dado** um molde aberto no ateliê
 - **Então** o mestre planta nós clicando, move arrastando, e edita nome, tipo, ícone, rumor,
@@ -155,8 +168,8 @@ eventos escondidos disparam. O mestre orquestra; os jogadores veem e participam.
 | Fase | Entrega | Status |
 |---|---|---|
 | F0 | Descoberta | ✅ |
-| **F1** | Ateliê: sub-abas + CRUD do molde + upload do fundo + cotas | **em andamento** |
-| F2 | Render do grafo + editor de nós e trilhas | a fazer |
+| F1 | Ateliê: sub-abas + CRUD do molde + upload do fundo + cotas | ✅ |
+| **F2** | Render do grafo + editor de nós e trilhas + **mapa padrão** | **em andamento** |
 | F3 | Névoa bitmap + pincel + toggle de visão + deriva | a fazer |
 | F4 | Levar para a mesa + máquina de estados + viagem + revelação | a fazer |
 | F5 | Eventos, gatilhos, testes de descoberta | a fazer |

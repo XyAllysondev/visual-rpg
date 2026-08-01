@@ -239,6 +239,10 @@ export default function Atelier({ uid, plan = "free" }) {
         <MoldeDetalhe
           molde={aberto}
           uid={uid}
+          /* O plano vai explícito: sem ele, o editor reconstrói o plano a partir do
+           * teto de nós (500 ⇒ pago), heurística que quebra em silêncio se a cota
+           * mudar. Com a prop, o valor real vence. */
+          plan={plan}
           limiteNos={limiteNos}
           onVoltar={() => setAbertoId(null)}
           onRenomear={() => setModal({ modo: "renomear", molde: aberto })}

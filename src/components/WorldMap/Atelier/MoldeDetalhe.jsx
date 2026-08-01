@@ -23,12 +23,29 @@ import {
   uploadBackground, getBackground, fundoDisponivel,
   LIMITE_FUNDO_BYTES, AVISO_FUNDO_NO_DOCUMENTO,
 } from "../worldMapStore";
+import { PLAN_QUOTAS } from "../model/quotas";
+import EditorDoGrafo from "../Editor";
 import {
   SP, R, FS, T, SURF, LINE, HIT, btnStyle, contarNos, tempoRelativo,
   mensagemDeErro, DANGER_TEXT_AA,
 } from "./ui";
 
 const MAX_MB = 8;
+
+/**
+ * O plano do mestre, para a cota de nós do editor (AC-3).
+ *
+ * O ateliê entrega `limiteNos` (o teto já calculado), não o identificador do
+ * plano — e o editor precisa do identificador, porque quem valida a cota é
+ * `canAddNode(plan, ...)` no store, do outro lado da rede. Enquanto o ateliê
+ * não repassar `plan` direto, o teto é o suficiente para reconstruí-lo, e o
+ * lado errado desta conta é sempre o restritivo: qualquer coisa que não seja
+ * exatamente o teto do plano pago vira `free`.
+ */
+export function planoPeloLimite(plan, limiteNos) {
+  if (typeof plan === "string" && plan.trim()) return plan;
+  return limiteNos === PLAN_QUOTAS.pro.nodes ? "pago" : "free";
+}
 
 /** "0,9 MB" — o teto do store dito em português, sem o mestre ver bytes. */
 export const LIMITE_EM_MB = `${(LIMITE_FUNDO_BYTES / 1_000_000).toFixed(1).replace(".", ",")} MB`;
@@ -55,12 +72,18 @@ export function urlDoFundo(molde) {
  * @param {object} props
  * @param {object} props.molde
  * @param {string} props.uid
- * @param {number} props.limiteNos   teto de nós do plano (só informativo nesta fase)
+ * @param {number} props.limiteNos   teto de nós do plano (AC-3)
+ * @param {string} [props.plan]      identificador do plano, quando o ateliê o tiver
+ * @param {Array}  [props.cenas]     cenas táticas do mestre, para vincular a um lugar
+ * @param {Function} [props.onUsarComoBase] cria uma cópia editável do mapa padrão (AC-13)
  * @param {Function} props.onVoltar
  * @param {Function} props.onRenomear
  * @param {Function} props.onExcluir
  */
-export default function MoldeDetalhe({ molde, uid, limiteNos, onVoltar, onRenomear, onExcluir }) {
+export default function MoldeDetalhe({
+  molde, uid, limiteNos, plan, cenas = [], onUsarComoBase,
+  onVoltar, onRenomear, onExcluir,
+}) {
   const [preview, setPreview] = useState("");     // dataURL local, antes de subir
   const [arquivo, setArquivo] = useState(null);
   const [enviando, setEnviando] = useState(false);
@@ -149,6 +172,7 @@ export default function MoldeDetalhe({ molde, uid, limiteNos, onVoltar, onRenome
      do mapa e tem teto de tamanho. Dizer isso antes é o que evita o mestre
      escolher uma arte de 12 MB e descobrir o limite depois de esperar. */
   const noDocumento = !fundoDisponivel();
+  const planoEfetivo = planoPeloLimite(plan, limiteNos);
 
   return (
     <section aria-label={`Mapa-múndi: ${molde?.name || "sem nome"}`}
@@ -288,20 +312,26 @@ export default function MoldeDetalhe({ molde, uid, limiteNos, onVoltar, onRenome
         ) : null}
       </div>
 
-      {/* ── O que ainda não existe ────────────────────────────────── */}
+      {/* ── Lugares e trilhas — o editor visual (F2 · AC-4) ───────── */}
       <div style={{
         background: SURF.rail, border: `1px solid ${LINE.edge}`,
         borderRadius: R.panel, padding: SP.x5,
       }}>
-        <h3 style={{ ...T.section, margin: `0 0 ${SP.x2}px` }}>Nós e trilhas</h3>
-        <p style={{ ...T.body, margin: 0, color: "var(--muted2)", maxWidth: "68ch" }}>
-          Plantar nós, ligar trilhas, esconder passagens secretas e pintar a névoa chega na
-          próxima fase. Por enquanto o molde guarda a identidade e a ilustração — quando o
-          editor abrir, é aqui que ele vai morar.
-        </p>
-        <div style={{ ...T.meta, fontSize: FS.micro, marginTop: SP.x3 }}>
-          Seu plano permite até {limiteNos ?? "—"} nós neste mapa.
+        <div style={{ display: "flex", alignItems: "baseline", gap: SP.x3, flexWrap: "wrap", marginBottom: SP.x4 }}>
+          <h3 style={{ ...T.section, margin: 0 }}>Lugares e trilhas</h3>
+          <span style={{ ...T.meta, fontSize: FS.micro }}>
+            Seu plano permite até {limiteNos ?? "—"} lugares neste mapa.
+          </span>
         </div>
+
+        <EditorDoGrafo
+          uid={uid}
+          molde={molde}
+          plan={planoEfetivo}
+          fundoUrl={fundoCheio || fundoAtual}
+          cenas={cenas}
+          onUsarComoBase={onUsarComoBase}
+        />
       </div>
     </section>
   );
