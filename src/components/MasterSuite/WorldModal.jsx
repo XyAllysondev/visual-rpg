@@ -15,6 +15,7 @@ import { createPortal } from "react-dom";
 import { Btn } from "./ui/primitives";
 import { Ico } from "./ui/entityIcons";
 import { SP, R, FF, FS, SURF, HIT, ELEV, T, DANGER_TEXT_AA } from "./ui/tokens";
+import { mensagemDeErro } from "./model/erros";
 
 const GENEROS = [
   "Horror paranormal", "Fantasia medieval", "Fantasia sombria", "Cyberpunk",
@@ -101,7 +102,7 @@ export default function WorldModal({ onClose, onCreate }) {
     try {
       await onCreate({ name: nome, description: description.trim(), genre: genre.trim() });
     } catch (err) {
-      setFalha(err?.message || "Não foi possível criar o mundo. Tente de novo em instantes.");
+      setFalha(mensagemDeErro(err));
       setSaving(false);
     }
   };
@@ -200,7 +201,7 @@ export default function WorldModal({ onClose, onCreate }) {
             style={{ ...campoStyle(false), minHeight: 120, padding: SP.x3, lineHeight: 1.65, resize: "vertical" }}
           />
           <div style={{ ...T.meta, fontSize: FS.micro, marginTop: SP.x1 }}>
-            Dá para mudar tudo isso depois — o mundo só precisa de um nome para começar.
+            Só o nome é obrigatório.
           </div>
 
           {falha ? (

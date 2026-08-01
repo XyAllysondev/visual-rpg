@@ -42,8 +42,10 @@ jest.mock("../worldsStore", () => ({
 import MasterSuite from "../index";
 import Dashboard from "../Dashboard";
 import Wiki from "../Wiki";
+import { useIsMobile } from "../ui/primitives";
 import {
   useWorlds, useEntities, useConnections, useFolders, useActiveWorld,
+  seedDemoWorld, createEntity,
 } from "../worldsStore";
 
 /* ── Acervo de teste ────────────────────────────────────────────────── */
@@ -194,12 +196,27 @@ describe("Forja do Mestre · casca com mundo ativo", () => {
     expect(screen.getByRole("tab", { name: /painel/i })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("resume o acervo do mundo no cabeçalho", async () => {
+  /* O resumo saiu do cabeçalho (que repetia "Forja do Mestre" logo abaixo da
+   * topbar do app, que já diz "Ajudante do Mestre") e passou a viver na banda
+   * do painel, colado ao nome do mundo — onde ele é lido junto do que descreve. */
+  it("resume o acervo do mundo na banda, junto ao nome", async () => {
     comMundo();
     render(<MasterSuite uid="mestre-1" />);
 
     await screen.findByRole("heading", { name: "Cinzas de Aurum" });
-    expect(screen.getByText("6 entidades · 1 conexão")).toBeInTheDocument();
+    expect(screen.getByText("6 entidades")).toBeInTheDocument();
+    expect(screen.getByText("1 conexão")).toBeInTheDocument();
+    expect(screen.getByText("5 de 11 tipos")).toBeInTheDocument();
+  });
+
+  it("a casca não reapresenta o nome da suíte", async () => {
+    comMundo();
+    render(<MasterSuite uid="mestre-1" />);
+    await screen.findByRole("heading", { name: "Cinzas de Aurum" });
+
+    /* "Forja do Mestre" é codinome interno da spec 0027: vive em comentário e
+     * spec, nunca na tela — a aba já se chama "Ajudante do Mestre" na topbar. */
+    expect(screen.queryByText(/forja do mestre/i)).not.toBeInTheDocument();
   });
 
   it("lista as 9 ferramentas e marca as fases futuras como Em breve", async () => {
@@ -210,8 +227,13 @@ describe("Forja do Mestre · casca com mundo ativo", () => {
     const rail = screen.getByRole("tablist", { name: "Ferramentas da Forja" });
     expect(within(rail).getAllByRole("tab")).toHaveLength(9);
 
-    /* Fase 1 entrega duas: Painel e Wiki. As outras 7 informam sem prometer. */
-    expect(within(rail).getAllByText("Em breve")).toHaveLength(7);
+    /* Fase 1 entrega duas: Painel e Wiki. As outras 7 informam sem prometer.
+     * O "Em breve" saiu do selo ao lado (7 selos custavam ≈420px de largura e
+     * empurravam Genealogia e Mesa para fora da tela) e virou estado do próprio
+     * item: nome acessível + `aria-disabled` + `title`. A informação continua
+     * chegando a leitor de tela e a mouse — só parou de gritar em pixel. */
+    expect(within(rail).getAllByRole("tab", { name: /em breve/i })).toHaveLength(7);
+    expect(within(rail).getByRole("tab", { name: /grafo/i })).toHaveAttribute("title", "Em breve");
     expect(within(rail).getByRole("tab", { name: /grafo/i })).toHaveAttribute("aria-disabled", "true");
     expect(within(rail).getByRole("tab", { name: /^painel/i })).not.toHaveAttribute("aria-disabled");
     expect(within(rail).getByRole("tab", { name: /^wiki/i })).not.toHaveAttribute("aria-disabled");
@@ -261,7 +283,11 @@ describe("Painel do mundo (AC-6)", () => {
       />,
     );
 
-  it("conta as entidades por tipo, inclusive os tipos vazios", () => {
+  /* O ledger substituiu a grade de 11 contadores: mostra o INVENTÁRIO (só o
+   * que existe, do mais povoado ao menos) e guarda os tipos vazios atrás de um
+   * clique. Onze caixas idênticas, dez delas dizendo "0", gastavam 195px do
+   * espaço mais nobre da tela para informar que o mundo está vazio. */
+  it("lista no ledger só os tipos que o mundo tem, do mais povoado ao menos", () => {
     montarPainel();
 
     expect(screen.getByLabelText(/^2 Personagens/)).toBeInTheDocument();
@@ -269,9 +295,21 @@ describe("Painel do mundo (AC-6)", () => {
     expect(screen.getByLabelText(/^1 Organização/)).toBeInTheDocument();
     expect(screen.getByLabelText(/^1 Item /)).toBeInTheDocument();
     expect(screen.getByLabelText(/^1 Criatura /)).toBeInTheDocument();
-    /* tipo sem nenhuma entidade continua no acervo, zerado (AC-4) */
+
+    /* 5 tipos usados ⇒ os 6 vazios ficam fora da tela, mas contados e à mão */
+    expect(screen.queryByLabelText(/^0 Divindades/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "6 tipos vazios" })).toBeInTheDocument();
+  });
+
+  it("tipo sem nenhuma entidade continua no acervo, zerado (AC-4)", () => {
+    montarPainel();
+
+    fireEvent.click(screen.getByRole("button", { name: "6 tipos vazios" }));
+
     expect(screen.getByLabelText(/^0 Divindades/)).toBeInTheDocument();
     expect(screen.getByLabelText(/^0 Rotas/)).toBeInTheDocument();
+    /* revelado, o ledger tem os 11 tipos — nenhum sumiu do vocabulário */
+    expect(screen.getByRole("button", { name: "Ocultar tipos vazios" })).toBeInTheDocument();
   });
 
   it("abre a Wiki filtrada ao clicar num contador de tipo", () => {
@@ -294,11 +332,11 @@ describe("Painel do mundo (AC-6)", () => {
     expect(nomes[1]).toContain("Muralha Cinzenta");
   });
 
-  it("os primeiros passos refletem o estado real do mundo", () => {
+  it("o preparo do mundo reflete o estado real do mundo", () => {
     montarPainel();
 
     /* feitos: mundo criado + personagem + local ⇒ 3 de 6 */
-    expect(screen.getByRole("progressbar", { name: /primeiros passos/i }))
+    expect(screen.getByRole("progressbar", { name: /preparo do mundo/i }))
       .toHaveAttribute("aria-valuenow", "50");
 
     /* passo cumprido não é clicável… */
@@ -311,18 +349,18 @@ describe("Painel do mundo (AC-6)", () => {
   it("marca o passo de conexão como feito assim que existe uma aresta", () => {
     montarPainel({ connections: CONEXOES });
 
-    expect(screen.getByRole("progressbar", { name: /primeiros passos/i }))
-      .toHaveAttribute("aria-valuenow", "83");
+    expect(screen.getByRole("progressbar", { name: /preparo do mundo/i }))
+      .toHaveAttribute("aria-valuenow", "67");
     expect(screen.getByText("Conectar duas entidades").closest("button")).toBeNull();
   });
 
   it("mundo recém-criado começa o checklist só com o próprio mundo feito", () => {
     montarPainel({ entities: [], connections: [] });
 
-    expect(screen.getByRole("progressbar", { name: /primeiros passos/i }))
+    expect(screen.getByRole("progressbar", { name: /preparo do mundo/i }))
       .toHaveAttribute("aria-valuenow", "17");
     expect(screen.getByText("Adicionar um personagem").closest("button")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /nada editado ainda/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^nada editado$/i })).toBeInTheDocument();
   });
 });
 
@@ -385,7 +423,7 @@ describe("Wiki (AC-3/AC-4)", () => {
     await waitFor(() => {
       expect(screen.queryByText("Muralha Cinzenta")).not.toBeInTheDocument();
     });
-    expect(screen.getByRole("heading", { name: /nada|nenhum/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /sem correspondência/i })).toBeInTheDocument();
   });
 
   it("clicar no filtro de um tipo restringe a lista", async () => {
@@ -481,5 +519,335 @@ describe("Detalhe da entidade (AC-5)", () => {
       expect(screen.getByText("Sétimo Guardião")).toBeInTheDocument();
       expect(screen.getByText("Ordem do Véu")).toBeInTheDocument();
     });
+  });
+
+  /* ── BUG-6 do E2E: o formulário inline de conexão ignorava Esc e deixava
+   *    empilhar a confirmação de exclusão por cima. ── */
+  const abrirFormularioDeConexao = async () => {
+    abrirMuralha();
+    await screen.findByRole("heading", { name: "Muralha Cinzenta", level: 1 });
+    fireEvent.click(screen.getByRole("button", { name: /conectar entidade/i }));
+    expect(screen.getByLabelText("Entidade")).toBeInTheDocument();
+  };
+
+  it("Esc fecha o formulário de conexão (BUG-6)", async () => {
+    await abrirFormularioDeConexao();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Entidade")).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /conectar entidade/i })).toBeInTheDocument();
+  });
+
+  it("não empilha a exclusão sobre o formulário de conexão (BUG-6)", async () => {
+    await abrirFormularioDeConexao();
+
+    fireEvent.click(screen.getByRole("button", { name: /^excluir$/i }));
+
+    const dialogo = await screen.findByRole("alertdialog");
+    expect(within(dialogo).getByText(/excluir entidade\?/i)).toBeInTheDocument();
+    /* o formulário saiu da tela antes do diálogo entrar */
+    expect(screen.queryByLabelText("Entidade")).not.toBeInTheDocument();
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════
+ *  6 · MUNDO DEMO QUE FALHA  (BUG-2 e BUG-3 do E2E)
+ * ════════════════════════════════════════════════════════════════════ */
+describe("Mundo demo que falha (BUG-2/BUG-3)", () => {
+  /** O erro real do E2E: o doc do mundo nasce, o conteúdo não. */
+  const falhaDoSeed = () => {
+    const e = new Error("Missing or insufficient permissions.");
+    e.name = "FirebaseError";
+    e.code = "permission-denied";
+    e.worldId = "w-demo";
+    e.mundoParcial = true;
+    return e;
+  };
+
+  it("mostra a falha no Painel, onde o mestre está — não só no estado vazio", async () => {
+    /* `useWorlds` é lido a cada render: quando o seed cria o mundo raiz e falha
+     * depois, a tela troca para o Painel e o estado vazio (que era o único lugar
+     * que renderizava o erro) desaparece. */
+    let mundos = [];
+    useWorlds.mockImplementation(() => ({ worlds: mundos, loading: false, error: null }));
+    seedDemoWorld.mockImplementation(async () => {
+      mundos = [{ ...MUNDO, id: "w-demo", name: "Coroa de Cinzas" }];
+      throw falhaDoSeed();
+    });
+
+    render(<MasterSuite uid="mestre-1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Criar mundo demo" }));
+
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).toHaveTextContent(/ficou pela metade/i);
+    expect(alerta).toHaveTextContent(/Coroa de Cinzas/);
+    /* saiu do estado vazio: sem o conserto, nenhum aviso sobraria na tela */
+    expect(screen.queryByRole("heading", { name: /a forja está fria/i })).not.toBeInTheDocument();
+  });
+
+  it("traduz o erro do Firebase — nada de inglês cru na tela (BUG-3)", async () => {
+    let mundos = [];
+    useWorlds.mockImplementation(() => ({ worlds: mundos, loading: false, error: null }));
+    seedDemoWorld.mockImplementation(async () => {
+      mundos = [{ ...MUNDO, id: "w-demo", name: "Coroa de Cinzas" }];
+      throw falhaDoSeed();
+    });
+
+    render(<MasterSuite uid="mestre-1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Criar mundo demo" }));
+
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).not.toHaveTextContent(/Missing or insufficient permissions/i);
+    expect(alerta).toHaveTextContent(/mundo não é seu|removido/i);
+    expect(screen.queryByText(/Missing or insufficient permissions/i)).not.toBeInTheDocument();
+  });
+
+  it("o acervo que não carrega também fala português (BUG-3)", async () => {
+    comMundo({ entities: [] });
+    const erro = new Error("Missing or insufficient permissions.");
+    erro.name = "FirebaseError";
+    erro.code = "permission-denied";
+    useEntities.mockReturnValue({ entities: [], loading: false, error: erro });
+
+    render(<MasterSuite uid="mestre-1" />);
+
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).toHaveTextContent(/o acervo não carregou/i);
+    expect(alerta).toHaveTextContent(/sem permissão de leitura/i);
+    expect(alerta).not.toHaveTextContent(/Missing or insufficient permissions/i);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════
+ *  7 · ESCRITA NA WIKI  (BUG-4 e BUG-5 do E2E)
+ * ════════════════════════════════════════════════════════════════════ */
+describe("Escrita na Wiki (BUG-4/BUG-5)", () => {
+  const montarWiki = (props = {}) =>
+    render(
+      <Wiki
+        worldId="w1"
+        entities={ENTIDADES}
+        connections={CONEXOES}
+        loading={false}
+        initialType=""
+        initialEntityId=""
+        createType=""
+        createSignal={0}
+        {...props}
+      />,
+    );
+
+  const chips = () => screen.getByRole("group", { name: "Filtrar por tipo de entidade" });
+
+  it("entidade criada não nasce invisível sob o filtro ativo (BUG-5)", async () => {
+    createEntity.mockResolvedValue("nova-1");
+    montarWiki();
+
+    /* o mestre está filtrando Personagem… */
+    fireEvent.click(within(chips()).getByRole("button", { name: /^Personagem/ }));
+    await waitFor(() => {
+      expect(screen.queryByText("Muralha Cinzenta")).not.toBeInTheDocument();
+    });
+
+    /* …e cria um Local, que o filtro esconderia */
+    fireEvent.click(screen.getByRole("button", { name: "Nova entidade" }));
+    const modal = await screen.findByRole("dialog");
+    fireEvent.click(within(modal).getByRole("radio", { name: /^Local$/ }));
+    fireEvent.change(within(modal).getByLabelText(/^Nome/), { target: { value: "Teste QA" } });
+    fireEvent.click(within(modal).getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() => expect(createEntity).toHaveBeenCalled());
+    /* filtro limpo + aviso explicando: a criação não pode PARECER falha */
+    await waitFor(() => {
+      expect(within(chips()).getByRole("button", { name: /^Personagem/ }))
+        .toHaveAttribute("aria-pressed", "false");
+    });
+    expect(screen.getByText(/filtros foram limpos/i)).toBeInTheDocument();
+    expect(screen.getByText("Muralha Cinzenta")).toBeInTheDocument();
+  });
+
+  it("entidade criada dentro do filtro ativo não mexe nos filtros (BUG-5)", async () => {
+    createEntity.mockResolvedValue("nova-2");
+    montarWiki();
+
+    fireEvent.click(within(chips()).getByRole("button", { name: /^Personagem/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Nova entidade" }));
+    const modal = await screen.findByRole("dialog");
+    fireEvent.click(within(modal).getByRole("radio", { name: /^Personagem$/ }));
+    fireEvent.change(within(modal).getByLabelText(/^Nome/), { target: { value: "Outro vigia" } });
+    fireEvent.click(within(modal).getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() => expect(createEntity).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    expect(within(chips()).getByRole("button", { name: /^Personagem/ }))
+      .toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText(/filtros foram limpos/i)).not.toBeInTheDocument();
+  });
+
+  it("mexer nas pastas não gera aviso de estilo do React (BUG-4)", async () => {
+    useFolders.mockReturnValue({
+      folders: [{ id: "f1", name: "Pasta QA", parentId: null, scope: "wiki" }],
+      loading: false,
+      error: null,
+    });
+    const consoleErro = jest.spyOn(console, "error").mockImplementation(() => {});
+    montarWiki();
+
+    const rail = screen.getByRole("navigation", { name: "Pastas da wiki" });
+    /* ativa e desativa: é a troca de `borderColor` que denunciava o shorthand */
+    fireEvent.click(within(rail).getByRole("button", { name: /Pasta QA/ }));
+    fireEvent.click(within(rail).getByRole("button", { name: /^Tudo/ }));
+    fireEvent.click(within(rail).getByRole("button", { name: /Pasta QA/ }));
+
+    const gritos = consoleErro.mock.calls.map((args) => args.join(" ")).join("\n");
+    expect(gritos).not.toMatch(/shorthand|style property during rerender/i);
+    consoleErro.mockRestore();
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════
+ *  8 · MUNDO AINDA NÃO CONFIRMADO PELO SERVIDOR
+ *  --------------------------------------------------------------------
+ *  O `onSnapshot` entrega o mundo recém-criado ANTES de o servidor confirmar
+ *  a escrita (latency compensation). A regra de leitura das subcoleções faz
+ *  `get()` no documento do mundo — que lá ainda não existe. Auto-selecionar
+ *  esse mundo abria o acervo com `permission-denied` e pintava "O ACERVO NÃO
+ *  CARREGOU" logo depois de criar o mundo demo.
+ * ════════════════════════════════════════════════════════════════════ */
+describe("Mundo com escrita pendente (corrida da latency compensation)", () => {
+  const negado = () => {
+    const e = new Error("Missing or insufficient permissions.");
+    e.name = "FirebaseError";
+    e.code = "permission-denied";
+    return e;
+  };
+
+  it("a auto-seleção não pega o mundo cuja escrita ainda não voltou do servidor", () => {
+    useWorlds.mockReturnValue({
+      worlds: [{ ...MUNDO, pendenteNoServidor: true }],
+      loading: false,
+      error: null,
+    });
+    const setActiveWorldId = jest.fn();
+    useActiveWorld.mockReturnValue({ activeWorldId: null, setActiveWorldId });
+
+    render(<MasterSuite uid="mestre-1" />);
+
+    expect(setActiveWorldId).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /escolher mundo/i })).toBeInTheDocument();
+  });
+
+  it("assume o mundo assim que o servidor confirma", () => {
+    useWorlds.mockReturnValue({
+      worlds: [{ ...MUNDO, pendenteNoServidor: false }],
+      loading: false,
+      error: null,
+    });
+    const setActiveWorldId = jest.fn();
+    useActiveWorld.mockReturnValue({ activeWorldId: null, setActiveWorldId });
+
+    render(<MasterSuite uid="mestre-1" />);
+
+    expect(setActiveWorldId).toHaveBeenCalledWith(MUNDO.id);
+  });
+
+  it("negativa de leitura durante a pendência não vira banner de erro", async () => {
+    useWorlds.mockReturnValue({
+      worlds: [{ ...MUNDO, pendenteNoServidor: true }],
+      loading: false,
+      error: null,
+    });
+    useEntities.mockReturnValue({ entities: [], loading: false, error: negado() });
+    useConnections.mockReturnValue({ connections: [], loading: false, error: null });
+    /* seleção EXPLÍCITA (o que `criarDemo` faz) — a auto-seleção já foi barrada */
+    useActiveWorld.mockReturnValue({ activeWorldId: MUNDO.id, setActiveWorldId: nada });
+
+    render(<MasterSuite uid="mestre-1" />);
+
+    await screen.findByRole("heading", { name: MUNDO.name });
+    expect(screen.queryByText(/o acervo não carregou/i)).not.toBeInTheDocument();
+  });
+
+  it("a mesma negativa vira banner assim que o mundo está confirmado", async () => {
+    useWorlds.mockReturnValue({
+      worlds: [{ ...MUNDO, pendenteNoServidor: false }],
+      loading: false,
+      error: null,
+    });
+    useEntities.mockReturnValue({ entities: [], loading: false, error: negado() });
+    useConnections.mockReturnValue({ connections: [], loading: false, error: null });
+    useActiveWorld.mockReturnValue({ activeWorldId: MUNDO.id, setActiveWorldId: nada });
+    /* a casca loga o erro cru no console de propósito — aqui ele é esperado */
+    const avisos = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    render(<MasterSuite uid="mestre-1" />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/o acervo não carregou/i);
+    avisos.mockRestore();
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════
+ *  9 · MEDIDAS DA CASCA
+ * ════════════════════════════════════════════════════════════════════ */
+describe("Seletor de mundo · largura", () => {
+  it("no desktop o teto do seletor comporta o nome inteiro do mundo", async () => {
+    comMundo();
+    render(<MasterSuite uid="mestre-1" />);
+
+    const botao = await screen.findByRole("button", { name: /mundo ativo: cinzas de aurum/i });
+    /* 240px raspava a reticência em nomes de tamanho comum ("Coroa de Cinzas");
+     * o botão continua se dimensionando pelo conteúdo — 320 é só o teto. */
+    expect(botao).toHaveStyle({ maxWidth: "320px" });
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════
+ * 10 · LARGURA DA JANELA
+ * ════════════════════════════════════════════════════════════════════ */
+describe("useIsMobile", () => {
+  const larguraDe = (w) => {
+    Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: w });
+  };
+
+  afterEach(() => larguraDe(1024));
+
+  it("pega o resize que cai entre o primeiro render e a montagem", () => {
+    larguraDe(1024);
+    let visto = null;
+    function Sonda() { visto = useIsMobile(); return null; }
+    /* Renderiza DEPOIS da sonda e ANTES dos efeitos — é exatamente a janela em
+     * que um resize acontece sem ninguém escutando (montagem tardia de `lazy`,
+     * rotação de aparelho). Sem reler a largura no efeito, a sonda ficava presa
+     * em 1024 até o próximo resize. */
+    function Estreita() { larguraDe(500); return null; }
+
+    render(<><Sonda /><Estreita /></>);
+
+    expect(visto).toBe(true);
+  });
+
+  it("continua reagindo a resize depois de montado, e solta o listener no unmount", async () => {
+    larguraDe(1024);
+    let visto = null;
+    function Sonda() { visto = useIsMobile(); return null; }
+    const solta = jest.spyOn(window, "removeEventListener");
+    const { unmount } = render(<Sonda />);
+    expect(visto).toBe(false);
+
+    larguraDe(400);
+    window.dispatchEvent(new Event("resize"));
+    /* o handler agenda por `requestAnimationFrame` — a atualização não é síncrona */
+    await waitFor(() => expect(visto).toBe(true));
+
+    unmount();
+    expect(solta).toHaveBeenCalledWith("resize", expect.any(Function));
+    expect(solta).toHaveBeenCalledWith("orientationchange", expect.any(Function));
+    solta.mockRestore();
   });
 });

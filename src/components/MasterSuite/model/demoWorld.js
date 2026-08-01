@@ -40,13 +40,20 @@ const ID = {
   estrada: "demo-rota-1",
 };
 
+/**
+ * Atributos são declarados aqui como objeto por conveniência de leitura, mas o
+ * modelo persistido é uma LISTA de pares `{ key, value }` — é o que a Wiki exibe
+ * e o único formato aceito por `worldsStore.sanitizeAttributes`. Converter aqui,
+ * na fronteira, evita o seed morrer na primeira entidade (o mundo demo nascia
+ * vazio: o doc do mundo já tinha sido criado quando a exceção subia).
+ */
 const ent = (id, type, name, description, tags = [], attributes = {}) => ({
   id,
   type,
   name,
   description,
   tags: [...tags],
-  attributes: { ...attributes },
+  attributes: Object.entries(attributes).map(([key, value]) => ({ key, value: String(value) })),
   folderId: null,
 });
 

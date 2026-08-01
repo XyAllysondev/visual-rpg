@@ -20,7 +20,14 @@ import {
   activeWorldStorageKey, toNameLower, BATCH_LIMIT,
 } from "../worldsStore";
 
-jest.mock("../../../firebase", () => ({ db: { __db: true }, auth: {} }));
+// `auth.currentUser` é lido nas escritas: desde a correção do lote do mundo demo,
+// cada documento de subcoleção carrega `ownerUid` para a regra não precisar de
+// `get()` (o Firestore limita a 20 access calls por lote).
+const UID_LOGADO = "uid-mestre";
+jest.mock("../../../firebase", () => ({
+  db: { __db: true },
+  auth: { currentUser: { uid: "uid-mestre" } },
+}));
 
 jest.mock("firebase/firestore", () => {
   const state = { batches: [], listeners: [], autoId: 0 };
@@ -106,6 +113,16 @@ describe("createWorld", () => {
     await expect(createWorld("mestre-1", { name: "   " })).rejects.toThrow(/nome/i);
     await expect(createWorld("mestre-1", {})).rejects.toThrow(/nome/i);
     expect(firestore.addDoc).not.toHaveBeenCalled();
+  });
+
+  // OBS-1 do E2E: o seed marcava `demo: true` e o store jogava fora — depois de
+  // criado, não havia como distinguir o mundo de exemplo do mundo autoral.
+  it("persiste a marca `demo` (e grava false quando o mundo é autoral)", async () => {
+    await createWorld("mestre-1", { name: "Aurora" });
+    expect(firestore.addDoc.mock.calls[0][1]).toMatchObject({ demo: false });
+
+    await createWorld("mestre-1", { name: "Coroa de Cinzas", demo: true });
+    expect(firestore.addDoc.mock.calls[1][1]).toMatchObject({ demo: true });
   });
 
   it("exige um usuário autenticado", async () => {
@@ -343,6 +360,31 @@ describe("deleteFolder", () => {
 
 /* ── Mundo demo (AC-7) ───────────────────────────────────────────────────── */
 
+describe("ownerUid nas subcoleções (lote do mundo demo)", () => {
+  // O Firestore permite no máximo 20 `get()` por escrita em lote. Enquanto a regra
+  // resolvia o dono com `get()` por documento, o lote de ~48 docs do mundo demo era
+  // negado inteiro e o mundo nascia vazio. Cada documento carregar `ownerUid` é o
+  // que mantém a regra O(1) — se isto quebrar, o mundo demo volta a nascer vazio.
+  it("createEntity grava ownerUid do usuário logado", async () => {
+    firestore.addDoc.mockResolvedValue({ id: "e-1" });
+    await createEntity("w-1", { type: "location", name: "Vila" });
+    expect(firestore.addDoc.mock.calls[0][1]).toMatchObject({ ownerUid: UID_LOGADO });
+  });
+
+  it("createConnection grava ownerUid do usuário logado", async () => {
+    firestore.getDocs.mockResolvedValue({ docs: [], size: 0, empty: true });
+    firestore.addDoc.mockResolvedValue({ id: "c-1" });
+    await createConnection("w-1", { fromId: "a", toId: "b", relation: "CONTÉM" });
+    expect(firestore.addDoc.mock.calls[0][1]).toMatchObject({ ownerUid: UID_LOGADO });
+  });
+
+  it("createFolder grava ownerUid do usuário logado", async () => {
+    firestore.addDoc.mockResolvedValue({ id: "f-1" });
+    await createFolder("w-1", { name: "Reinos" });
+    expect(firestore.addDoc.mock.calls[0][1]).toMatchObject({ ownerUid: UID_LOGADO });
+  });
+});
+
 describe("seedDemoWorld", () => {
   const seed = () => ({
     world: { name: "Ruínas de Aurora", description: "Mundo demo", genre: "Horror" },
@@ -385,6 +427,55 @@ describe("seedDemoWorld", () => {
     await expect(seedDemoWorld(null)).rejects.toThrow(/autenticado/i);
     expect(buildDemoWorld).not.toHaveBeenCalled();
   });
+
+  it("leva a marca `demo` do seed para o documento do mundo (OBS-1)", async () => {
+    const comMarca = seed();
+    comMarca.world = { ...comMarca.world, demo: true };
+    buildDemoWorld.mockReturnValue(comMarca);
+
+    await seedDemoWorld("mestre-1");
+
+    expect(firestore.addDoc.mock.calls[0][1]).toMatchObject({
+      name: "Ruínas de Aurora",
+      demo: true,
+    });
+  });
+
+  // BUG-2 do E2E: o doc do mundo é criado ANTES do conteúdo. Quando o lote falha,
+  // sobra um mundo vazio na conta do mestre — e quem chama precisa saber disso para
+  // conseguir contar a verdade na tela (a UI não tem outro jeito de descobrir).
+  it("entrega o id do mundo órfão quando o conteúdo falha depois da criação", async () => {
+    const quebrado = seed();
+    quebrado.connections.push({ fromId: "demo-personagem-1", toId: "demo-fantasma-9", relation: "TEME" });
+    buildDemoWorld.mockReturnValue(quebrado);
+
+    const erro = await seedDemoWorld("mestre-1").catch((e) => e);
+
+    expect(erro.message).toMatch(/inexistente/i);
+    expect(erro.worldId).toBe("new-1");
+    expect(erro.mundoParcial).toBe(true);
+  });
+
+  it("marca o mundo como parcial quando o lote é negado pelo Firestore", async () => {
+    buildDemoWorld.mockReturnValue(seed());
+    firestore.writeBatch.mockImplementation(() => ({
+      set: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+      commit: jest.fn(async () => {
+        const e = new Error("Missing or insufficient permissions.");
+        e.name = "FirebaseError";
+        e.code = "permission-denied";
+        throw e;
+      }),
+    }));
+
+    const erro = await seedDemoWorld("mestre-1").catch((e) => e);
+
+    expect(erro.code).toBe("permission-denied");
+    expect(erro.worldId).toBe("new-1");
+    expect(erro.mundoParcial).toBe(true);
+  });
 });
 
 /* ── Hooks ───────────────────────────────────────────────────────────────── */
@@ -400,7 +491,9 @@ describe("useWorlds", () => {
     act(() => {
       state.listeners[0].next(fakeSnap([fakeDoc("w-1", { name: "Aurora" })]));
     });
-    expect(result.current.worlds).toEqual([{ id: "w-1", name: "Aurora" }]);
+    expect(result.current.worlds).toEqual([
+      { id: "w-1", name: "Aurora", pendenteNoServidor: false },
+    ]);
     expect(result.current.loading).toBe(false);
     expect(result.current.error).toBeNull();
 
@@ -408,6 +501,37 @@ describe("useWorlds", () => {
     expect(unsub).not.toHaveBeenCalled();
     unmount();
     expect(unsub).toHaveBeenCalledTimes(1);
+  });
+
+  /* O snapshot LOCAL chega antes do servidor confirmar a escrita. Sem este campo
+   * a casca não tem como distinguir um mundo que existe de um mundo que só existe
+   * aqui — e a regra da subcoleção nega a leitura do segundo. */
+  it("marca o mundo com escrita ainda pendente no servidor", () => {
+    const { result } = renderHook(() => useWorlds("mestre-1"));
+
+    act(() => {
+      state.listeners[0].next({
+        docs: [
+          {
+            id: "w-novo",
+            data: () => ({ name: "Coroa de Cinzas" }),
+            metadata: { hasPendingWrites: true, fromCache: true },
+          },
+          {
+            id: "w-velho",
+            data: () => ({ name: "Aurora" }),
+            metadata: { hasPendingWrites: false, fromCache: false },
+          },
+        ],
+        empty: false,
+        size: 2,
+      });
+    });
+
+    expect(result.current.worlds.map((w) => [w.id, w.pendenteNoServidor])).toEqual([
+      ["w-novo", true],
+      ["w-velho", false],
+    ]);
   });
 
   it("não assina nada sem uid", () => {
@@ -491,6 +615,20 @@ describe("useActiveWorld", () => {
     await waitFor(() => expect(console.warn).toHaveBeenCalled());
     expect(result.current.activeWorldId).toBe("w-1");
     expect(window.localStorage.getItem(activeWorldStorageKey("mestre-1"))).toBe("w-1");
+  });
+
+  it("limpa a seleção quando o mundo guardado dá permission-denied (mundo fantasma)", async () => {
+    // Doc inexistente cai como `permission-denied` porque a regra lê
+    // `resource.data.ownerUid` e `resource` é nulo. Se não limpar, a Forja fica
+    // presa num mundo que não existe mais.
+    window.localStorage.setItem(activeWorldStorageKey("mestre-1"), "w-fantasma");
+    const erro = new Error("Missing or insufficient permissions.");
+    erro.code = "permission-denied";
+    firestore.getDoc.mockRejectedValue(erro);
+
+    const { result } = renderHook(() => useActiveWorld("mestre-1"));
+    await waitFor(() => expect(result.current.activeWorldId).toBeNull());
+    expect(window.localStorage.getItem(activeWorldStorageKey("mestre-1"))).toBeNull();
   });
 
   it("ignora o storage quando não há usuário", () => {

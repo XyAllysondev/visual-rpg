@@ -6,7 +6,7 @@
  */
 import React from "react";
 import { getEntityType } from "../model/entityTypes";
-import { SP, R, FS, SURF, ELEV, T, tint } from "../ui/tokens";
+import { SP, R, FS, LINE, SURF, T, tint } from "../ui/tokens";
 import { TypeBadge } from "../ui/primitives";
 import { EntityIcon } from "../ui/entityIcons";
 
@@ -46,10 +46,13 @@ export default function EntityCard({ entity, onOpen, index = 0 }) {
         flexDirection: "column",
         overflow: "hidden",
         cursor: "pointer",
+        /* Card CLICÁVEL: fundo distinto do canvas + filete `raise`. O dourado
+         * aparece só no hover/foco, via `--forja-edge` (aqui ele é legítimo:
+         * marca interação). Sem `ELEV.e0` — era um inset branco de 1px que
+         * ninguém via e que só sujava o repouso. */
         background: SURF.card,
-        border: `1px solid ${SURF.hair}`,
+        border: `1px solid ${LINE.raise}`,
         borderRadius: R.card,
-        boxShadow: ELEV.e0,
       }}
     >
       {/* faixa do tipo — o discriminador que sobrevive à varredura rápida */}
@@ -66,14 +69,16 @@ export default function EntityCard({ entity, onOpen, index = 0 }) {
         }}
       />
 
-      {/* capa ou sigilo do tipo */}
+      {/* Capa proporcional ao dado: com imagem real vale 112px; sem imagem, o
+        * sigilo é placeholder e placeholder não pode ser maior que o nome —
+        * 84px e um ícone de 30px a 18% de opacidade. */}
       <div
         style={{
           position: "relative",
-          height: 112,
+          height: entity?.imageUrl ? 112 : 84,
           flexShrink: 0,
           background: tint(tipo.color, 0.07),
-          borderBottom: `1px solid ${SURF.hair}`,
+          borderBottom: `1px solid ${LINE.hair}`,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -88,8 +93,8 @@ export default function EntityCard({ entity, onOpen, index = 0 }) {
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
         ) : (
-          <span style={{ color: tipo.color, opacity: 0.3, display: "flex" }}>
-            <EntityIcon type={entity?.type} size={44} strokeWidth={1.2} />
+          <span style={{ color: tipo.color, opacity: 0.18, display: "flex" }}>
+            <EntityIcon type={entity?.type} size={30} strokeWidth={1.2} />
           </span>
         )}
       </div>
@@ -130,7 +135,7 @@ export default function EntityCard({ entity, onOpen, index = 0 }) {
                   fontSize: FS.micro,
                   padding: `2px ${SP.x2}px`,
                   background: "rgba(255,255,255,0.05)",
-                  border: `1px solid ${SURF.hair}`,
+                  border: `1px solid ${LINE.hair}`,
                   borderRadius: R.tag,
                   color: "var(--muted2)",
                 }}

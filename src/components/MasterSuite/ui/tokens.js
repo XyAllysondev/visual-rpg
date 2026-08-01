@@ -17,12 +17,15 @@ export const SP = {
 };
 
 /* ── RAIOS ────────────────────────────────────────────────────────── */
+/* Raio ≠ 0 significa "isto responde ao clique". Banda = estrutura, e
+ * estrutura não flutua: `band` nunca arredonda. */
 export const R = {
-  tag: 4,      // tag inline #hash
-  input: 6,    // input, botão pequeno
-  ctl: 8,      // botão, item de nav, pílula do rail
-  card: 10,    // card de entidade, contador, atalho
-  panel: 14,   // painel, hero, modal
+  band: 0,     // banda de dossiê full-bleed — NUNCA arredonda
+  tag: 3,      // tag inline #hash
+  input: 5,    // input, botão pequeno
+  ctl: 6,      // botão, item de nav, pílula do rail
+  card: 8,     // só superfície CLICÁVEL (card de entidade)
+  panel: 12,   // painel de conteúdo, modal
   pill: 999,   // chip de filtro, badge de tipo
 };
 
@@ -79,6 +82,36 @@ export const SURF = {
   edge: "var(--border2)",
 };
 
+/* ── FILETES: estrutura é NEUTRA, ouro é ESTADO ───────────────────────
+ * O dourado (`var(--border)`, rgba(201,168,76,0.18)) contornava hero,
+ * contadores, painéis, rail, toolbar e atalhos ao mesmo tempo — quando a
+ * cor de acento contorna tudo, ela para de marcar o que é clicável.
+ * A partir daqui: filete NEUTRO desenha estrutura; filete OURO marca
+ * SÓ interação (ativo, selecionado, hover, foco). Não trocar os papéis.
+ *
+ * Escada de superfície que acompanha (o tema já entrega os quatro degraus:
+ * --bg #14141c < --surface #1c1c26 < --card #24242f < --card2 #2c2c39):
+ *
+ *   papel                        | fundo          | borda        | raio
+ *   ---------------------------- | -------------- | ------------ | -------
+ *   canvas                       | var(--bg)      | —            | —
+ *   banda de dossiê (hero/seção) | var(--surface) | LINE.edge ↓  | R.band
+ *   painel de conteúdo           | var(--surface) | LINE.edge    | R.panel
+ *   linha dentro de painel       | transparente   | LINE.hair ↑  | 0
+ *   card clicável                | var(--card)    | LINE.raise   | R.card
+ *   card clicável ativo/hover    | var(--card2)   | LINE.gold    | R.card
+ *
+ * Contraste: o card clicável nunca depende só da borda — tem preenchimento
+ * distinto do canvas E rótulo de texto. Rótulos em `--muted2` (#c8b48e)
+ * sobre #1c1c26 ficam em ≈9,5:1; `--muted` (#a89a7c) em ≈6,8:1. A cor de
+ * tipo mais escura (#fb7185) sobre #1c1c26 fica em ≈5,9:1. Todos passam. */
+export const LINE = {
+  hair: "rgba(255,255,255,0.055)",  // separador interno de lista/ledger
+  edge: "rgba(255,255,255,0.08)",   // borda de painel e de banda
+  raise: "rgba(255,255,255,0.13)",  // borda de card clicável em repouso
+  gold: "var(--border2)",           // SÓ ativo/selecionado/hover/foco
+};
+
 /* ── ALVOS / ACESSIBILIDADE ───────────────────────────────────────── */
 export const HIT = { desktop: 36, mobile: 44, fab: 56 };
 export const FOCUS = { outline: "2px solid var(--accent2)", outlineOffset: 2 };
@@ -101,9 +134,9 @@ export const DEBOUNCE_BUSCA = 220; // ms
 export const W = {
   viewport: 1320,   // maxWidth do conteúdo, centrado
   aside: 320,       // coluna direita
-  folders: 200,     // rail de pastas da Wiki
+  folders: 176,     // coluna de pastas da Wiki
   cardMin: 248,     // minmax da grade de entidades
-  counterMin: 152,  // minmax da grade de contadores
+  ledgerMin: 208,   // minmax do ledger de tipos do painel
   measure: "68ch",  // medida de leitura
 };
 
@@ -148,6 +181,14 @@ export const T = {
   data: {
     fontFamily: FF.data, fontSize: 13, letterSpacing: LS.data,
     fontVariantNumeric: "tabular-nums", color: "var(--muted2)",
+  },
+  /* Número do ledger de tipos: alinhado à direita, discreto, sem cor de tipo
+   * (a cor de tipo vive no ícone de 16px ao lado — 11 números coloridos numa
+   * grade viram arco-íris e nenhum deles significa mais nada). */
+  ledgerNum: {
+    fontFamily: FF.data, fontSize: 15, fontWeight: FW.med,
+    letterSpacing: LS.data, fontVariantNumeric: "tabular-nums",
+    color: "var(--text)", textAlign: "right",
   },
   /* Rótulo de botão */
   btn: {

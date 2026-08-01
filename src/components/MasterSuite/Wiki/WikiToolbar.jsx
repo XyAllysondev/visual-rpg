@@ -7,16 +7,21 @@
 import React from "react";
 import { ENTITY_TYPES } from "../model/entityTypes";
 import { SORT_OPTIONS } from "../model/entityFilters";
-import { SP, R, FF, FS, LS, SURF, HIT, T } from "../ui/tokens";
-import { TypeChip } from "../ui/primitives";
+import { SP, R, FF, FS, LS, LINE, SURF, HIT, T } from "../ui/tokens";
+import { TypeChip, useIsMobile } from "../ui/primitives";
 import { ForjaIco, Ico } from "../ui/entityIcons";
 
+/* Borda longhand (width/style/color): os botões de visão trocam só `borderColor`
+ * quando ficam ativos, e misturar com o atalho `border` no mesmo objeto gera o
+ * aviso do React sobre shorthand + longhand na mesma propriedade. */
 const controle = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
   background: "rgba(255,255,255,0.04)",
-  border: "1px solid var(--border)",
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderColor: LINE.raise,
   borderRadius: R.input,
   color: "var(--muted2)",
   cursor: "pointer",
@@ -75,9 +80,15 @@ export default function WikiToolbar({
   hasFilters = false,
   onClear,
 }) {
+  const isMobile = useIsMobile();
   const semTipo = activeTypes.length === 0;
+  /* Alvo de 44px é inegociável no toque; no desktop 36px basta e devolve
+   * altura à área de resultados (a barra media 190px para filtrar 2 itens). */
+  const ctlH = isMobile ? HIT.mobile : 36;
 
   return (
+    /* Faixa de controle, não caixa: a toolbar empilhava mais um cartão com
+     * borda dourada e raio sobre um fundo já cheio de cartões. */
     <div
       style={{
         position: "sticky",
@@ -85,12 +96,11 @@ export default function WikiToolbar({
         zIndex: 6,
         display: "flex",
         flexDirection: "column",
-        gap: SP.x3,
-        padding: SP.x3,
+        gap: SP.x2,
+        padding: `${SP.x3}px 0`,
         marginBottom: SP.x4,
-        background: SURF.rail,
-        border: `1px solid ${SURF.hair}`,
-        borderRadius: R.card,
+        background: SURF.page,
+        borderBottom: `1px solid ${LINE.hair}`,
       }}
     >
       {/* ── linha 1: busca · visão · ordenação ── */}
@@ -116,14 +126,16 @@ export default function WikiToolbar({
             value={query}
             onChange={(e) => onQuery && onQuery(e.target.value)}
             aria-label={`Buscar entre ${total} ${total === 1 ? "entidade" : "entidades"}`}
-            placeholder={`Buscar em ${total} ${total === 1 ? "entidade" : "entidades"}…`}
+            /* a contagem saiu do placeholder: ela vive na linha de resultados,
+             * onde muda com o filtro e não fica mentindo enquanto se digita */
+            placeholder="Buscar no acervo"
             style={{
               width: "100%",
-              minHeight: HIT.mobile,
+              minHeight: ctlH,
               boxSizing: "border-box",
               padding: `0 ${query ? 42 : SP.x3}px 0 38px`,
-              background: SURF.raised,
-              border: `1px solid ${SURF.hair}`,
+              background: "var(--card)",
+              border: `1px solid ${LINE.raise}`,
               borderRadius: R.ctl,
               color: "var(--text)",
               fontFamily: FF.ui,
@@ -146,7 +158,7 @@ export default function WikiToolbar({
                 width: 32,
                 height: 32,
                 background: "transparent",
-                border: "none",
+                borderStyle: "none",
               }}
             >
               <Ico name="close" size={16} />
@@ -171,10 +183,11 @@ export default function WikiToolbar({
                 title={op.rotulo}
                 style={{
                   ...controle,
-                  width: 44,
-                  minHeight: 44,
+                  width: ctlH,
+                  minHeight: ctlH,
+                  /* borda dourada SÓ no ativo — é o único sinal de estado aqui */
                   background: on ? "var(--gold-dim)" : controle.background,
-                  borderColor: on ? "var(--border2)" : "var(--border)",
+                  borderColor: on ? LINE.gold : LINE.raise,
                   color: on ? "var(--accent)" : "var(--muted2)",
                 }}
               >
@@ -191,14 +204,15 @@ export default function WikiToolbar({
             onChange={(e) => onSort && onSort(e.target.value)}
             className="forja-focus"
             style={{
-              minHeight: 44,
+              minHeight: ctlH,
               padding: `0 ${SP.x2}px`,
-              background: SURF.raised,
-              border: `1px solid ${SURF.hair}`,
+              background: "var(--card)",
+              border: `1px solid ${LINE.raise}`,
               borderRadius: R.input,
               color: "var(--text)",
               fontFamily: FF.ui,
-              fontSize: FS.input,
+              /* 16px trava o zoom do iOS — só relaxa quando não há toque */
+              fontSize: isMobile ? FS.input : FS.meta,
               cursor: "pointer",
             }}
           >
@@ -235,44 +249,53 @@ export default function WikiToolbar({
         })}
       </div>
 
-      {/* ── linha 3: chips de tag ── */}
-      {tags.length > 0 && (
-        <div className="forja-chips" role="group" aria-label="Filtrar por tag">
-          {tags.map((tag) => {
-            const on = activeTags.includes(tag);
-            return (
-              <button
-                key={tag}
-                type="button"
-                className="forja-focus"
-                onClick={() => onToggleTag && onToggleTag(tag)}
-                aria-pressed={on}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  flexShrink: 0,
-                  minHeight: 32,
-                  padding: `0 ${SP.x3}px`,
-                  borderRadius: R.pill,
-                  cursor: "pointer",
-                  touchAction: "manipulation",
-                  background: on ? "var(--gold-dim)" : "rgba(255,255,255,0.04)",
-                  border: `1px solid ${on ? "var(--border2)" : "var(--border)"}`,
-                  color: on ? "var(--accent)" : "var(--muted2)",
-                  fontFamily: FF.ui,
-                  fontSize: FS.meta,
-                }}
-              >
-                #{tag}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ── linha 4: contagem viva + limpar ── */}
+      {/* ── linha 3: tags + contagem viva + limpar (eram duas linhas) ── */}
       <div style={{ display: "flex", alignItems: "center", gap: SP.x3, flexWrap: "wrap" }}>
-        <div aria-live="polite" style={{ ...T.meta, flex: 1, minWidth: 0 }}>
+        {tags.length > 0 && (
+          <div
+            className="forja-chips"
+            role="group"
+            aria-label="Filtrar por tag"
+            style={{ flex: "1 1 200px", minWidth: 0 }}
+          >
+            {tags.map((tag) => {
+              const on = activeTags.includes(tag);
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  className="forja-focus"
+                  onClick={() => onToggleTag && onToggleTag(tag)}
+                  aria-pressed={on}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    flexShrink: 0,
+                    minHeight: isMobile ? HIT.mobile : 30,
+                    padding: `0 ${SP.x3}px`,
+                    borderRadius: R.pill,
+                    cursor: "pointer",
+                    touchAction: "manipulation",
+                    background: on ? "var(--gold-dim)" : "rgba(255,255,255,0.04)",
+                    borderWidth: 1,
+                    borderStyle: "solid",
+                    borderColor: on ? LINE.gold : LINE.raise,
+                    color: on ? "var(--accent)" : "var(--muted2)",
+                    fontFamily: FF.ui,
+                    fontSize: FS.meta,
+                  }}
+                >
+                  #{tag}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <div
+          aria-live="polite"
+          style={{ ...T.meta, flex: tags.length ? "0 0 auto" : "1 1 auto", minWidth: 0, marginLeft: "auto" }}
+        >
           {results} {results === 1 ? "resultado" : "resultados"}
           {query ? ` · “${query}”` : ""}
         </div>
@@ -283,9 +306,10 @@ export default function WikiToolbar({
             onClick={() => onClear && onClear()}
             style={{
               ...controle,
-              minHeight: 34,
+              minHeight: isMobile ? HIT.mobile : 30,
               padding: `0 ${SP.x3}px`,
               gap: SP.x1,
+              borderColor: LINE.raise,
               fontFamily: FF.title,
               fontSize: FS.tag,
               letterSpacing: LS.tag,

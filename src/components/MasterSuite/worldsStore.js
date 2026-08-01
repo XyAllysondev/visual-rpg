@@ -23,7 +23,7 @@ import {
   doc, getDoc, updateDoc, collection, addDoc, query, orderBy,
   onSnapshot, getDocs, serverTimestamp, where, deleteDoc, writeBatch,
 } from "firebase/firestore";
-import { db } from "../../firebase";
+import { auth, db } from "../../firebase";
 import { buildDemoWorld } from "./model/demoWorld";
 
 /* ── Constantes ──────────────────────────────────────────────────────────── */
@@ -88,7 +88,46 @@ const worldRef = (worldId) => doc(db, WORLDS, worldId);
 const subCol = (worldId, name) => collection(db, WORLDS, worldId, name);
 const subRef = (worldId, name, id) => doc(db, WORLDS, worldId, name, id);
 
-const snapToList = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+/**
+ * `serverTimestamp()` chega `null` no snapshot local (latency compensation) até o
+ * servidor confirmar — o que jogaria o doc recém-escrito para o FIM de "recentes"
+ * e mostraria "—" no tempo relativo. `serverTimestamps:"estimate"` entrega uma
+ * estimativa local no lugar do `null`, corrigida no snapshot seguinte.
+ */
+const snapToList = (snap) =>
+  snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) }));
+
+/**
+ * Mesma leitura de `snapToList`, mais o estado de confirmação de CADA mundo.
+ *
+ * `d.metadata.hasPendingWrites` é `true` enquanto a escrita existe só no cliente
+ * (latency compensation) — o snapshot local chega antes do servidor confirmar.
+ * Isso importa fora do store: a regra de leitura das subcoleções faz `get()` no
+ * documento do mundo, que ainda NÃO existe para o servidor, então assinar o
+ * acervo de um mundo pendente volta `permission-denied`. Quem consome usa este
+ * campo para não escolher sozinho um mundo que o servidor ainda não conhece.
+ */
+const worldsFromSnap = (snap) =>
+  snap.docs.map((d) => ({
+    id: d.id,
+    ...d.data({ serverTimestamps: "estimate" }),
+    pendenteNoServidor: !!(d.metadata && d.metadata.hasPendingWrites),
+  }));
+
+/**
+ * Dono gravado em CADA documento das subcoleções.
+ *
+ * Por que denormalizar: a regra de escrita precisa saber o dono, e resolvê-lo com
+ * `get()` no documento do mundo custa uma "access call" por documento. O Firestore
+ * permite no máximo 20 por escrita em lote — o mundo demo grava ~48 docs de uma vez
+ * e o lote inteiro era negado. Com o dono no próprio documento a regra é O(1) e o
+ * lote não tem teto.
+ */
+function ownerUidAtual() {
+  const uid = auth.currentUser && auth.currentUser.uid;
+  if (!uid) throw new Error("É preciso estar autenticado para escrever neste mundo.");
+  return uid;
+}
 
 /**
  * Aplica operações em lotes de no máximo `BATCH_LIMIT`, respeitando o limite do
@@ -113,9 +152,15 @@ async function commitOps(ops) {
 
 /**
  * Cria um mundo do mestre. Só `name` é obrigatório (AC-2).
+ *
+ * `demo` é gravado no documento: o seed (`model/demoWorld`) já marcava o mundo como
+ * demonstração e o campo era descartado aqui — contrato mentindo. Persistir custa um
+ * booleano e é o que permite distinguir depois o mundo de exemplo do mundo autoral
+ * (selo na UI, "recriar demo", suporte). Mundo criado à mão grava `false`.
+ *
  * @returns {Promise<string>} id do mundo criado.
  */
-export async function createWorld(uid, { name, description, genre } = {}) {
+export async function createWorld(uid, { name, description, genre, demo } = {}) {
   const ownerUid = requireText(uid, "É preciso estar autenticado para criar um mundo.");
   const worldName = requireText(name, "Dê um nome ao mundo antes de criá-lo.");
   const ref = await addDoc(worldsCol(), {
@@ -124,6 +169,7 @@ export async function createWorld(uid, { name, description, genre } = {}) {
     nameLower: toNameLower(worldName),
     description: asText(description),
     genre: asText(genre),
+    demo: demo === true,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -188,6 +234,7 @@ export async function createEntity(worldId, data = {}) {
   const name = requireText(data.name, "Dê um nome à entidade antes de salvá-la.");
   const type = requireText(data.type, "Escolha o tipo da entidade antes de salvá-la.");
   const ref = await addDoc(subCol(id, ENTITIES), {
+    ownerUid: ownerUidAtual(),
     type,
     name,
     nameLower: toNameLower(name),
@@ -278,6 +325,7 @@ export async function createConnection(worldId, conn = {}) {
     throw new Error("Essa conexão já existe entre as duas entidades.");
   }
   const ref = await addDoc(collectionRef, {
+    ownerUid: ownerUidAtual(),
     fromId,
     toId,
     relation,
@@ -306,6 +354,7 @@ export async function createFolder(worldId, data = {}) {
     throw new Error(`Escopo de pasta inválido: "${scope}". Use "wiki" ou "journal".`);
   }
   const ref = await addDoc(subCol(id, FOLDERS), {
+    ownerUid: ownerUidAtual(),
     name,
     scope,
     parentId: asText(data.parentId) || null,
@@ -389,7 +438,25 @@ export async function seedDemoWorld(uid) {
   }
 
   const worldId = await createWorld(ownerUid, seed.world || {});
+  try {
+    await popularDemo(worldId, seed);
+  } catch (e) {
+    /* O documento do mundo JÁ existe quando o conteúdo falha: sem esta marca a UI
+     * não tem como saber que sobrou um mundo vazio na conta do mestre — e era assim
+     * que o demo nascia vazio sem ninguém avisar. Quem chama decide o que dizer. */
+    if (e && typeof e === "object") {
+      e.worldId = worldId;
+      e.mundoParcial = true;
+    }
+    throw e;
+  }
+  return worldId;
+}
+
+/** Grava entidades e conexões do seed no mundo já criado. */
+async function popularDemo(worldId, seed) {
   const localToReal = new Map();
+  const dono = ownerUidAtual();
   const ops = [];
 
   for (const entity of seed.entities) {
@@ -406,6 +473,7 @@ export async function seedDemoWorld(uid) {
       type: "set",
       ref,
       data: {
+        ownerUid: dono,
         type,
         name,
         nameLower: toNameLower(name),
@@ -433,6 +501,7 @@ export async function seedDemoWorld(uid) {
       type: "set",
       ref: doc(subCol(worldId, CONNECTIONS)),
       data: {
+        ownerUid: dono,
         fromId,
         toId,
         relation,
@@ -444,7 +513,6 @@ export async function seedDemoWorld(uid) {
   }
 
   await commitOps(ops);
-  return worldId;
 }
 
 /* ── Hooks ───────────────────────────────────────────────────────────────── */
@@ -452,8 +520,10 @@ export async function seedDemoWorld(uid) {
 /**
  * Assina uma coleção e devolve `{ data, loading, error }`.
  * `buildQuery` devolve a query ou `null` (nada para assinar → lista vazia).
+ * `mapSnap` traduz o snapshot em lista — trocável para quem precisa de mais do
+ * que os campos do documento (ver `worldsFromSnap`).
  */
-function useCollection(buildQuery, deps) {
+function useCollection(buildQuery, deps, mapSnap = snapToList) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -465,7 +535,7 @@ function useCollection(buildQuery, deps) {
     setError(null);
     const unsub = onSnapshot(
       q,
-      (snap) => { setData(snapToList(snap)); setLoading(false); },
+      (snap) => { setData(mapSnap(snap)); setLoading(false); },
       (err) => { setError(err); setData([]); setLoading(false); },
     );
     return () => unsub();
@@ -478,6 +548,9 @@ function useCollection(buildQuery, deps) {
 /**
  * Mundos do mestre, do mais recente para o mais antigo (AC-2).
  *
+ * Cada mundo carrega `pendenteNoServidor` (ver `worldsFromSnap`): `true` enquanto
+ * a criação só existe no cliente. Ler o acervo de um mundo pendente é negado.
+ *
  * ATENÇÃO (infra): filtro de igualdade em `ownerUid` + ordenação por `updatedAt`
  * exige um ÍNDICE COMPOSTO em `worlds` (ownerUid ASC, updatedAt DESC). Sem ele o
  * Firestore recusa a query e o erro chega em `error` com o link de criação do
@@ -489,6 +562,7 @@ export function useWorlds(uid) {
       ? query(worldsCol(), where("ownerUid", "==", uid), orderBy("updatedAt", "desc"))
       : null),
     [uid],
+    worldsFromSnap,
   );
   return { worlds: data, loading, error };
 }
@@ -582,7 +656,16 @@ export function useActiveWorld(uid) {
         setActive(null);
       })
       .catch((e) => {
-        // Offline/permissão: mantém a seleção e avisa — não some com o mundo do mestre.
+        // Documento inexistente cai como `permission-denied` (a regra lê
+        // `resource.data.ownerUid`, e `resource` é nulo quando o doc não existe).
+        // Na prática significa a mesma coisa que "não é mais seu": limpa a seleção
+        // presa, senão a Forja fica travada num mundo fantasma do localStorage.
+        if (!cancelled && e && e.code === "permission-denied") {
+          writeStoredWorld(uid, null);
+          setActive(null);
+          return;
+        }
+        // Offline/rede: mantém a seleção e avisa — não some com o mundo do mestre.
         console.warn("Forja do Mestre: não foi possível conferir o mundo ativo.", e);
       });
     return () => { cancelled = true; };

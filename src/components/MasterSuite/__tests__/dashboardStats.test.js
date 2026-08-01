@@ -82,9 +82,12 @@ describe("firstSteps — checklist reflete o estado real (AC-6)", () => {
       .toEqual(["world", "location"]);
   });
 
-  it("uma conexão marca conectar e explorar o grafo", () => {
+  it("uma conexão marca conectar, mas NÃO o grafo (Fase 2, ainda não abre)", () => {
+    // O painel rotula este passo como "Fase 2". Dar como concluído algo que o
+    // mestre não tem como fazer é mentir para ele — o passo só vale quando a
+    // ferramenta existir.
     expect(doneOf(firstSteps(mundo, ents, [conexao])))
-      .toEqual(["world", "character", "location", "connection", "graph"]);
+      .toEqual(["world", "character", "location", "connection"]);
   });
 
   it("o diário vem por flag (a suíte informa se já existe página)", () => {
@@ -97,8 +100,9 @@ describe("firstSteps — checklist reflete o estado real (AC-6)", () => {
     expect(doneOf(firstSteps({ ...mundo, journalCount: 0 }, [], []))).toEqual(["world"]);
   });
 
-  it("mundo completo marca tudo", () => {
+  it("mundo completo marca tudo que é possível hoje — o grafo fica para a Fase 2", () => {
     const steps = firstSteps(mundo, ents, [conexao], { hasJournalEntry: true });
-    expect(steps.every((s) => s.done)).toBe(true);
+    const pendentes = steps.filter((s) => !s.done).map((s) => s.id);
+    expect(pendentes).toEqual(["graph"]);
   });
 });

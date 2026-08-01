@@ -5,7 +5,7 @@
  * `makeConnection` + `isDuplicate` ANTES de tocar no banco — autoligação e duplicata morrem aqui,
  * com mensagem em português na tela, nunca em silêncio.
  */
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { getEntityType } from "../model/entityTypes";
 import { sortEntities } from "../model/entityFilters";
 import {
@@ -14,15 +14,15 @@ import {
   isDuplicate,
   makeConnection,
 } from "../model/connections";
-import { SP, R, FF, FS, SURF, HIT, W, T, tint, tempoRelativo, DANGER_TEXT_AA } from "../ui/tokens";
+import { SP, R, FF, FS, LINE, HIT, W, T, tempoRelativo, DANGER_TEXT_AA } from "../ui/tokens";
 import { Btn } from "../ui/primitives";
 import { EntityIcon, Ico } from "../ui/entityIcons";
 
 const LIVRE = "__livre__";
 
 const painel = {
-  background: SURF.card,
-  border: `1px solid ${SURF.hair}`,
+  background: "var(--surface)",
+  border: `1px solid ${LINE.edge}`,
   borderRadius: R.panel,
   padding: SP.x4,
 };
@@ -85,6 +85,26 @@ export default function EntityDetail({
     [entities, entity],
   );
 
+  /* O formulário de conexão é inline, mas se comporta como diálogo: Esc fecha.
+   * O listener é no documento (e não no <div>) porque o mestre pode ter tirado o
+   * foco do formulário; sem isto o Esc não fazia nada em lugar nenhum da página. */
+  const fecharConexao = useCallback(() => {
+    setConectando(false);
+    setErro(null);
+  }, []);
+
+  useEffect(() => {
+    if (!conectando) return undefined;
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      fecharConexao();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [conectando, fecharConexao]);
+
   if (!entity) return null;
 
   const tipo = getEntityType(entity.type);
@@ -109,11 +129,94 @@ export default function EntityDetail({
       setErro("Essa conexão já existe entre as duas entidades.");
       return;
     }
-    if (onCreateConnection) onCreateConnection(candidata);
-    setAlvo("");
-    setRotuloLivre("");
-    setConectando(false);
+    if (!onCreateConnection) return;
+    // Fecha o formulário só depois que o servidor confirmar — fechar antes faz
+    // uma falha (rede, duplicata vinda de outra aba) parecer sucesso.
+    Promise.resolve(onCreateConnection(candidata)).then((ok) => {
+      if (ok === false) {
+        setErro("A conexão não foi salva. Verifique a rede e tente de novo.");
+        return;
+      }
+      setAlvo("");
+      setRotuloLivre("");
+      setConectando(false);
+    });
   };
+
+  /* Verbete recém-criado não tem atributo nem conexão: aí os dois painéis do
+   * aside colapsam num só ("Ficha"), e este formulário é o mesmo nos dois
+   * caminhos — um único lugar que sabe conectar. */
+  const fichaVazia = atributos.length === 0 && vinculos.length === 0;
+
+  const formularioConexao = conectando ? (
+    <div style={{ display: "flex", flexDirection: "column", gap: SP.x2 }}>
+      <label htmlFor="wk-conn-alvo" style={{ ...T.section, fontSize: 10 }}>
+        Entidade
+      </label>
+      <select
+        id="wk-conn-alvo"
+        className="forja-focus"
+        value={alvo}
+        onChange={(e) => setAlvo(e.target.value)}
+        style={campo}
+      >
+        <option value="">Escolha a entidade…</option>
+        {candidatas.map((e) => (
+          <option key={e.id} value={e.id}>
+            {`${e.name} · ${getEntityType(e.type).label}`}
+          </option>
+        ))}
+      </select>
+
+      <label htmlFor="wk-conn-rel" style={{ ...T.section, fontSize: 10 }}>
+        Relação
+      </label>
+      <select
+        id="wk-conn-rel"
+        className="forja-focus"
+        value={relacao}
+        onChange={(e) => setRelacao(e.target.value)}
+        style={campo}
+      >
+        {RELATION_PRESETS.map((p) => (
+          <option key={p.id} value={p.id}>
+            {`${p.label} · do outro lado: ${p.inverse}`}
+          </option>
+        ))}
+        <option value={LIVRE}>Outro rótulo…</option>
+      </select>
+
+      {relacao === LIVRE && (
+        <input
+          className="forja-focus"
+          value={rotuloLivre}
+          onChange={(e) => setRotuloLivre(e.target.value)}
+          aria-label="Rótulo livre da relação"
+          placeholder="Ex.: DEVE FAVOR A"
+          style={{ ...campo, padding: `0 ${SP.x3}px` }}
+        />
+      )}
+
+      {erro && (
+        <div role="alert" style={{ ...T.meta, fontSize: FS.micro, color: DANGER_TEXT_AA }}>
+          {erro}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: SP.x2 }}>
+        <Btn kind="primary" size="sm" icon="link" onClick={criarConexao} disabled={busy}>
+          Conectar
+        </Btn>
+        <Btn kind="quiet" size="sm" onClick={fecharConexao}>
+          Cancelar
+        </Btn>
+      </div>
+    </div>
+  ) : (
+    <Btn kind="quiet" size="sm" icon="plus" onClick={() => setConectando(true)} disabled={busy}>
+      Conectar entidade
+    </Btn>
+  );
 
   return (
     <div>
@@ -144,7 +247,23 @@ export default function EntityDetail({
         <Btn kind="ghost" size="sm" icon="edit" onClick={onEdit} disabled={busy}>
           Editar
         </Btn>
-        <Btn kind="danger" size="sm" icon="trash" onClick={onDelete} disabled={busy}>
+        {/* Ação destrutiva não precisa competir de igual para igual com "Editar":
+          * o gatilho fica quieto (ícone de lixeira + rótulo já são inequívocos)
+          * e o diálogo de confirmação continua vermelho — é lá que a decisão
+          * acontece, e o diálogo já era a melhor tela do produto. */}
+        <Btn
+          kind="quiet"
+          size="sm"
+          icon="trash"
+          /* Nada de dois diálogos empilhados: o formulário de conexão sai da tela
+           * antes de a confirmação de exclusão entrar. Nada é perdido — o
+           * formulário ainda não tinha gravado nada. */
+          onClick={() => {
+            fecharConexao();
+            if (onDelete) onDelete();
+          }}
+          disabled={busy}
+        >
           Excluir
         </Btn>
       </div>
@@ -155,11 +274,16 @@ export default function EntityDetail({
           position: "relative",
           overflow: "hidden",
           borderRadius: R.panel,
-          border: `1px solid ${SURF.hair}`,
+          /* a faixa da esquerda troca de cor a cada entidade aberta: bordas em
+           * propriedades longas para não misturar com o atalho `border`. */
+          borderTop: `1px solid ${LINE.edge}`,
+          borderRight: `1px solid ${LINE.edge}`,
+          borderBottom: `1px solid ${LINE.edge}`,
+          /* A faixa de 4px já identifica o tipo. O radial-gradient da cor do
+           * tipo cobria 152px de hero, comia contraste do nome e é o efeito que
+           * todo gerador de UI produz — bonito por 3 segundos, genérico depois. */
           borderLeft: `4px solid ${tipo.color}`,
-          background: entity.imageUrl
-            ? SURF.card
-            : `radial-gradient(ellipse at 25% 0%, ${tint(tipo.color, 0.16)}, transparent 70%), ${SURF.card}`,
+          background: "var(--surface)",
           marginBottom: SP.x6,
         }}
       >
@@ -194,16 +318,12 @@ export default function EntityDetail({
             display: "flex",
             flexDirection: "column",
             gap: SP.x2,
-            minHeight: 152,
+            minHeight: 112,
             justifyContent: "flex-end",
           }}
         >
-          <span
-            style={{ display: "inline-flex", alignItems: "center", gap: SP.x1, color: tipo.color }}
-          >
-            <EntityIcon type={entity.type} size={16} />
-            <span style={{ ...T.typeTag, fontSize: FS.label }}>{tipo.label}</span>
-          </span>
+          {/* Sem repetir o tipo: a trilha logo acima já imprime "LOCAL" na cor
+            * dele, 30px daqui. Duas vezes o tipo e duas vezes o nome em 90px. */}
           <h1 style={{ ...T.hero, margin: 0 }}>{entity.name}</h1>
           <div style={T.meta}>Editado {tempoRelativo(entity.updatedAt)}</div>
           {tags.length > 0 && (
@@ -216,7 +336,7 @@ export default function EntityDetail({
                     fontSize: FS.micro,
                     padding: `3px ${SP.x2}px`,
                     background: "rgba(255,255,255,0.05)",
-                    border: `1px solid ${SURF.hair}`,
+                    border: `1px solid ${LINE.hair}`,
                     borderRadius: R.tag,
                     color: "var(--muted2)",
                   }}
@@ -240,13 +360,27 @@ export default function EntityDetail({
               {entity.description}
             </p>
           ) : (
-            <p style={{ ...T.empty, margin: 0 }}>
-              Sem descrição ainda. Abra “Editar” e conte o que este verbete guarda.
-            </p>
+            <p style={{ ...T.empty, margin: 0 }}>Sem descrição.</p>
           )}
         </section>
 
         <aside style={{ display: "flex", flexDirection: "column", gap: SP.x4 }}>
+          {/* Ficha vazia: UM painel de ~96px em vez de três caixas, três bordas,
+            * três títulos em caixa alta e 250px de altura para dizer que não há
+            * nada. Assim que aparece atributo ou conexão, os dois painéis voltam. */}
+          {fichaVazia ? (
+            <section style={painel} aria-labelledby="wk-ficha-title">
+              <h2 id="wk-ficha-title" style={{ ...T.section, margin: `0 0 ${SP.x2}px` }}>
+                Ficha
+              </h2>
+              <p style={{ ...T.empty, margin: 0, minHeight: 32, lineHeight: "32px" }}>Sem atributos.</p>
+              <p style={{ ...T.empty, margin: `0 0 ${SP.x3}px`, minHeight: 32, lineHeight: "32px" }}>
+                Sem conexões.
+              </p>
+              {formularioConexao}
+            </section>
+          ) : (
+          <>
           {/* atributos */}
           <section style={painel} aria-labelledby="wk-attr-title">
             <h2 id="wk-attr-title" style={{ ...T.section, margin: `0 0 ${SP.x3}px` }}>
@@ -260,7 +394,7 @@ export default function EntityDetail({
                     className="wk-attr-line"
                     style={{
                       padding: `${SP.x2}px 0`,
-                      borderTop: i === 0 ? "none" : `1px solid ${SURF.hair}`,
+                      borderTop: i === 0 ? "none" : `1px solid ${LINE.hair}`,
                     }}
                   >
                     <dt style={{ ...T.section, fontSize: 10, margin: 0 }}>{a.key}</dt>
@@ -271,7 +405,7 @@ export default function EntityDetail({
                 ))}
               </dl>
             ) : (
-              <p style={{ ...T.empty, margin: 0 }}>Sem atributos registrados.</p>
+              <p style={{ ...T.empty, margin: 0 }}>Sem atributos.</p>
             )}
           </section>
 
@@ -282,9 +416,7 @@ export default function EntityDetail({
             </h2>
 
             {vinculos.length === 0 && !conectando && (
-              <p style={{ ...T.empty, margin: `0 0 ${SP.x3}px` }}>
-                Ninguém ainda se liga a esta entidade.
-              </p>
+              <p style={{ ...T.empty, margin: `0 0 ${SP.x3}px` }}>Sem conexões.</p>
             )}
 
             {vinculos.length > 0 && (
@@ -299,7 +431,7 @@ export default function EntityDetail({
                         display: "flex",
                         alignItems: "center",
                         gap: SP.x2,
-                        borderTop: `1px solid ${SURF.hair}`,
+                        borderTop: `1px solid ${LINE.hair}`,
                       }}
                     >
                       <button
@@ -369,92 +501,10 @@ export default function EntityDetail({
               </ul>
             )}
 
-            {conectando ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: SP.x2 }}>
-                <label htmlFor="wk-conn-alvo" style={{ ...T.section, fontSize: 10 }}>
-                  Entidade
-                </label>
-                <select
-                  id="wk-conn-alvo"
-                  className="forja-focus"
-                  value={alvo}
-                  onChange={(e) => setAlvo(e.target.value)}
-                  style={campo}
-                >
-                  <option value="">Escolha a entidade…</option>
-                  {candidatas.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {`${e.name} · ${getEntityType(e.type).label}`}
-                    </option>
-                  ))}
-                </select>
-
-                <label htmlFor="wk-conn-rel" style={{ ...T.section, fontSize: 10 }}>
-                  Relação
-                </label>
-                <select
-                  id="wk-conn-rel"
-                  className="forja-focus"
-                  value={relacao}
-                  onChange={(e) => setRelacao(e.target.value)}
-                  style={campo}
-                >
-                  {RELATION_PRESETS.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {`${p.label} · do outro lado: ${p.inverse}`}
-                    </option>
-                  ))}
-                  <option value={LIVRE}>Outro rótulo…</option>
-                </select>
-
-                {relacao === LIVRE && (
-                  <input
-                    className="forja-focus"
-                    value={rotuloLivre}
-                    onChange={(e) => setRotuloLivre(e.target.value)}
-                    aria-label="Rótulo livre da relação"
-                    placeholder="Ex.: DEVE FAVOR A"
-                    style={{ ...campo, padding: `0 ${SP.x3}px` }}
-                  />
-                )}
-
-                {erro && (
-                  <div
-                    role="alert"
-                    style={{ ...T.meta, fontSize: FS.micro, color: DANGER_TEXT_AA }}
-                  >
-                    {erro}
-                  </div>
-                )}
-
-                <div style={{ display: "flex", gap: SP.x2 }}>
-                  <Btn kind="primary" size="sm" icon="link" onClick={criarConexao} disabled={busy}>
-                    Conectar
-                  </Btn>
-                  <Btn
-                    kind="quiet"
-                    size="sm"
-                    onClick={() => {
-                      setConectando(false);
-                      setErro(null);
-                    }}
-                  >
-                    Cancelar
-                  </Btn>
-                </div>
-              </div>
-            ) : (
-              <Btn
-                kind="quiet"
-                size="sm"
-                icon="plus"
-                onClick={() => setConectando(true)}
-                disabled={busy}
-              >
-                Conectar entidade
-              </Btn>
-            )}
+            {formularioConexao}
           </section>
+          </>
+          )}
         </aside>
       </div>
     </div>

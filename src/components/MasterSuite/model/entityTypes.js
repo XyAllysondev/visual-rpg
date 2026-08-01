@@ -4,6 +4,9 @@
  * nada de React, nada de Firestore. A arte (ícone SVG de cada tipo) mora em módulo separado —
  * aqui ficam apenas id, rótulo PT, plural, cor e a dica que explica o tipo pro mestre.
  *
+ * `artigo` é o gênero gramatical do rótulo ("o Local", "a Criatura"). Serve pro aviso de
+ * escrita concordar com o que foi salvo — "Alvo QA criado." em vez de "Entidade criada."
+ *
  * A ordem do array é a ordem que a UI exibe: alfabética pelos rótulos em português.
  *
  * Cores: hex de 6 dígitos, escolhidos em matizes bem separados (≈33° entre vizinhos) e claros
@@ -14,6 +17,7 @@
 export const ENTITY_TYPES = [
   {
     id: "concept",
+    artigo: "o",
     label: "Conceito",
     plural: "Conceitos",
     color: "#a78bfa",
@@ -21,6 +25,7 @@ export const ENTITY_TYPES = [
   },
   {
     id: "creature",
+    artigo: "a",
     label: "Criatura",
     plural: "Criaturas",
     color: "#a3e635",
@@ -28,6 +33,7 @@ export const ENTITY_TYPES = [
   },
   {
     id: "deity",
+    artigo: "a",
     label: "Divindade",
     plural: "Divindades",
     color: "#fbbf24",
@@ -35,6 +41,7 @@ export const ENTITY_TYPES = [
   },
   {
     id: "event",
+    artigo: "o",
     label: "Evento",
     plural: "Eventos",
     color: "#fb7185",
@@ -42,6 +49,7 @@ export const ENTITY_TYPES = [
   },
   {
     id: "item",
+    artigo: "o",
     label: "Item",
     plural: "Itens",
     color: "#38bdf8",
@@ -49,6 +57,7 @@ export const ENTITY_TYPES = [
   },
   {
     id: "location",
+    artigo: "o",
     label: "Local",
     plural: "Locais",
     color: "#2dd4bf",
@@ -56,6 +65,7 @@ export const ENTITY_TYPES = [
   },
   {
     id: "organization",
+    artigo: "a",
     label: "Organização",
     plural: "Organizações",
     color: "#60a5fa",
@@ -63,6 +73,7 @@ export const ENTITY_TYPES = [
   },
   {
     id: "character",
+    artigo: "o",
     label: "Personagem",
     plural: "Personagens",
     color: "#f472b6",
@@ -70,6 +81,7 @@ export const ENTITY_TYPES = [
   },
   {
     id: "race",
+    artigo: "a",
     label: "Raça",
     plural: "Raças",
     color: "#fb923c",
@@ -77,6 +89,7 @@ export const ENTITY_TYPES = [
   },
   {
     id: "sessionSummary",
+    artigo: "o",
     label: "Resumo de Sessão",
     plural: "Resumos de Sessão",
     color: "#cbd5e1",
@@ -84,6 +97,7 @@ export const ENTITY_TYPES = [
   },
   {
     id: "route",
+    artigo: "a",
     label: "Rota",
     plural: "Rotas",
     color: "#e879f9",
@@ -97,6 +111,7 @@ export const ENTITY_TYPE_IDS = ENTITY_TYPES.map((t) => t.id);
  * renderizável. NÃO entra em ENTITY_TYPES (não é escolhível no formulário). */
 export const FALLBACK_ENTITY_TYPE = {
   id: "unknown",
+  artigo: "o",
   label: "Outro",
   plural: "Outros",
   color: "#a89a7c",

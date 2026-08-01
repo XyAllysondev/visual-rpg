@@ -60,17 +60,38 @@ npx craco build
 - [x] **E1.** Auditoria de acessibilidade (teclado, foco, contraste, alvo ≥44px) `[P]`.
 - [x] **E2.** Revisão React (hooks, re-render, chaves de lista, cleanup de listener) `[P]`.
 - [x] **E3.** `npx craco build` verde e chunk da suíte separado.
-- [ ] **E4.** Verificação manual do fluxo AC-2 → AC-7 com o app rodando.
+- [x] **E4.** Verificação E2E automatizada (Playwright + conta Firebase real) do fluxo AC-2 → AC-7.
 - [x] **E5.** Atualizar `docs/STATE.md`.
 
 ## Resultado da Fase 1
 
-**Gate: 36 suítes / 485 testes PASS · `npx craco build` → Compiled.**
+**Gate: 37 suítes / 528 testes PASS · `npx craco build` → Compiled.**
 
-- 27 arquivos em `src/components/MasterSuite/`; `App.jsx` encolheu de 12.586 para 12.014 linhas.
-- Testes da suíte: 161 (91 de lógica pura, 36 de contrato do store, 25 de renderização, 9 do gate anti-IA).
-- **E4 (verificação manual no navegador) segue PENDENTE** — exige login do Andre no app.
+- 30 arquivos em `src/components/MasterSuite/`; `App.jsx` encolheu de 12.586 para 12.014 linhas.
+- Regras e índice do Firestore publicados; hosting no ar.
+
+### Rodada de endurecimento (E2E real + refino visual)
+
+O E2E com Playwright numa conta Firebase de verdade expôs o que os testes unitários não pegavam:
+
+1. **CRÍTICO — o mundo demo nascia vazio.** `model/demoWorld.js` emitia `attributes` como OBJETO;
+   `sanitizeAttributes` exige lista de pares e lançava na primeira entidade, **depois** de
+   `createWorld` já ter criado o doc raiz. Corrigido na origem + teste de contrato do seed.
+2. **CRÍTICO — o acervo não se recuperava.** A auto-seleção assumia `worlds[0]` no snapshot LOCAL,
+   antes do servidor confirmar; a regra da subcoleção faz `get()` no doc do mundo e devolvia
+   `permission-denied`. Um listener do Firestore que erra é encerrado e **não se reinscreve**: o
+   acervo ficava vazio até um F5. Corrigido com `metadata.hasPendingWrites` (`pendenteNoServidor`).
+3. **Escrita em lote negada.** A regra resolvia o dono com `get()` por documento e o Firestore
+   limita a **20 access calls por lote** — o seed grava ~48. Agora cada documento de subcoleção
+   carrega `ownerUid` e a regra é O(1). Provado contra o Firestore real: lote de 48 docs persiste.
+4. Erros do SDK em inglês na tela → módulo `model/erros.js` traduz 15 códigos; texto cru nunca vaza.
+5. Erro do demo era engolido ao trocar de tela; entidade nova nascia invisível sob filtro; warning
+   do React (`border` + `borderColor`) em 6 lugares; Esc no form de conexão; flag `demo` descartada.
+6. **Refino visual** sobre crítica de 25 pontos: grade de 11 contadores → ledger dos tipos usados;
+   ouro reservado a estado/interação (contornava 21 elementos inertes); três barras → uma; título
+   duplicado "Forja do Mestre" removido (teste trava a regressão); 25 textos reescritos sem tom de
+   assistente.
 
 ### Pendências manuais do Andre
-1. `firebase deploy --only firestore:rules` — o bloco `worlds` só vale após o deploy.
-2. Índice composto no Firestore: coleção `worlds`, `ownerUid` ASC + `updatedAt` DESC.
+Nenhuma. Regras (`firebase deploy --only firestore:rules`) e índice composto
+(`worlds`: `ownerUid` ASC + `updatedAt` DESC) foram publicados e verificados nesta sessão.

@@ -5,12 +5,16 @@
  * — `display:none` também tira o escondido da ordem de tabulação.
  */
 import React, { useMemo, useRef, useState } from "react";
-import { SP, R, FF, FS, FW, LS, SURF, HIT, T } from "../ui/tokens";
+import { SP, R, FF, FS, FW, LS, LINE, SURF, HIT, T } from "../ui/tokens";
 import { Ico } from "../ui/entityIcons";
 
 /** Valor sentinela do filtro "entidades fora de qualquer pasta". */
 export const NO_FOLDER = "__sem-pasta__";
 
+/* Borda em propriedades longas (width/style/color) de propósito: quem ativa a pasta
+ * sobrescreve SÓ `borderColor`, e misturar o atalho `border` com a longa no mesmo
+ * objeto de estilo faz o React avisar no console a cada rerender ("Removing a style
+ * property during rerender") — e, pior, deixa a borda em estado imprevisível. */
 const itemBase = {
   display: "flex",
   alignItems: "center",
@@ -19,7 +23,9 @@ const itemBase = {
   minHeight: 36,
   padding: `0 ${SP.x2}px`,
   background: "transparent",
-  border: "1px solid transparent",
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderColor: "transparent",
   borderRadius: R.input,
   cursor: "pointer",
   textAlign: "left",
@@ -30,9 +36,10 @@ const itemBase = {
   transition: "background .15s ease, color .15s ease",
 };
 
+/* Aqui o dourado é legítimo: marca a pasta SELECIONADA — estado, não moldura. */
 const ativoStyle = {
   background: "var(--gold-dim)",
-  borderColor: "var(--border2)",
+  borderColor: LINE.gold,
   color: "var(--accent)",
 };
 
@@ -102,10 +109,13 @@ export default function FolderRail({
       return proximo;
     });
 
-  const confirmarCriacao = () => {
+  const confirmarCriacao = async () => {
     const limpo = nome.trim();
-    if (!limpo) return;
-    if (onCreate) onCreate(limpo);
+    if (!limpo || !onCreate) return;
+    // Só fecha o formulário quando a escrita confirmar — fechar antes faz uma
+    // falha de rede parecer sucesso (a pasta "some" sem nenhum aviso no contexto).
+    const ok = await onCreate(limpo);
+    if (ok === false) return;
     setNome("");
     setCriando(false);
   };
@@ -223,7 +233,7 @@ export default function FolderRail({
               minHeight: HIT.mobile,
               padding: `0 ${SP.x2}px`,
               background: SURF.raised,
-              border: `1px solid ${SURF.hair}`,
+              border: `1px solid ${LINE.raise}`,
               borderRadius: R.input,
               color: "var(--text)",
               fontFamily: FF.ui,
@@ -241,15 +251,18 @@ export default function FolderRail({
         </label>
       </div>
 
-      {/* ── desktop: rail ── */}
+      {/* ── desktop: COLUNA, não cartão ──────────────────────────────────
+        * Era uma caixa de 200×175px com borda dourada e raio, encostada à
+        * esquerda e terminando no meio do nada enquanto a grade seguia — um
+        * cartãozinho perdido. Um filete vertical faz o trabalho. */}
       <nav
         className="wk-folders"
         aria-label="Pastas da wiki"
         style={{
-          background: SURF.card,
-          border: `1px solid ${SURF.hair}`,
-          borderRadius: R.card,
-          padding: SP.x2,
+          background: "transparent",
+          borderRight: `1px solid ${LINE.hair}`,
+          borderRadius: 0,
+          padding: `0 ${SP.x3}px 0 0`,
         }}
       >
         <div style={{ ...T.section, padding: `${SP.x1}px ${SP.x2}px ${SP.x2}px` }}>Pastas</div>
@@ -278,7 +291,7 @@ export default function FolderRail({
           {renderNivel(null, 0)}
         </ul>
 
-        <div style={{ marginTop: SP.x2, borderTop: `1px solid ${SURF.hair}`, paddingTop: SP.x2 }}>
+        <div style={{ marginTop: SP.x2, borderTop: `1px solid ${LINE.hair}`, paddingTop: SP.x2 }}>
           {criando ? (
             <div style={{ display: "flex", flexDirection: "column", gap: SP.x2 }}>
               <input
@@ -322,7 +335,7 @@ export default function FolderRail({
                     ...itemBase,
                     justifyContent: "center",
                     background: "var(--gold-dim)",
-                    borderColor: "var(--border2)",
+                    borderColor: LINE.gold,
                     color: "var(--accent)",
                     fontFamily: FF.title,
                     fontSize: FS.tag,

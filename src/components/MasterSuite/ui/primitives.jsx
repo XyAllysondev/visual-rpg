@@ -26,6 +26,12 @@ export function useViewportWidth() {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => setW(window.innerWidth));
     };
+    /* Re-lê a largura na MONTAGEM, não só no primeiro render: entre calcular o
+     * estado inicial e este efeito rodar cabe um resize inteiro (montagem tardia
+     * de um `React.lazy`, rotação, barra de endereço do celular). Esse resize não
+     * tem quem o escute ainda, e sem esta linha o componente ficaria preso na
+     * largura velha até o PRÓXIMO resize — no mobile, para sempre. */
+    setW(window.innerWidth);
     window.addEventListener("resize", onResize);
     window.addEventListener("orientationchange", onResize);
     return () => {
@@ -107,7 +113,11 @@ export function Btn({
           aria-hidden="true"
           style={{
             width: 13, height: 13, borderRadius: "50%", flexShrink: 0,
-            border: "2px solid currentColor", borderTopColor: "transparent",
+            /* longhand em todas as bordas: `borderTopColor` ao lado do atalho
+             * `border` é exatamente o padrão que faz o React avisar no rerender. */
+            borderWidth: 2, borderStyle: "solid",
+            borderTopColor: "transparent", borderRightColor: "currentColor",
+            borderBottomColor: "currentColor", borderLeftColor: "currentColor",
             animation: "spin .8s linear infinite",
           }}
         />

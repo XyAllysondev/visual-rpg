@@ -5,7 +5,7 @@
  */
 import React from "react";
 import { getEntityType } from "../model/entityTypes";
-import { SP, FS, HIT, SURF, T, tempoRelativo } from "../ui/tokens";
+import { SP, FS, HIT, LINE, SURF, T, tempoRelativo } from "../ui/tokens";
 import { EntityIcon } from "../ui/entityIcons";
 
 const ellipsis = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 };
@@ -35,8 +35,9 @@ export default function EntityRow({ entity, onOpen }) {
         minHeight: HIT.mobile + 12,
         padding: `${SP.x2}px ${SP.x3}px`,
         cursor: "pointer",
-        borderBottom: `1px solid ${SURF.hair}`,
-        borderLeft: `3px solid ${tipo.color}`,
+        borderBottom: `1px solid ${LINE.hair}`,
+        /* 2px, não 3: a 3px a faixa competia com o ícone colorido ao lado */
+        borderLeft: `2px solid ${tipo.color}`,
         background: SURF.card,
       }}
     >

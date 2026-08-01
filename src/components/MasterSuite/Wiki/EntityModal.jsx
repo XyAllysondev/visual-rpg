@@ -343,6 +343,7 @@ export default function EntityModal({
       {/* ── corpo ── */}
       <form
         onSubmit={submeter}
+        className="forja-modal-body"
         style={{
           flex: 1,
           minHeight: 0,
@@ -486,7 +487,7 @@ export default function EntityModal({
           onChange={(e) => setDescription(e.target.value)}
           className="forja-focus"
           rows={7}
-          placeholder="O que o mestre precisa lembrar sobre isto na hora da mesa."
+          placeholder="O que importa lembrar na mesa."
           style={{ ...campoStyle(false), minHeight: 150, lineHeight: 1.65, resize: "vertical" }}
         />
 
@@ -558,7 +559,7 @@ export default function EntityModal({
               }
             }}
             onBlur={() => adicionarTag(tagInput)}
-            placeholder="digite e tecle Enter"
+            placeholder="Enter para adicionar"
             style={{
               flex: "1 1 140px",
               minWidth: 120,

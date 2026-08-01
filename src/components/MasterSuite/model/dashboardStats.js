@@ -64,7 +64,11 @@ export function firstSteps(world, entities, connections, options = {}) {
     location: temTipo("location"),
     connection: arestas.length >= 1,
     journal: temDiario,
-    graph: arestas.length >= 1,
+    // O Grafo é a Fase 2 e ainda não abre — o próprio painel rotula este passo
+    // como "Fase 2". Marcá-lo concluído só porque existe uma conexão seria mentir
+    // para o mestre sobre algo que ele não tem como fazer. Volta a valer quando a
+    // ferramenta existir (aí o critério vira "abriu o grafo", não "tem aresta").
+    graph: false,
   };
 
   return FIRST_STEP_IDS.map((id) => ({ id, label: LABELS[id], done: done[id] }));

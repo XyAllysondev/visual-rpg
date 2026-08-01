@@ -20,6 +20,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { collectTags, countByType, filterEntities, sortEntities } from "../model/entityFilters";
 import { getEntityType } from "../model/entityTypes";
+import { mensagemDeErro } from "../model/erros";
 import {
   createConnection,
   createEntity,
@@ -30,7 +31,7 @@ import {
   updateEntity,
   useFolders,
 } from "../worldsStore";
-import { SP, R, FS, SURF, T } from "../ui/tokens";
+import { SP, R, FS, LINE, SURF, T } from "../ui/tokens";
 import { Btn, EmptyState, Skeleton } from "../ui/primitives";
 import { EntityIcon, Ico } from "../ui/entityIcons";
 import EntityCard from "./EntityCard";
@@ -42,11 +43,6 @@ import WikiToolbar from "./WikiToolbar";
 
 const DEBOUNCE_BUSCA = 220;
 const ESPERA_SKELETON = 300;
-
-/** Erro do Firestore ou do store vira frase de gente. Nada falha em silêncio. */
-const mensagemDeErro = (e) =>
-  (e && typeof e.message === "string" && e.message.trim()) ||
-  "Algo deu errado ao falar com o servidor. Tente de novo em instantes.";
 
 /* ── CSS exclusivo da Wiki ────────────────────────────────────────────────
  * Complementa o `<ForjaStyles/>` da casca (que já traz .forja-grid-cards, .forja-row,
@@ -78,7 +74,7 @@ const WikiStyles = () => (
 /**
  * @param {{
  *   worldId: ?string, entities: Array, connections: Array,
- *   loading?: boolean, error?: ?Error,
+ *   loading?: boolean,
  *   initialType?: ?string, initialEntityId?: ?string,
  *   createType?: ?string, createSignal?: number,
  * }} props
@@ -88,7 +84,6 @@ export default function Wiki({
   entities,
   connections,
   loading = false,
-  error = null,
   initialType = null,
   initialEntityId = null,
   createType = null,
@@ -248,6 +243,41 @@ export default function Wiki({
     abrirCriacao(createType);
   }, [createSignal, createType, abrirCriacao]);
 
+  const limparFiltros = useCallback(() => {
+    setQuery("");
+    setBusca("");
+    setTiposSel([]);
+    setTagsSel([]);
+    setPastaSel(null);
+  }, []);
+
+  /* Entidade recém-criada não pode nascer invisível: com um filtro de tipo/pasta/
+   * busca ativo, salvar um "Local" enquanto o filtro é "Personagem" devolvia a tela
+   * "Nada encontrado" — parece que a criação falhou. Das saídas possíveis (avisar e
+   * oferecer um botão, abrir o verbete, limpar os filtros), limpar é a menos
+   * surpreendente: o mestre acabou de dizer o que quer ver, a lista passa a mostrar
+   * exatamente isso, e o aviso explica o que mudou (nada é desfeito em silêncio). */
+  const revelarCriada = useCallback(
+    (payload) => {
+      const candidata = {
+        id: "__recem-criada__",
+        ...payload,
+        folderId: payload?.folderId || null,
+      };
+      const passa = filterEntities([candidata], {
+        types: tiposSel,
+        tags: tagsSel,
+        folderId: pastaSel === NO_FOLDER ? null : pastaSel,
+        query: busca,
+      }).length > 0;
+      const forade = pastaSel === NO_FOLDER && candidata.folderId;
+      if (passa && !forade) return false;
+      limparFiltros();
+      return true;
+    },
+    [busca, limparFiltros, pastaSel, tagsSel, tiposSel],
+  );
+
   const salvar = useCallback(
     async (payload) => {
       if (!worldId) {
@@ -255,16 +285,26 @@ export default function Wiki({
         return;
       }
       const editando = modal?.mode === "editar";
+      /* O aviso nomeia o que foi salvo, com o gênero do tipo ("Alvo QA criado."
+       * / "Muralha Cinzenta criada."): "Entidade criada." não confirma NADA —
+       * o mestre não sabe se salvou o que ele acabou de escrever. */
+      const a = getEntityType(payload?.type).artigo === "a" ? "a" : "o";
+      const nome = String(payload?.name || "").trim() || "Entidade";
       const ok = await executar(
         () =>
           editando
             ? updateEntity(worldId, modal.entity.id, payload)
             : createEntity(worldId, payload),
-        editando ? "Entidade atualizada." : "Entidade criada.",
+        editando ? `${nome} atualizad${a}.` : `${nome} criad${a}.`,
       );
-      if (ok && vivo.current) setModal(null);
+      if (ok && vivo.current) {
+        setModal(null);
+        if (!editando && revelarCriada(payload)) {
+          setAviso(`${nome} criad${a}. Os filtros foram limpos para aparecer na lista.`);
+        }
+      }
     },
-    [executar, modal, worldId],
+    [executar, modal, revelarCriada, worldId],
   );
 
   const pedirExclusao = useCallback(
@@ -311,8 +351,10 @@ export default function Wiki({
   );
 
   const conectar = useCallback(
-    (conn) =>
-      executar(
+    (conn) => {
+      /* O aviso mostra a aresta que passou a existir, não a categoria dela. */
+      const nomeDe = (id) => lista.find((e) => e.id === id)?.name || "?";
+      return executar(
         () =>
           createConnection(worldId, {
             fromId: conn.fromId,
@@ -321,23 +363,16 @@ export default function Wiki({
             inverse: conn.inverse,
             kind: conn.kind,
           }),
-        "Conexão criada.",
-      ),
-    [executar, worldId],
+        `${nomeDe(conn.fromId)} → ${nomeDe(conn.toId)} · ${conn.relation}`,
+      );
+    },
+    [executar, lista, worldId],
   );
 
   const desconectar = useCallback(
     (conn) => executar(() => deleteConnection(worldId, conn.id), "Conexão removida."),
     [executar, worldId],
   );
-
-  const limparFiltros = useCallback(() => {
-    setQuery("");
-    setBusca("");
-    setTiposSel([]);
-    setTagsSel([]);
-    setPastaSel(null);
-  }, []);
 
   const alternarTipo = useCallback(
     (id) =>
@@ -407,12 +442,12 @@ export default function Wiki({
           key={i}
           style={{
             background: SURF.card,
-            border: `1px solid ${SURF.hair}`,
+            border: `1px solid ${LINE.raise}`,
             borderRadius: R.card,
             overflow: "hidden",
           }}
         >
-          <Skeleton h={112} r={0} />
+          <Skeleton h={84} r={0} />
           <div style={{ padding: SP.x4, display: "flex", flexDirection: "column", gap: SP.x2 }}>
             <Skeleton w="40%" h={10} />
             <Skeleton w="90%" h={14} />
@@ -427,7 +462,7 @@ export default function Wiki({
     <EmptyState
       icon={<EntityIcon type="location" size={64} />}
       title="Acervo vazio"
-      description="Este mundo ainda não tem registros. Comece pelo que seus jogadores vão pisar primeiro: um Local."
+      description="Nenhum verbete neste mundo."
       actions={
         <>
           <Btn kind="primary" icon="plus" onClick={() => abrirCriacao("location")}>
@@ -446,13 +481,13 @@ export default function Wiki({
     const descricao = busca
       ? `Nenhuma entidade combina com “${busca}”.`
       : tipoUnico
-        ? `Nenhum registro de ${tipoUnico.plural.toLowerCase()} sobrevive aos filtros atuais.`
-        : "Nenhuma entidade sobrevive à combinação de filtros atual.";
+        ? `Nenhum ${tipoUnico.label} com esses filtros.`
+        : "Nada com esses filtros.";
     return (
       <EmptyState
         icon={tipoUnico ? <EntityIcon type={tipoUnico.id} size={56} /> : <Ico name="search" size={56} />}
         tone={tipoUnico ? tipoUnico.color : undefined}
-        title="Nada encontrado"
+        title="Sem correspondência"
         description={descricao}
         actions={
           <>
@@ -476,7 +511,7 @@ export default function Wiki({
         ))}
       </div>
     ) : (
-      <div style={{ border: `1px solid ${SURF.hair}`, borderRadius: R.card, overflow: "hidden" }}>
+      <div style={{ border: `1px solid ${LINE.edge}`, borderRadius: R.panel, overflow: "hidden" }}>
         {ordenadas.map((e) => (
           <EntityRow key={e.id} entity={e} onOpen={() => setSelecionadaId(e.id)} />
         ))}
@@ -502,7 +537,6 @@ export default function Wiki({
     <>
       <WikiStyles />
 
-      {error && bannerErro(`Não foi possível carregar o acervo. ${mensagemDeErro(error)}`, null)}
       {erroEscrita && !modal && bannerErro(erroEscrita, () => setErroEscrita(null))}
 
       {selecionada ? (
@@ -530,11 +564,10 @@ export default function Wiki({
               marginBottom: SP.x4,
             }}
           >
+            {/* Sem subtítulo com a contagem: a linha de resultados da toolbar já
+              * imprime o número, e ele lá é vivo (muda com o filtro). */}
             <div style={{ flex: 1, minWidth: 0 }}>
-              <h1 style={{ ...T.hero, fontSize: FS.h3, margin: 0 }}>Acervo</h1>
-              <div style={T.meta}>
-                {lista.length} {lista.length === 1 ? "entidade" : "entidades"} neste mundo
-              </div>
+              <h1 style={{ ...T.hero, fontSize: 20, margin: 0 }}>Acervo</h1>
             </div>
             <Btn kind="primary" icon="plus" onClick={() => abrirCriacao()}>
               Nova entidade

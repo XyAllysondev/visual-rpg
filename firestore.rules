@@ -144,9 +144,24 @@ service cloud.firestore {
         && request.resource.data.ownerUid == request.auth.uid;
       allow delete: if request.auth != null && resource.data.ownerUid == request.auth.uid;
 
-      // entities / connections / folders (e o que a suíte adicionar nas próximas fases)
+      // entities / connections / folders (e o que a suíte adicionar nas próximas fases).
+      //
+      // LEITURA usa `isWorldOwner()` (um `get()`): a consulta é de coleção inteira,
+      // e a regra não consegue inspecionar documento a documento nesse caso.
+      //
+      // ESCRITA usa o `ownerUid` gravado no PRÓPRIO documento, sem `get()`. Motivo:
+      // o Firestore permite no máximo 20 "access calls" por escrita em lote, e o
+      // mundo demo grava ~48 documentos de uma vez — com `get()` por documento o
+      // lote inteiro era negado e o mundo nascia vazio. O `||` curto-circuita, então
+      // documentos legados (sem `ownerUid`) ainda são editáveis via `get()`.
       match /{document=**} {
-        allow read, write: if request.auth != null && isWorldOwner(worldId);
+        allow read: if request.auth != null && isWorldOwner(worldId);
+        allow create: if request.auth != null
+          && (request.resource.data.ownerUid == request.auth.uid || isWorldOwner(worldId));
+        allow update: if request.auth != null
+          && (resource.data.get('ownerUid', '') == request.auth.uid || isWorldOwner(worldId));
+        allow delete: if request.auth != null
+          && (resource.data.get('ownerUid', '') == request.auth.uid || isWorldOwner(worldId));
       }
     }
 

@@ -104,3 +104,38 @@ describe("AC-7 — laços prontos pro grafo e pra genealogia", () => {
     });
   });
 });
+
+/*
+ * Regressão de contrato com a camada de persistência.
+ *
+ * O seed já passava em todos os gates de conteúdo enquanto entregava `attributes`
+ * como OBJETO — formato que `worldsStore.sanitizeAttributes` recusa. Resultado em
+ * produção: `seedDemoWorld` criava o doc do mundo, estourava na primeira entidade
+ * e o mestre ficava com "Coroa de Cinzas" vazio, sem mensagem de erro.
+ * Estes testes casam o seed com o formato que o Firestore realmente recebe.
+ */
+describe("o seed obedece ao contrato do worldsStore", () => {
+  const { entities } = buildDemoWorld();
+
+  it("attributes é sempre uma lista de pares { key, value } com textos", () => {
+    entities.forEach((e) => {
+      expect(Array.isArray(e.attributes)).toBe(true);
+      e.attributes.forEach((attr) => {
+        expect(typeof attr.key).toBe("string");
+        expect(attr.key.trim().length).toBeGreaterThan(0);
+        expect(typeof attr.value).toBe("string");
+      });
+    });
+  });
+
+  it("tags é sempre uma lista de textos", () => {
+    entities.forEach((e) => {
+      expect(Array.isArray(e.tags)).toBe(true);
+      e.tags.forEach((t) => expect(typeof t).toBe("string"));
+    });
+  });
+
+  it("pelo menos uma entidade traz atributos — senão o teste acima passa vazio", () => {
+    expect(entities.some((e) => e.attributes.length > 0)).toBe(true);
+  });
+});
