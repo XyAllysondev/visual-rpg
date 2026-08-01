@@ -36,8 +36,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useMapCamera from "../../../hooks/useMapCamera";
 import {
   useGrafo, createNode, updateNode, deleteNode,
-  createEdge, updateEdge, deleteEdge,
+  createEdge, updateEdge, deleteEdge, updateWorldMap,
 } from "../worldMapStore";
+import { useFog, useSalvarFog } from "../fogStore";
+import {
+  cobrirAoLongoDe, cobrirTudo, fracaoRevelada, mascaraParaOMundo,
+  revelarAoLongoDe, revelarTudo, tamanhoSerializado,
+} from "../model/fogMask";
 import { canAddNode } from "../model/quotas";
 import { limitesDoGrafo, pontasDaTrilha, trilhaDuplicada, vizinhos } from "../model/graph";
 import { construirMapaPadrao, ehMapaPadrao } from "../model/mapaPadrao";
@@ -48,6 +53,7 @@ import BarraDeFerramentas from "./BarraDeFerramentas";
 import PainelDoNo from "./PainelDoNo";
 import PainelDaTrilha from "./PainelDaTrilha";
 import ConfirmarRemocao from "./ConfirmarRemocao";
+import ControlesDaNevoa, { COR_DA_VISAO_DE_JOGADOR, RAIO_PADRAO } from "./ControlesDaNevoa";
 import {
   FERRAMENTA_PADRAO, MUNDO_DE_RESERVA, ferramentaPorTecla, nomeDaTrilha,
   rotuloDoNo, usaCartografiaPadrao,
@@ -72,6 +78,10 @@ export const PASSO_DO_TECLADO = 6;
  * @param {Array<{id:string,name:string}>} [props.cenas] cenas táticas do mestre.
  * @param {()=>void} [props.onUsarComoBase] cria uma cópia editável do mapa padrão.
  * @param {number} [props.altura] altura do palco em px.
+ * @param {boolean} [props.visaoDeJogador] o papel REAL de quem está olhando. No
+ *   ateliê é sempre `false` (só o mestre entra aqui); a F4 passa `true` na mesa.
+ *   Ver o cabeçalho de `ControlesDaNevoa.jsx`: este estado é separado da
+ *   PREVISÃO do mestre, e os dois só se juntam no render.
  */
 export default function EditorDoGrafo({
   uid,
@@ -81,6 +91,7 @@ export default function EditorDoGrafo({
   cenas = [],
   onUsarComoBase,
   altura = 560,
+  visaoDeJogador = false,
 }) {
   const moldeId = molde?.id || "";
   const ehPadrao = ehMapaPadrao(moldeId);
@@ -174,6 +185,94 @@ export default function EditorDoGrafo({
     img.src = fundoUrl;
     return () => { ativo = false; };
   }, [fundoUrl]);
+
+  /* ════════════════════════════════════════════════════════════════════
+   *  NÉVOA  (F3 · AC-5)
+   *  ------------------------------------------------------------------
+   *  O mapa PADRÃO fica de fora: ele é somente leitura e não existe no
+   *  Firestore (AC-13), então não há onde gravar máscara nenhuma. Oferecer
+   *  um pincel que não persiste seria pior do que não oferecer.
+   *
+   *  A máscara vive em `useState` mas é MUTADA EM LUGAR pelas funções de
+   *  `model/fogMask` (ver o cabeçalho de lá: copiar 30 KB por movimento do
+   *  ponteiro seria desperdício). Quem avisa o React que ela mudou é
+   *  `revisaoDaNevoa` — um contador, não a identidade do objeto.
+   * ════════════════════════════════════════════════════════════════════ */
+  const podeTerNevoa = !!uid && !ehPadrao;
+  const [nevoaLocal, setNevoaLocal] = useState(null);   // otimismo do interruptor
+  const nevoaLigada = podeTerNevoa
+    && (nevoaLocal !== null ? nevoaLocal : molde?.fogEnabled === true);
+
+  const fog = useFog(
+    podeTerNevoa && nevoaLigada ? uid : "",
+    podeTerNevoa && nevoaLigada ? moldeId : "",
+  );
+  const gravacaoDaNevoa = useSalvarFog(uid, moldeId);
+
+  const [mascara, setMascara] = useState(null);
+  const [revisaoDaNevoa, setRevisaoDaNevoa] = useState(0);
+  const [modoDoPincel, setModoDoPincel] = useState("revelar");
+  const [raioDoPincel, setRaioDoPincel] = useState(RAIO_PADRAO);
+  const [previsaoDeJogador, setPrevisaoDeJogador] = useState(false);
+
+  /* O otimismo do interruptor some assim que o documento confirma. */
+  useEffect(() => {
+    if (nevoaLocal !== null && molde?.fogEnabled === nevoaLocal) setNevoaLocal(null);
+  }, [nevoaLocal, molde?.fogEnabled]);
+
+  useEffect(() => { setNevoaLocal(null); setPrevisaoDeJogador(false); }, [moldeId]);
+
+  /* Semeadura: a gravada, se couber no mundo atual; senão uma nova, coberta.
+     A decisão mora em `mascaraParaOMundo` — trocar a ilustração por uma de
+     outro tamanho não pode esticar o revelado para o lugar errado. */
+  useEffect(() => {
+    if (!nevoaLigada) { setMascara(null); return; }
+    if (fog.loading) return;
+    setMascara((atual) => mascaraParaOMundo(fog.mascara || atual, mundo));
+    setRevisaoDaNevoa((r) => r + 1);
+  }, [nevoaLigada, fog.mascara, fog.loading, mundo]);
+
+  const comoJogador = visaoDeJogador || previsaoDeJogador;   // spec 0012: só no render
+  const papelDaNevoa = comoJogador ? "jogador" : "mestre";
+
+  const mexerNaNevoa = useCallback((aplicar) => {
+    if (!mascara || somenteLeitura || !nevoaLigada) return;
+    const antes = mascara.revisao;
+    aplicar(mascara);
+    if (mascara.revisao === antes) return;   // nada mudou: não repinta nem grava
+    setRevisaoDaNevoa((r) => r + 1);
+    gravacaoDaNevoa.agendar(mascara);
+  }, [mascara, somenteLeitura, nevoaLigada, gravacaoDaNevoa]);
+
+  const aoPincelar = useCallback((de, para) => {
+    mexerNaNevoa((m) => {
+      if (modoDoPincel === "cobrir") cobrirAoLongoDe(m, [de, para], raioDoPincel);
+      else revelarAoLongoDe(m, [de, para], raioDoPincel);
+    });
+  }, [mexerNaNevoa, modoDoPincel, raioDoPincel]);
+
+  const aoLigarNevoa = useCallback(async (ligar) => {
+    if (somenteLeitura) return;
+    setFalha(""); setAviso("");
+    setNevoaLocal(ligar);
+    if (!ligar) setPrevisaoDeJogador(false);
+    try {
+      if (typeof updateWorldMap === "function") {
+        await updateWorldMap(uid, moldeId, { fogEnabled: ligar });
+      }
+    } catch (err) {
+      console.error("[editor do mapa] não deu para mudar a névoa:", err);
+      if (vivo.current) { setNevoaLocal(null); setFalha(mensagemDeErro(err)); }
+    }
+  }, [somenteLeitura, uid, moldeId]);
+
+  /* O peso e a fração são recalculados só quando a névoa muda de verdade —
+     serializar a cada render seria varrer 240.000 bits à toa. */
+  const estadoDaNevoa = useMemo(() => {
+    if (!mascara) return { fracao: 0, bytes: 0 };
+    try { return { fracao: fracaoRevelada(mascara), bytes: tamanhoSerializado(mascara) }; }
+    catch { return { fracao: 0, bytes: 0 }; }
+  }, [mascara, revisaoDaNevoa]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Cota (AC-3) ───────────────────────────────────────────────────── */
   const cota = useMemo(() => {
@@ -425,6 +524,9 @@ export default function EditorDoGrafo({
       }
 
       const ferramentaDaTecla = ferramentaPorTecla(e.key);
+      /* O atalho da névoa não pode acender uma ferramenta que a barra esconde:
+         sem névoa ligada, o pincel não existe. */
+      if (ferramentaDaTecla === "nevoa" && !nevoaLigada) return;
       if (ferramentaDaTecla && !(somenteLeitura && ferramentaDaTecla !== "selecionar" && ferramentaDaTecla !== "mao")) {
         e.preventDefault();
         setFerramenta(ferramentaDaTecla);
@@ -433,7 +535,7 @@ export default function EditorDoGrafo({
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [ligandoDe, selecao, nos, somenteLeitura, pedirRemocao, aoArrastarNo, aoSoltarNo]);
+  }, [ligandoDe, selecao, nos, somenteLeitura, pedirRemocao, aoArrastarNo, aoSoltarNo, nevoaLigada]);
 
   /* ── Render ────────────────────────────────────────────────────────── */
   const painelAberto = !!(noSelecionado || trilhaSelecionada);
@@ -473,7 +575,38 @@ export default function EditorDoGrafo({
         onZoom={zoomNoCentro}
         escala={scale}
         somenteLeitura={somenteLeitura}
+        comNevoa={nevoaLigada}
       />
+
+      {/* ── Névoa (AC-5) ───────────────────────────────────────────── */}
+      {podeTerNevoa ? (
+        <ControlesDaNevoa
+          ligada={nevoaLigada}
+          onLigar={aoLigarNevoa}
+          modo={modoDoPincel}
+          onModo={(m) => { setModoDoPincel(m); setFerramenta("nevoa"); }}
+          raio={raioDoPincel}
+          onRaio={setRaioDoPincel}
+          previsaoDeJogador={previsaoDeJogador}
+          onPrevisao={setPrevisaoDeJogador}
+          onCobrirTudo={() => mexerNaNevoa(cobrirTudo)}
+          onRevelarTudo={() => mexerNaNevoa(revelarTudo)}
+          fracao={estadoDaNevoa.fracao}
+          bytes={estadoDaNevoa.bytes}
+          gravando={gravacaoDaNevoa.gravando}
+          pendente={gravacaoDaNevoa.pendente}
+          somenteLeitura={somenteLeitura}
+        />
+      ) : null}
+
+      {gravacaoDaNevoa.erro ? (
+        <div role="alert" style={{
+          padding: SP.x3, borderRadius: R.card, ...T.meta, color: "var(--text)",
+          background: "rgba(139,26,26,0.10)", border: "1px solid rgba(216,90,90,0.34)",
+        }}>
+          <strong>A névoa não foi gravada. </strong>{mensagemDeErro(gravacaoDaNevoa.erro)}
+        </div>
+      ) : null}
 
       {/* ── Cota (AC-3): o teto explicado ANTES do clique que falha ─── */}
       {!cota.ok && !somenteLeitura ? (
@@ -520,6 +653,22 @@ export default function EditorDoGrafo({
           onCurvarTrilha={aoCurvarTrilha}
           onSoltarCurva={aoSoltarCurva}
           altura={altura}
+          nevoa={nevoaLigada && mascara ? {
+            mascara,
+            papel: papelDaNevoa,
+            /* AC-11 / design §5.4: nada anima enquanto o mestre edita no
+               ateliê. "Editar" aqui é ter uma ferramenta de ESCRITA na mão —
+               plantar, ligar ou pincelar. Com a mão ou a seleção ele está
+               olhando o mapa, não trabalhando nele, e é aí que a névoa
+               respira. (Os outros dois desligamentos — movimento reduzido e
+               fora do viewport — moram em `CamadaDeNevoa`.) */
+            deriva: comoJogador || ferramenta === "selecionar" || ferramenta === "mao",
+          } : null}
+          pincel={nevoaLigada && !somenteLeitura && ferramenta === "nevoa"
+            ? { raio: raioDoPincel, modo: modoDoPincel }
+            : null}
+          onPincel={aoPincelar}
+          destaque={comoJogador ? COR_DA_VISAO_DE_JOGADOR : null}
         />
 
         {painelAberto ? (
@@ -628,6 +777,18 @@ export default function EditorDoGrafo({
         {noSelecionado ? `Selecionado — ${rotuloDoNo(noSelecionado)}` : null}
         {trilhaSelecionada ? `Selecionada — trilha ${nomeDaTrilha(trilhaSelecionada, nos)}` : null}
       </div>
+
+      {/* A moldura violeta avisa quem enxerga; isto avisa quem ouve. */}
+      {podeTerNevoa ? (
+        <div aria-live="polite" style={{
+          position: "absolute", width: 1, height: 1, overflow: "hidden",
+          clip: "rect(0 0 0 0)", whiteSpace: "nowrap",
+        }}>
+          {comoJogador
+            ? "Visão do jogador: o mapa está sendo mostrado como o grupo o vê."
+            : "Visão do mestre: você está vendo o mapa inteiro."}
+        </div>
+      ) : null}
 
       {confirmando ? (
         <ConfirmarRemocao

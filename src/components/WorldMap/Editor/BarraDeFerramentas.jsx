@@ -10,7 +10,7 @@
  *  documentação que não existe.
  * ════════════════════════════════════════════════════════════════════ */
 
-import { FERRAMENTAS, getFerramenta } from "./editorUi";
+import { ferramentasDisponiveis, getFerramenta } from "./editorUi";
 import { SP, R, FS, FW, T, HIT, LINE, btnStyle } from "../Atelier/ui";
 
 /**
@@ -21,6 +21,8 @@ import { SP, R, FS, FW, T, HIT, LINE, btnStyle } from "../Atelier/ui";
  * @param {(fator:number)=>void} props.onZoom
  * @param {number} props.escala escala atual da câmera (para o rótulo em %).
  * @param {boolean} [props.somenteLeitura] esconde o que escreve.
+ * @param {boolean} [props.comNevoa] o molde está com névoa ligada — só então o
+ *   pincel de névoa aparece (oferecer pincel que não pinta nada seria mentira).
  */
 export default function BarraDeFerramentas({
   ferramenta,
@@ -29,11 +31,10 @@ export default function BarraDeFerramentas({
   onZoom,
   escala = 1,
   somenteLeitura = false,
+  comNevoa = false,
 }) {
   const ativa = getFerramenta(ferramenta);
-  const disponiveis = somenteLeitura
-    ? FERRAMENTAS.filter((f) => f.id === "selecionar" || f.id === "mao")
-    : FERRAMENTAS;
+  const disponiveis = ferramentasDisponiveis({ somenteLeitura, comNevoa });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: SP.x2 }}>

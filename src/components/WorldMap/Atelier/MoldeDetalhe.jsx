@@ -24,6 +24,7 @@ import {
   LIMITE_FUNDO_BYTES, AVISO_FUNDO_NO_DOCUMENTO,
 } from "../worldMapStore";
 import { PLAN_QUOTAS } from "../model/quotas";
+import { ehMapaPadrao } from "../model/mapaPadrao";
 import EditorDoGrafo from "../Editor";
 import {
   SP, R, FS, T, SURF, LINE, HIT, btnStyle, contarNos, tempoRelativo,
@@ -174,6 +175,13 @@ export default function MoldeDetalhe({
   const noDocumento = !fundoDisponivel();
   const planoEfetivo = planoPeloLimite(plan, limiteNos);
 
+  /* O MAPA PADRÃO não é documento do Firestore (AC-13): a arte dele é vetorial e
+   * mora no app. A zona de envio some aqui **por segurança, não por estética** —
+   * `uploadBackground` no id reservado criaria um documento de verdade em
+   * `users/{uid}/worldmaps/nexus-mapa-padrao`, que passaria a contar na cota e a
+   * duplicar o card. Quem quiser arte própria faz a cópia, que é mapa dele. */
+  const ehPadrao = ehMapaPadrao(molde?.id);
+
   return (
     <section aria-label={`Mapa-múndi: ${molde?.name || "sem nome"}`}
       style={{ display: "flex", flexDirection: "column", gap: SP.x5 }}>
@@ -187,13 +195,19 @@ export default function MoldeDetalhe({
         <div style={{ flex: "1 1 240px", minWidth: 0 }}>
           <h2 style={{ ...T.hero, fontSize: FS.h2, margin: 0 }}>{molde?.name || "Sem nome"}</h2>
           <div style={{ ...T.data, marginTop: SP.x1 }}>
-            {contarNos(molde?.nodeCount)} · atualizado {tempoRelativo(molde?.updatedAt)}
+            {contarNos(molde?.nodeCount)} · {ehPadrao
+              ? "já vem no Nexus"
+              : `atualizado ${tempoRelativo(molde?.updatedAt)}`}
           </div>
         </div>
         <div style={{ display: "flex", gap: SP.x2, flexShrink: 0 }}>
-          <button type="button" className="wm-focus wm-act" onClick={onRenomear} style={btnStyle("ghost", "sm")}>
-            Renomear
-          </button>
+          {/* Renomear exige documento; o padrão é código. O que existe no lugar é
+              fazer a cópia — e ela, sim, se renomeia como qualquer mapa. */}
+          {ehPadrao ? null : (
+            <button type="button" className="wm-focus wm-act" onClick={onRenomear} style={btnStyle("ghost", "sm")}>
+              Renomear
+            </button>
+          )}
           <button type="button" className="wm-focus wm-act" onClick={onExcluir} style={btnStyle("danger", "sm")}>
             Excluir
           </button>
@@ -205,6 +219,19 @@ export default function MoldeDetalhe({
       ) : null}
 
       {/* ── Ilustração de fundo ───────────────────────────────────── */}
+      {ehPadrao ? (
+        <div style={{
+          background: SURF.rail, border: `1px solid ${LINE.edge}`,
+          borderRadius: R.panel, padding: SP.x5,
+        }}>
+          <h3 style={{ ...T.section, margin: `0 0 ${SP.x3}px` }}>Ilustração de fundo</h3>
+          <p style={{ ...T.meta, margin: 0, maxWidth: "62ch" }}>
+            A carta deste mapa é desenhada pelo próprio Nexus — vetorial, nítida em qualquer
+            zoom e sem ocupar espaço na sua conta. Para trocar a arte, faça uma cópia deste
+            mapa: a cópia é sua e aceita a ilustração que você quiser.
+          </p>
+        </div>
+      ) : (
       <div style={{
         background: SURF.rail, border: `1px solid ${LINE.edge}`,
         borderRadius: R.panel, padding: SP.x5,
@@ -311,6 +338,7 @@ export default function MoldeDetalhe({
           </div>
         ) : null}
       </div>
+      )}
 
       {/* ── Lugares e trilhas — o editor visual (F2 · AC-4) ───────── */}
       <div style={{

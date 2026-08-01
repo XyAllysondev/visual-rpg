@@ -79,6 +79,7 @@ import { db } from "../../firebase";
 import { mensagemDeErro } from "../MasterSuite/model/erros";
 import { canAddNode, canCreateMap, quotaFor } from "./model/quotas";
 import { criarNo, criarTrilha, pontasDaTrilha, trilhaDuplicada } from "./model/graph";
+import { CAMPO_DISPENSA, CAMPO_DISPENSA_EM, padraoDispensado } from "./model/mapaPadrao";
 
 /* ── Constantes ──────────────────────────────────────────────────────────── */
 
@@ -133,6 +134,7 @@ const asNumber = (value, padrao = 0) =>
 
 /* ── Helpers de caminho ──────────────────────────────────────────────────── */
 
+const userRef = (uid) => doc(db, USERS, uid);
 const mapsCol = (uid) => collection(db, USERS, uid, WORLDMAPS);
 const mapRef = (uid, mapId) => doc(db, USERS, uid, WORLDMAPS, mapId);
 const subCol = (uid, mapId, nome) => collection(db, USERS, uid, WORLDMAPS, mapId, nome);
@@ -207,7 +209,8 @@ async function contarMapas(uid) {
  *
  * @param {string} uid dono do mapa.
  * @param {{name:string, plan?:string, description?:string, width?:number,
- *          height?:number, fogEnabled?:boolean, defaultRevealRadius?:number}} data
+ *          height?:number, fogEnabled?:boolean, defaultRevealRadius?:number,
+ *          origem?:string, startNodeId?:string}} data
  * @returns {Promise<string>} id do mapa criado.
  * @throws {Error} em PT-BR quando falta nome/uid ou quando a cota do plano estourou.
  */
@@ -239,6 +242,13 @@ export async function createWorldMap(uid, data = {}) {
     // Contador denormalizado: é o que a cota de nós (AC-3) e as rules consultam
     // sem varrer a subcoleção. Quem cria/apaga nó em F2 é responsável por mantê-lo.
     nodeCount: 0,
+    /* Procedência (AC-13): preenchido quando o mapa nasce de "usar como base" do
+     * padrão. É o que faz a cópia continuar usando a carta vetorial enquanto o
+     * mestre não subir arte própria (`Editor/editorUi.js: usaCartografiaPadrao`).
+     * Mapa criado do zero nasce `null` — sem origem, sem ilustração emprestada. */
+    origem: asText(data.origem) || null,
+    /* Onde o grupo começa quando o molde virar instância na mesa (AC-7). */
+    startNodeId: asText(data.startNodeId) || null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -680,6 +690,102 @@ export function useWorldMaps(uid) {
   }, [uid]);
 
   return { maps, loading, error };
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+ *  A MARCA DE DISPENSA DO MAPA PADRÃO  (AC-13)
+ *  ---------------------------------------------------------------------------
+ *  O mapa padrão é código, não documento (`model/mapaPadrao.js`). "Excluí-lo"
+ *  não apaga nada — grava `mapaPadraoDispensado: true` no documento de perfil do
+ *  mestre, e a lista deixa de oferecê-lo. O PORQUÊ de ser ali (e não num doc de
+ *  configuração próprio) está escrito por extenso em `model/mapaPadrao.js`, no
+ *  bloco "DISPENSAR E RESTAURAR O PADRÃO". Em uma linha: é preferência de conta,
+ *  é o único lugar que estruturalmente NÃO entra na contagem da cota, e as rules
+ *  já o permitem sem afrouxar nada (`firestore.rules:14-15` congela apenas
+ *  `plan` e `subscribedSystems`).
+ *
+ *  `setDoc(..., {merge:true})` e não `updateDoc`: o documento de perfil pode não
+ *  existir ainda (conta antiga, cadastro que não escreveu nada além do auth), e
+ *  `updateDoc` falha em documento inexistente. O merge cria só o campo, sem
+ *  encostar em `plan` nem em `subscribedSystems` — o que também é o que faz a
+ *  escrita passar tanto na regra de `create` quanto na de `update`.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/** Escreve a marca (ou a apaga) no perfil. Erro sobe traduzido por quem chama. */
+async function marcarDispensa(uid, valor, acao) {
+  const ownerUid = requireText(uid, `É preciso estar autenticado para ${acao}.`);
+  await setDoc(
+    userRef(ownerUid),
+    { [CAMPO_DISPENSA]: valor, [CAMPO_DISPENSA_EM]: valor ? serverTimestamp() : null },
+    { merge: true },
+  );
+}
+
+/**
+ * Tira o mapa padrão da lista deste mestre (AC-13).
+ *
+ * Não é exclusão: nada é apagado, porque o padrão não é dado. É por isso que a
+ * confirmação na tela diz outra coisa que a de excluir um mapa autoral — e é
+ * por isso que `restaurarMapaPadrao` existe do lado.
+ *
+ * @param {string} uid mestre que dispensou.
+ * @throws {Error} em PT-BR quando falta uid; erro do Firestore sobe cru para quem chama.
+ */
+export async function dispensarMapaPadrao(uid) {
+  await marcarDispensa(uid, true, "mudar o que aparece no seu ateliê");
+}
+
+/**
+ * Devolve o mapa padrão à lista deste mestre (AC-13).
+ *
+ * O contrário exato de `dispensarMapaPadrao`. Existe para que dispensar não seja
+ * porta de mão única: descartar por engano não pode custar o conteúdo para sempre.
+ *
+ * @param {string} uid mestre que quer o padrão de volta.
+ */
+export async function restaurarMapaPadrao(uid) {
+  await marcarDispensa(uid, false, "trazer o mapa padrão de volta");
+}
+
+/**
+ * O mestre dispensou o mapa padrão? Em tempo real, do documento de perfil.
+ *
+ * Sem uid, não assina nada e devolve `false` — "ninguém logado ainda" não é erro.
+ *
+ * FALHA DE LEITURA **OFERECE** O PADRÃO (`dispensado: false`) e devolve o `error`
+ * para quem chama mostrar. Sem saber a preferência, o lado seguro é mostrar: um
+ * mapa reaparecendo é aborrecimento, um mapa sumindo parece perda de conteúdo. O
+ * erro não é engolido — a tela diz por que a preferência não foi lida.
+ *
+ * @param {string} uid mestre.
+ * @returns {{ dispensado: boolean, loading: boolean, error: Error|null }}
+ */
+export function useMapaPadraoDispensado(uid) {
+  const [dispensado, setDispensado] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!uid) { setDispensado(false); setLoading(false); setError(null); return undefined; }
+    setLoading(true);
+    setError(null);
+    const unsub = onSnapshot(
+      userRef(uid),
+      (snap) => {
+        setDispensado(padraoDispensado(snap.exists() ? snap.data() : null));
+        setLoading(false);
+      },
+      (err) => {
+        console.error("[worldMapStore] não deu para ler a preferência do mapa padrão:", err);
+        setError(err);
+        setDispensado(false);
+        setLoading(false);
+      },
+    );
+    return () => unsub();
+  }, [uid]);
+
+  return { dispensado, loading, error };
 }
 
 /* ════════════════════════════════════════════════════════════════════════════

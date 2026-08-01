@@ -69,7 +69,39 @@ export const FERRAMENTAS = [
     icone: "✥",
     dica: "Arraste para deslocar o mapa. A roda do mouse dá zoom em qualquer ferramenta.",
   },
+  {
+    id: "nevoa",
+    label: "Pincel de névoa",
+    atalho: "F",
+    icone: "🌫",
+    dica: "Arraste sobre o mapa para abrir ou fechar a névoa. O tamanho e o que ele faz ficam na barra da névoa.",
+  },
 ];
+
+/**
+ * Ferramentas que só fazem sentido com a névoa ligada.
+ *
+ * A barra as esconde quando o molde está sem névoa — oferecer um pincel que
+ * não pinta nada seria mentira. Ver `ferramentasDisponiveis`.
+ */
+export const FERRAMENTAS_DE_NEVOA = ["nevoa"];
+
+/**
+ * As ferramentas que a barra deve mostrar agora.
+ *
+ * Em somente leitura sobram as duas que não escrevem no molde (escolher e
+ * mover). Sem névoa, o pincel some. As duas regras se somam.
+ *
+ * @param {{somenteLeitura?:boolean, comNevoa?:boolean}} contexto
+ * @returns {Array} subconjunto de `FERRAMENTAS` (as mesmas referências).
+ */
+export function ferramentasDisponiveis({ somenteLeitura = false, comNevoa = false } = {}) {
+  return FERRAMENTAS.filter((f) => {
+    if (somenteLeitura) return f.id === "selecionar" || f.id === "mao";
+    if (FERRAMENTAS_DE_NEVOA.includes(f.id)) return comNevoa;
+    return true;
+  });
+}
 
 /** Ferramenta assumida ao abrir o editor. */
 export const FERRAMENTA_PADRAO = "selecionar";

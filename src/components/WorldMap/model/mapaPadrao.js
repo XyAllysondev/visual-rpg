@@ -32,6 +32,12 @@
  *    qualquer zoom. `mapa.background` é `null` de propósito — o campo de imagem
  *    fica livre para o mestre trocar a arte se quiser (AC-13).
  *
+ * 4. **Dispensável, e de volta quando quiser.** A oferta do sistema não é
+ *    imposta: o mestre tira o padrão da lista pela mesma afordância dos outros
+ *    mapas, e traz de volta pelo caminho visível do estado vazio. Como não há
+ *    documento a apagar, o que se grava é uma marca no perfil dele — ver o bloco
+ *    "DISPENSAR E RESTAURAR O PADRÃO", no fim deste arquivo.
+ *
  * DETERMINISMO: sem `Date.now()`, sem `Math.random()`, ids locais estáveis
  * (`padrao-no-1`, `padrao-trilha-1`). Duas chamadas devolvem estruturas idênticas
  * — e objetos NOVOS, para que quem grava carimbe datas sem contaminar o seed.
@@ -412,12 +418,117 @@ export function construirMapaPadrao() {
 
 /**
  * `true` quando o id é o do mapa padrão. A lista usa isto para desenhar o selo
- * "já vem no Nexus", esconder o botão de excluir e **não somar na cota**.
+ * "já vem no Nexus", trocar a confirmação de exclusão pela de dispensa e
+ * **não somar na cota**.
  *
  * @param {string} mapId id a testar.
  */
 export function ehMapaPadrao(mapId) {
   return typeof mapId === "string" && mapId.trim() === MAPA_PADRAO_ID;
+}
+
+/**
+ * Só os metadados do padrão — o card da lista, sem montar o grafo inteiro.
+ *
+ * @returns {object} objeto NOVO, com a mesma forma de um documento de molde.
+ */
+export function moldeDoMapaPadrao() {
+  return molde();
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+ *  DISPENSAR E RESTAURAR O PADRÃO  (AC-13)
+ *  ---------------------------------------------------------------------------
+ *  *"o mestre pode excluir o mapa padrão da sua lista, como excluiria qualquer
+ *  outro — a oferta do sistema não pode ser imposta"*.
+ *
+ *  Só que **não há o que apagar**: o padrão é código, não documento. Então
+ *  "excluir" grava uma MARCA DE DISPENSA no perfil do mestre
+ *  (`users/{uid}.mapaPadraoDispensado`) e a lista deixa de oferecê-lo.
+ *
+ *  POR QUE NO DOCUMENTO DO PERFIL, e não num doc de configuração próprio:
+ *
+ *   1. **É preferência de mestre, não mapa.** O AC-13 diz literalmente "marca
+ *      de dispensa no perfil do mestre". `users/{uid}` já é o lugar onde o
+ *      projeto guarda preferência de conta (`musicLinks`, `App.jsx:46`), com o
+ *      mesmo `setDoc(..., {merge:true})`. Não se inventa um segundo lugar.
+ *
+ *   2. **É a única forma que NÃO pode contar na cota.** A cota conta documentos
+ *      de `users/{uid}/worldmaps` (`contarMapas` no store, `getDocs(...).size`).
+ *      Um doc de configuração dentro dessa coleção seria contado — o mestre free
+ *      perderia o direito de criar o mapa dele por ter dispensado o padrão. Um
+ *      campo no documento PAI está estruturalmente fora da contagem: não é
+ *      disciplina de quem escreve o filtro, é topologia.
+ *
+ *   3. **As rules já permitem, sem afrouxar nada.** `firestore.rules:14-15`
+ *      congela só `plan` e `subscribedSystems` no update de `users/{uid}`;
+ *      qualquer outro campo do dono passa. Uma subcoleção nova precisaria de um
+ *      bloco de rules novo (subcoleção não herda a regra do pai) — mais
+ *      superfície de permissão para guardar um booleano.
+ *
+ *   4. **É por mestre, nunca global.** O caminho tem o uid dentro: um mestre
+ *      dispensar não alcança o documento de outro.
+ *
+ *  A marca é reversível de propósito (`false`, não um documento apagado): a
+ *  restauração é caminho de primeira classe, não conserto.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/** Campo booleano em `users/{uid}`. `true` = não oferecer o padrão a este mestre. */
+export const CAMPO_DISPENSA = "mapaPadraoDispensado";
+
+/** Quando a dispensa aconteceu. Só para suporte — nenhuma regra depende dele. */
+export const CAMPO_DISPENSA_EM = "mapaPadraoDispensadoEm";
+
+/**
+ * O perfil do mestre dispensou o mapa padrão?
+ *
+ * Só `true` literal dispensa. Perfil ausente, campo ausente, `null` ou lixo de
+ * tipo valem "não dispensou" — o lado seguro é **oferecer**: mostrar um mapa
+ * que o mestre tinha escondido é um aborrecimento; esconder um que ele espera
+ * ver parece perda de conteúdo.
+ *
+ * @param {object|null|undefined} perfil documento `users/{uid}`.
+ * @returns {boolean}
+ */
+export function padraoDispensado(perfil) {
+  return !!perfil && typeof perfil === "object" && perfil[CAMPO_DISPENSA] === true;
+}
+
+/**
+ * A lista que o ateliê mostra: os mapas do mestre mais o padrão, quando ele não
+ * foi dispensado.
+ *
+ * O padrão entra por ÚLTIMO. É oferta, não imposição (AC-13): quem já tem
+ * mapas próprios vê os dele primeiro, e quem não tem vê o padrão de qualquer
+ * jeito, porque é o único card.
+ *
+ * @param {Array<object>} mapasDoUsuario o que veio de `users/{uid}/worldmaps`.
+ * @param {{dispensado?:boolean}} [opcoes]
+ * @returns {Array<object>} lista nova; a de entrada não é tocada.
+ */
+export function listaComPadrao(mapasDoUsuario, opcoes = {}) {
+  const meus = Array.isArray(mapasDoUsuario) ? mapasDoUsuario : [];
+  /* Defesa contra o dado antigo: se um documento com o id reservado existir no
+   * Firestore (não deveria — o padrão é código), ele não pode virar um segundo
+   * card idêntico ao da oferta. */
+  const limpos = meus.filter((m) => !ehMapaPadrao(m?.id));
+  return opcoes.dispensado === true ? limpos : [...limpos, moldeDoMapaPadrao()];
+}
+
+/**
+ * Quantos mapas da lista **contam na cota do plano** (AC-3 + AC-13).
+ *
+ * O padrão não conta: ele não é documento do mestre, e a cota do free é de 1
+ * mapa — se contasse, o mestre free nasceria sem poder criar o dele. Esta
+ * função é o único lugar que decide isso; quem chama `canCreateMap` passa o
+ * resultado dela, nunca `lista.length`.
+ *
+ * @param {Array<object>} lista lista já montada (com ou sem o padrão).
+ * @returns {number}
+ */
+export function contarParaCota(lista) {
+  const itens = Array.isArray(lista) ? lista : [];
+  return itens.filter((m) => !(ehMapaPadrao(m?.id) && !MAPA_PADRAO_CONSOME_COTA)).length;
 }
 
 /**

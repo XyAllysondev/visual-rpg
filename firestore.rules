@@ -6,6 +6,13 @@ service cloud.firestore {
     // ── Users (perfil + plano) ─────────────────────────────────────────────────
     // plan/subscribedSystems são escritos APENAS pelo backend (service account não passa
     // pelas rules). Cliente não pode se dar plano (spec 0004 AC-1).
+    //
+    // O RESTO DO DOCUMENTO É PREFERÊNCIA DO DONO e ele escreve à vontade: `musicLinks`
+    // (App.jsx) e `mapaPadraoDispensado` (spec 0028 AC-13 — a marca de "não me ofereça
+    // mais o mapa padrão") entram por `setDoc({merge:true})` e passam nas duas regras
+    // abaixo sem exceção nova: `create` só barra `subscribedSystems` e `plan != 'free'`,
+    // e `update` só congela esses mesmos dois campos. Se um dia a preferência precisar
+    // de mais campos, ela continua cabendo aqui — NÃO afrouxe a lista congelada.
     match /users/{userId} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null && request.auth.uid == userId

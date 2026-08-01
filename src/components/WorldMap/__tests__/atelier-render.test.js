@@ -26,6 +26,12 @@ jest.mock("../worldMapStore", () => ({
   /* F2: o molde aberto agora monta o editor do grafo, que também lê o store.
      A fronteira mockada continua sendo só o I/O — o editor roda de verdade. */
   useGrafo: jest.fn(),
+  /* F3 · AC-13: a marca de dispensa do mapa padrão mora no perfil do mestre —
+     I/O, portanto mockado. Quem decide o que a lista mostra a partir dela é
+     `model/mapaPadrao.js`, que roda de verdade. */
+  useMapaPadraoDispensado: jest.fn(),
+  dispensarMapaPadrao: jest.fn(),
+  restaurarMapaPadrao: jest.fn(),
   createNode: jest.fn(),
   updateNode: jest.fn(),
   deleteNode: jest.fn(),
@@ -41,8 +47,10 @@ jest.mock("../worldMapStore", () => ({
 import Atelier from "../Atelier";
 import {
   useWorldMaps, createWorldMap, updateWorldMap, deleteWorldMap, uploadBackground,
-  getBackground, fundoDisponivel, useGrafo,
+  getBackground, fundoDisponivel, useGrafo, semearGrafo,
+  useMapaPadraoDispensado, dispensarMapaPadrao, restaurarMapaPadrao,
 } from "../worldMapStore";
+import { construirMapaPadrao } from "../model/mapaPadrao";
 
 /* ── Acervo de teste ────────────────────────────────────────────────── */
 
@@ -69,6 +77,12 @@ beforeEach(() => {
   uploadBackground.mockResolvedValue({ url: "https://exemplo/f.png", path: "p", width: 10, height: 10 });
   getBackground.mockResolvedValue(null);
   useGrafo.mockReturnValue({ nos: [], trilhas: [], loading: false, error: null });
+  semearGrafo.mockResolvedValue({ nos: 12, trilhas: 16 });
+  /* Estado de fábrica do AC-13: o mapa padrão está à mostra. Dispensá-lo é
+     escolha do mestre, e cada teste que precisa dela a liga explicitamente. */
+  useMapaPadraoDispensado.mockReturnValue({ dispensado: false, loading: false, error: null });
+  dispensarMapaPadrao.mockResolvedValue(undefined);
+  restaurarMapaPadrao.mockResolvedValue(undefined);
   /* Padrão dos testes: o mundo em que o Storage está de pé (plano Blaze). O
    * mundo de HOJE — Storage indisponível, ilustração em base64 dentro do
    * documento (ADR-0008, opção B) — tem testes próprios mais abaixo, porque as
@@ -77,6 +91,13 @@ beforeEach(() => {
 });
 
 const comMoldes = (maps) => useWorldMaps.mockReturnValue({ maps, loading: false, error: null });
+
+/** Liga a marca de dispensa do mapa padrão (AC-13). */
+const semPadrao = () =>
+  useMapaPadraoDispensado.mockReturnValue({ dispensado: true, loading: false, error: null });
+
+/** Nome do mapa padrão, tirado do próprio seed — nunca copiado à mão. */
+const NOME_PADRAO = construirMapaPadrao().mapa.name;
 
 /* ════════════════════════════════════════════════════════════════════
  *  1 · CASCA E ESTADO VAZIO  (AC-2)
@@ -89,12 +110,23 @@ describe("Ateliê · casca e estado vazio (AC-2)", () => {
     expect(screen.queryByRole("button", { name: /novo mapa-múndi/i })).not.toBeInTheDocument();
   });
 
-  it("o vazio explica o que é um mapa-múndi e convida a criar o primeiro", () => {
+  it("sem mapa próprio, o painel explica o que é um mapa-múndi e convida a criar o primeiro", () => {
+    render(<Atelier uid="mestre-1" plan="free" />);
+
+    /* Com o padrão à mostra (estado de fábrica do AC-13) o título muda: dizer
+       "nenhum mapa-múndi ainda" com um mapa jogável na tela seria falso. */
+    expect(screen.getByRole("heading", { name: /comece pelo mapa que já vem pronto/i })).toBeInTheDocument();
+    expect(screen.getByText(/a névoa recua/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Criar meu primeiro mapa-múndi" })).toBeInTheDocument();
+  });
+
+  it("com o padrão dispensado e nenhum mapa próprio, o vazio é vazio de verdade", () => {
+    semPadrao();
     render(<Atelier uid="mestre-1" plan="free" />);
 
     expect(screen.getByRole("heading", { name: /nenhum mapa-múndi ainda/i })).toBeInTheDocument();
     expect(screen.getByText(/a névoa recua/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Criar meu primeiro mapa-múndi" })).toBeInTheDocument();
+    expect(screen.queryByText(NOME_PADRAO)).not.toBeInTheDocument();
   });
 
   it("a falha de leitura fala português, sem erro cru do Firebase", () => {
@@ -458,5 +490,202 @@ describe("Ateliê · molde aberto (AC-2)", () => {
     fireEvent.click(screen.getByRole("button", { name: /todos os mapas/i }));
 
     await waitFor(() => expect(screen.getByText("Vale do Sino")).toBeInTheDocument());
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════
+ *  7 · O MAPA PADRÃO NA LISTA: OFERECER, DISPENSAR, RESTAURAR  (AC-13)
+ *  --------------------------------------------------------------------
+ *  *"tem que ter um mapa padrão que o sistema oferece, e aí se a pessoa
+ *  quiser, ela cria um novo ou exclui esse padrão"* — o pedido, literal.
+ *
+ *  O que este bloco protege:
+ *   · a oferta existe sem o mestre pedir, e não é documento do Firestore;
+ *   · dispensar esconde — pela MESMA afordância de excluir qualquer mapa,
+ *     mas com uma conversa que não mente sobre o que se perde (nada);
+ *   · restaurar traz de volta, por caminho visível nos dois estados;
+ *   · a marca NÃO conta na cota: o mestre free continua podendo criar o dele.
+ * ════════════════════════════════════════════════════════════════════ */
+describe("Ateliê · mapa padrão do sistema (AC-13)", () => {
+  it("oferece o mapa padrão sem o mestre ter criado nada", () => {
+    render(<Atelier uid="mestre-1" plan="free" />);
+
+    expect(screen.getByText(NOME_PADRAO)).toBeInTheDocument();
+    expect(screen.getByText(/já vem no Nexus/i)).toBeInTheDocument();
+    /* Ele não é documento: ninguém foi criado no banco para ele existir. */
+    expect(createWorldMap).not.toHaveBeenCalled();
+  });
+
+  it("o padrão tem a MESMA afordância de exclusão dos outros mapas", () => {
+    comMoldes([MOLDE]);
+    render(<Atelier uid="mestre-1" plan="pro" />);
+
+    expect(screen.getByRole("button", { name: `Excluir ${NOME_PADRAO}` })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Excluir As Terras Partidas" })).toBeInTheDocument();
+  });
+
+  it("a confirmação do padrão NÃO usa a frase de apagar mapa autoral", async () => {
+    render(<Atelier uid="mestre-1" plan="free" />);
+
+    fireEvent.click(screen.getByRole("button", { name: `Excluir ${NOME_PADRAO}` }));
+    const dialogo = await screen.findByRole("alertdialog");
+
+    expect(dialogo).toHaveTextContent(/tirar o mapa padrão da sua lista\?/i);
+    expect(dialogo).toHaveTextContent(/nada é apagado/i);
+    expect(dialogo).toHaveTextContent(/trazê-lo de volta/i);
+    /* a frase assustadora do mapa autoral não pode aparecer aqui */
+    expect(dialogo).not.toHaveTextContent(/não dá para desfazer/i);
+    expect(within(dialogo).getByRole("button", { name: "Tirar da lista" })).toBeInTheDocument();
+  });
+
+  it("confirmar grava a marca de dispensa no perfil — e não apaga documento nenhum", async () => {
+    render(<Atelier uid="mestre-1" plan="free" />);
+
+    fireEvent.click(screen.getByRole("button", { name: `Excluir ${NOME_PADRAO}` }));
+    const dialogo = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Tirar da lista" }));
+
+    await waitFor(() => expect(dispensarMapaPadrao).toHaveBeenCalledWith("mestre-1"));
+    expect(deleteWorldMap).not.toHaveBeenCalled();
+  });
+
+  it("com a marca ligada, a lista deixa de oferecer o padrão", () => {
+    semPadrao();
+    comMoldes([MOLDE]);
+    render(<Atelier uid="mestre-1" plan="pro" />);
+
+    expect(screen.getByText("As Terras Partidas")).toBeInTheDocument();
+    expect(screen.queryByText(NOME_PADRAO)).not.toBeInTheDocument();
+  });
+
+  it("dispensar não é porta de mão única: o vazio oferece a volta", async () => {
+    semPadrao();
+    render(<Atelier uid="mestre-1" plan="free" />);
+
+    const voltar = screen.getAllByRole("button", { name: /trazer o mapa padrão de volta/i });
+    expect(voltar.length).toBeGreaterThan(0);
+
+    fireEvent.click(voltar[0]);
+    await waitFor(() => expect(restaurarMapaPadrao).toHaveBeenCalledWith("mestre-1"));
+  });
+
+  it("quem já tem mapas próprios também acha a volta, no topo da lista", async () => {
+    semPadrao();
+    comMoldes([MOLDE]);
+    render(<Atelier uid="mestre-1" plan="pro" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /trazer o mapa padrão de volta/i }));
+
+    await waitFor(() => expect(restaurarMapaPadrao).toHaveBeenCalledWith("mestre-1"));
+  });
+
+  it("a falha da restauração vira frase — nada falha em silêncio", async () => {
+    semPadrao();
+    const erro = new Error("Missing or insufficient permissions.");
+    erro.code = "permission-denied";
+    restaurarMapaPadrao.mockRejectedValue(erro);
+    const gritos = jest.spyOn(console, "error").mockImplementation(() => {});
+    render(<Atelier uid="mestre-1" plan="free" />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /trazer o mapa padrão de volta/i })[0]);
+
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).toHaveTextContent(/o mapa padrão não voltou/i);
+    expect(alerta).not.toHaveTextContent(/Missing or insufficient permissions/);
+    gritos.mockRestore();
+  });
+
+  /* ── A COTA: o ponto em que isto poderia dar muito errado ─────────
+     O free tem 1 mapa. Se o padrão contasse — ou se a marca de dispensa
+     virasse um documento na coleção de mapas —, o mestre free ficaria sem
+     poder criar o dele. As duas metades do AC-13 são testadas aqui. */
+  it("com o padrão à mostra, o mestre free ainda pode criar o mapa dele", async () => {
+    render(<Atelier uid="mestre-1" plan="free" />);
+
+    const novo = screen.getByRole("button", { name: /novo mapa-múndi/i });
+    expect(novo).not.toHaveAttribute("aria-disabled");
+    expect(screen.queryByText(/limite do plano/i)).not.toBeInTheDocument();
+
+    fireEvent.click(novo);
+    const modal = await screen.findByRole("dialog");
+    fireEvent.change(within(modal).getByLabelText(/^Nome/), { target: { value: "Mar de Ferro" } });
+    fireEvent.click(within(modal).getByRole("button", { name: "Criar mapa" }));
+
+    await waitFor(() => expect(createWorldMap).toHaveBeenCalledWith(
+      "mestre-1", { name: "Mar de Ferro", description: "", plan: "free" },
+    ));
+  });
+
+  it("dispensar o padrão não libera vaga: a cota olha só os mapas do mestre", () => {
+    semPadrao();
+    comMoldes([MOLDE]);
+    render(<Atelier uid="mestre-1" plan="free" />);
+
+    /* 1 mapa próprio no free = no teto, com ou sem a marca. */
+    expect(screen.getByRole("button", { name: /novo mapa-múndi/i }))
+      .toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("o padrão não ocupa a vaga do free nem quando é o único card", () => {
+    render(<Atelier uid="mestre-1" plan="free" />);
+
+    expect(screen.getByText(NOME_PADRAO)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /novo mapa-múndi/i }))
+      .not.toHaveAttribute("aria-disabled");
+  });
+
+  /* ── Cópia ao usar ───────────────────────────────────────────────── */
+  it("usar como base cria um mapa DO MESTRE, com o grafo do padrão semeado", async () => {
+    render(<Atelier uid="mestre-1" plan="free" />);
+
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`^Usar ${NOME_PADRAO}`, "i") }));
+
+    await waitFor(() => expect(createWorldMap).toHaveBeenCalled());
+    const [, dados] = createWorldMap.mock.calls[0];
+    expect(dados.name).toMatch(/cópia/i);
+    expect(dados.origem).toBe("nexus-mapa-padrao");
+
+    await waitFor(() => expect(semearGrafo).toHaveBeenCalled());
+    const [, idNovo, grafo] = semearGrafo.mock.calls[0];
+    expect(idNovo).toBe("novo-1");
+    expect(grafo.nos.length).toBeGreaterThanOrEqual(8);
+    expect(grafo.trilhas.length).toBeGreaterThanOrEqual(8);
+    /* nenhum id do seed sobrevive: a cópia é dela mesma */
+    expect(grafo.nos.every((n) => !String(n.id).startsWith("padrao-"))).toBe(true);
+  });
+
+  it("no teto do plano, usar como base explica em vez de estourar a cota", async () => {
+    comMoldes([MOLDE]);
+    render(<Atelier uid="mestre-1" plan="free" />);
+
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`^Usar ${NOME_PADRAO}`, "i") }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/plano permite/i);
+    expect(createWorldMap).not.toHaveBeenCalled();
+    expect(semearGrafo).not.toHaveBeenCalled();
+  });
+
+  /* ── O padrão aberto ─────────────────────────────────────────────── */
+  it("aberto, o padrão não oferece envio de ilustração (não é documento)", () => {
+    render(<Atelier uid="mestre-1" plan="pro" />);
+    fireEvent.click(screen.getByRole("button", { name: `Abrir mapa-múndi: ${NOME_PADRAO}` }));
+
+    expect(screen.getByRole("heading", { name: NOME_PADRAO })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Escolher imagem" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Renomear" })).not.toBeInTheDocument();
+    /* a exclusão continua ali: a oferta do sistema não é imposta */
+    expect(screen.getByRole("button", { name: "Excluir" })).toBeInTheDocument();
+    expect(screen.getByText(/vetorial/i)).toBeInTheDocument();
+  });
+
+  it("a preferência ilegível deixa o padrão à mostra e diz por quê", () => {
+    const erro = new Error("Missing or insufficient permissions.");
+    erro.code = "permission-denied";
+    useMapaPadraoDispensado.mockReturnValue({ dispensado: false, loading: false, error: erro });
+    render(<Atelier uid="mestre-1" plan="free" />);
+
+    expect(screen.getByText(NOME_PADRAO)).toBeInTheDocument();
+    const avisos = screen.getAllByRole("status").map((el) => el.textContent).join(" ");
+    expect(avisos).toMatch(/preferências do ateliê/i);
   });
 });

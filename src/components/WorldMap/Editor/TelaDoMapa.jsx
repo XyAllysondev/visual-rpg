@@ -10,7 +10,10 @@
  *   ├─ camada 1 · CANVAS ─ ilustração do usuário + TODAS as trilhas ─────┤
  *   │  Centenas de curvas em SVG seriam centenas de nós de DOM que       │
  *   │  ninguém foca. Vão para o canvas, pintadas por `pintarMapa`.       │
- *   ├─ camada 2 · DOM ──── os nós, VIRTUALIZADOS por viewport ───────────┤
+ *   ├─ camada 2 · CANVAS ─ a NÉVOA (F3 · AC-5) ──────────────────────────┤
+ *   │  Acima do fundo (senão não esconde) e abaixo dos nós (senão o      │
+ *   │  mestre não clicaria num lugar coberto). Ver `CamadaDeNevoa.jsx`.  │
+ *   ├─ camada 3 · DOM ──── os nós, VIRTUALIZADOS por viewport ───────────┤
  *   │  Nó é interativo: precisa de foco, teclado, `aria-label` e alvo de │
  *   │  44px. Isso não existe em canvas. Só os nós dentro da caixa visível │
  *   │  viram DOM (`nosVisiveis`), então 500 nós custam o mesmo que 30.    │
@@ -30,6 +33,7 @@ import {
   caixaDoViewport, nosVisiveis, pontoDeControle, pintarMapa, rotuloDoNo,
   CORES_DA_TRILHA,
 } from "./editorUi";
+import CamadaDeNevoa from "./CamadaDeNevoa";
 import { SP, R, FF, FS, FW, T } from "../Atelier/ui";
 
 /** Diâmetro do nó em px de TELA (não de mundo): não encolhe com o zoom. */
@@ -196,6 +200,11 @@ function NoDoMapa({
  * @param {(trilhaId:string, ponto:{x:number,y:number})=>void} props.onCurvarTrilha
  * @param {(trilhaId:string, ponto:{x:number,y:number})=>void} props.onSoltarCurva
  * @param {number} props.altura altura do palco em px.
+ * @param {object|null} props.nevoa props de `CamadaDeNevoa` (máscara, papel, deriva).
+ * @param {{raio:number, modo:'revelar'|'cobrir'}|null} props.pincel pincel de névoa ativo.
+ * @param {(de:{x:number,y:number}, para:{x:number,y:number})=>void} props.onPincel
+ * @param {string|null} props.destaque cor da moldura do palco (marca a Visão do
+ *   Jogador — AC-5: o modo se anuncia por borda, não só por ícone).
  */
 export default function TelaDoMapa({
   nos = [],
@@ -217,6 +226,10 @@ export default function TelaDoMapa({
   onCurvarTrilha,
   onSoltarCurva,
   altura = 560,
+  nevoa = null,
+  pincel = null,
+  onPincel,
+  destaque = null,
 }) {
   const palcoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -225,6 +238,10 @@ export default function TelaDoMapa({
   const arrasteRef = useRef(null);   // arraste de nó em andamento
   const punhoRef = useRef(null);     // arraste do punho da curva
   const cliqueRef = useRef(null);    // origem do gesto, para separar clique de pan
+  const pincelRef = useRef(null);    // traço do pincel de névoa em andamento
+  /* Onde desenhar o anel do pincel, em px de TELA. Fica em estado porque é
+     puramente visual — e some quando o ponteiro sai do palco. */
+  const [anel, setAnel] = useState(null);
 
   const { pan, scale } = camera;
 
@@ -331,12 +348,43 @@ export default function TelaDoMapa({
     try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch { /* noop */ }
   }, [somenteLeitura, ferramenta, paraMundo]);
 
+  /* ── Pincel de névoa (AC-5) ────────────────────────────────────────────
+     O traço é contínuo: cada movimento do ponteiro manda o SEGMENTO entre o
+     ponto anterior e o atual, não um ponto solto. É `revelarAoLongoDe` que
+     transforma isso em cápsula — com pontos soltos, mover o mouse rápido
+     deixaria uma fileira de bolinhas separadas em vez de um traço. */
+  const pincelAtivo = !!pincel && ferramenta === "nevoa" && !somenteLeitura;
+
+  const pincelar = useCallback((e) => {
+    if (!pincelAtivo || !onPincel) return;
+    const agora = paraMundo(e);
+    const anterior = pincelRef.current?.ultimo || agora;
+    pincelRef.current = { ultimo: agora };
+    onPincel(anterior, agora);
+  }, [pincelAtivo, onPincel, paraMundo]);
+
   /* ── Gestos no palco ───────────────────────────────────────────────── */
   const aoDescer = useCallback((e) => {
     cliqueRef.current = { x: e.clientX, y: e.clientY, alvo: e.target };
-  }, []);
+    /* `!e.button` e não `=== 0`: no jsdom o PointerEvent não existe e o botão
+       chega `undefined`. Botão do meio (1) e direito (2) são truthy, então a
+       regra continua sendo "só o botão esquerdo pinta". */
+    if (pincelAtivo && !e.button) {
+      pincelRef.current = null;
+      pincelar(e);
+      try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch { /* noop */ }
+    }
+  }, [pincelAtivo, pincelar]);
 
   const aoMover = useCallback((e) => {
+    if (pincelAtivo) {
+      const tela = camera.eventoParaTela(e);
+      setAnel({ x: tela.x, y: tela.y });
+      if (pincelRef.current) { pincelar(e); return; }
+    } else if (anel) {
+      setAnel(null);
+    }
+
     const arraste = arrasteRef.current;
     if (arraste) {
       const agora = paraMundo(e);
@@ -356,9 +404,10 @@ export default function TelaDoMapa({
       punho.moveu = true;
       if (onCurvarTrilha) onCurvarTrilha(punho.id, agora);
     }
-  }, [paraMundo, onArrastarNo, onCurvarTrilha]);
+  }, [paraMundo, onArrastarNo, onCurvarTrilha, pincelAtivo, pincelar, camera, anel]);
 
   const aoSubir = useCallback(() => {
+    pincelRef.current = null;
     const arraste = arrasteRef.current;
     if (arraste) {
       arrasteRef.current = null;
@@ -384,6 +433,9 @@ export default function TelaDoMapa({
     // Cliques em nó/punho param a propagação; o que chega aqui é o palco.
     if (origem.alvo !== e.currentTarget && e.target !== e.currentTarget) return;
     if (ferramenta === "mao") return;
+    /* Com o pincel de névoa, o clique já foi consumido pelo traço — plantar um
+       lugar ou perder a seleção aqui seria efeito colateral que ninguém pediu. */
+    if (ferramenta === "nevoa") return;
 
     const ponto = paraMundo(e);
 
@@ -434,13 +486,18 @@ export default function TelaDoMapa({
         minHeight: 320,
         borderRadius: R.card,
         background: "radial-gradient(circle at 50% 40%, #171720, #0b0b11 70%)",
-        border: "1px solid rgba(255,255,255,0.10)",
+        /* A moldura colorida É o aviso de que a visão não é a do mestre (AC-5).
+           Ícone aceso num canto se esquece no meio da sessão; moldura em volta
+           do mapa inteiro, não. */
+        border: destaque ? `2px solid ${destaque}` : "1px solid rgba(255,255,255,0.10)",
+        boxShadow: destaque ? `inset 0 0 0 1px ${destaque}33, 0 0 24px ${destaque}22` : undefined,
       }}
       {...juntarHandlers(handlers, {
         onPointerDown: aoDescer,
         onPointerMove: aoMover,
         onPointerUp: aoSubir,
         onPointerCancel: aoSubir,
+        onPointerLeave: () => setAnel(null),
       })}
       onClick={aoClicarPalco}
     >
@@ -469,7 +526,18 @@ export default function TelaDoMapa({
         style={{ width: "100%", height: "100%" }}
       />
 
-      {/* ── Camada 2 · nós (DOM, virtualizados) + punho da curva ──────── */}
+      {/* ── Camada 2 · névoa (canvas) ─────────────────────────────────── */}
+      {nevoa ? (
+        <CamadaDeNevoa
+          {...nevoa}
+          pan={pan}
+          scale={scale}
+          largura={tamanho.largura}
+          altura={tamanho.altura}
+        />
+      ) : null}
+
+      {/* ── Camada 3 · nós (DOM, virtualizados) + punho da curva ──────── */}
       <div className="wme-camada" style={{ transform: transformDaCamera, width: 1, height: 1 }}>
         {visiveis.map((no) => (
           <NoDoMapa
@@ -531,6 +599,29 @@ export default function TelaDoMapa({
           </div>
         ) : null}
       </div>
+
+      {/* ── Anel do pincel de névoa ───────────────────────────────────
+          Mostra o tamanho REAL do pincel antes de ele tocar o mapa. Sem
+          isso, "tamanho ajustável" vira um número abstrato num slider. */}
+      {pincelAtivo && anel ? (
+        <div
+          aria-hidden="true"
+          data-testid="wm-nevoa-anel"
+          style={{
+            position: "absolute",
+            left: anel.x,
+            top: anel.y,
+            width: pincel.raio * 2 * scale,
+            height: pincel.raio * 2 * scale,
+            marginLeft: -pincel.raio * scale,
+            marginTop: -pincel.raio * scale,
+            borderRadius: "50%",
+            border: `1.5px solid ${pincel.modo === "cobrir" ? "rgba(160,170,210,0.85)" : "var(--gold2,var(--gold))"}`,
+            boxShadow: "0 0 0 1px rgba(0,0,0,0.55)",
+            pointerEvents: "none",
+          }}
+        />
+      ) : null}
 
       {/* ── Dica flutuante do estado da ligação ───────────────────────── */}
       {ligandoDe ? (

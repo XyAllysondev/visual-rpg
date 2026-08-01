@@ -70,10 +70,21 @@ eventos escondidos disparam. O mestre orquestra; os jogadores veem e participam.
 - **E** o mapa padrão **não consome a cota** do plano free (senão o mestre free ficaria sem poder
   criar o dele — a cota é 1 mapa)
 - **E** o padrão é **cópia ao usar**: mexer nele não altera o original, e sempre dá para recomeçar
+- **E** o mestre pode **excluir o mapa padrão** da sua lista, como excluiria qualquer outro — a
+  oferta do sistema não pode ser imposta
+  > **Como, sem virar dado:** o padrão continua sendo código (não consome cota, não pesa no
+  > Firestore). "Excluir" grava uma marca de dispensa **no perfil do mestre**, e a lista deixa de
+  > oferecê-lo. Não é exclusão de verdade porque não há o que apagar.
+- **E** a exclusão **não é porta de mão única**: existe um caminho visível para trazer o padrão de
+  volta (no estado vazio da lista e/ou nas opções), porque descartar por engano não pode custar o
+  conteúdo para sempre
+- **E** a marca de dispensa é **por mestre**, não global — um mestre descartar não afeta os outros
 - **E** a ilustração do padrão é **vetorial embutida no app** (SVG), não dado de usuário: não pesa
   no Firestore, não tem o teto de 900 KB e fica nítida em qualquer zoom
 - **Gate:** `mapaPadrao.test.js` — o seed tem ≥8 nós e ≥8 trilhas, nenhuma trilha aponta para nó
-  inexistente, nenhuma autoligação, e ≥1 trilha secreta (para exercitar a mecânica da F4)
+  inexistente, nenhuma autoligação, e ≥1 trilha secreta (para exercitar a mecânica da F4);
+  mais: dispensar esconde o padrão da lista, restaurar o traz de volta, e a marca **não** conta
+  como mapa na cota
 
 ### AC-4: Grafo — nós e trilhas `[F2]`
 - **Dado** um molde aberto no ateliê
@@ -169,8 +180,8 @@ eventos escondidos disparam. O mestre orquestra; os jogadores veem e participam.
 |---|---|---|
 | F0 | Descoberta | ✅ |
 | F1 | Ateliê: sub-abas + CRUD do molde + upload do fundo + cotas | ✅ |
-| **F2** | Render do grafo + editor de nós e trilhas + **mapa padrão** | **em andamento** |
-| F3 | Névoa bitmap + pincel + toggle de visão + deriva | a fazer |
+| F2 | Render do grafo + editor de nós e trilhas + mapa padrão | ✅ |
+| **F3** | Névoa bitmap + pincel + toggle de visão + deriva + dispensar o padrão | **em andamento** |
 | F4 | Levar para a mesa + máquina de estados + viagem + revelação | a fazer |
 | F5 | Eventos, gatilhos, testes de descoberta | a fazer |
 | F6 | Tempo, suprimentos, encontros, acampamento | a fazer |

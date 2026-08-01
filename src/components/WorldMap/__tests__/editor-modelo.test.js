@@ -12,7 +12,8 @@
 
 import {
   FERRAMENTAS, NIVEIS_DE_PERIGO, TRACO_SECRETO,
-  caixaDoViewport, espessuraDaTrilha, ferramentaPorTecla, formatarHoras,
+  caixaDoViewport, espessuraDaTrilha, ferramentaPorTecla, ferramentasDisponiveis,
+  formatarHoras,
   getFerramenta, nomeDaTrilha, nosVisiveis, pintarMapa, pontoDeControle,
   rotuloDaTrilha, rotuloDoNo, rotuloDoPerigo, usaCartografiaPadrao,
 } from "../Editor/editorUi";
@@ -239,10 +240,22 @@ describe("pintura das trilhas no canvas", () => {
  *  4 · FERRAMENTAS E ATALHOS
  * ════════════════════════════════════════════════════════════════════ */
 describe("ferramentas", () => {
-  it("são as quatro do AC-4, cada uma com atalho único", () => {
-    expect(FERRAMENTAS.map((f) => f.id)).toEqual(["selecionar", "no", "trilha", "mao"]);
+  it("são as quatro do grafo (AC-4) mais o pincel de névoa (AC-5), com atalho único", () => {
+    expect(FERRAMENTAS.map((f) => f.id)).toEqual(["selecionar", "no", "trilha", "mao", "nevoa"]);
     const atalhos = FERRAMENTAS.map((f) => f.atalho);
     expect(new Set(atalhos).size).toBe(atalhos.length);
+  });
+
+  it("o pincel de névoa só é oferecido com a névoa ligada", () => {
+    /* Oferecer um pincel que não pinta nada seria mentira — e em somente
+       leitura (mapa padrão) sobram só as duas que não escrevem no molde. */
+    expect(ferramentasDisponiveis({ comNevoa: true }).map((f) => f.id))
+      .toEqual(["selecionar", "no", "trilha", "mao", "nevoa"]);
+    expect(ferramentasDisponiveis({ comNevoa: false }).map((f) => f.id))
+      .toEqual(["selecionar", "no", "trilha", "mao"]);
+    expect(ferramentasDisponiveis({ somenteLeitura: true, comNevoa: true }).map((f) => f.id))
+      .toEqual(["selecionar", "mao"]);
+    expect(ferramentasDisponiveis().map((f) => f.id)).toEqual(["selecionar", "no", "trilha", "mao"]);
   });
 
   it("toda ferramenta explica o que faz, em português", () => {

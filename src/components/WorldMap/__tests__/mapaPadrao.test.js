@@ -22,9 +22,14 @@ import {
   MAPA_PADRAO_CONSOME_COTA,
   MAPA_PADRAO_LARGURA,
   MAPA_PADRAO_ALTURA,
+  CAMPO_DISPENSA,
   construirMapaPadrao,
   clonarMapaPadrao,
   ehMapaPadrao,
+  moldeDoMapaPadrao,
+  padraoDispensado,
+  listaComPadrao,
+  contarParaCota,
 } from "../model/mapaPadrao";
 import { canCreateMap } from "../model/quotas";
 import { validarGrafo, tipoConhecido } from "../model/graph";
@@ -325,6 +330,113 @@ describe("mapa padrão — cópia ao usar (clonarMapaPadrao)", () => {
     expect(clone.mapa.name).not.toBe(padrao.mapa.name);
     expect(clone.mapa.name).toContain("cópia");
     expect(clone.mapa.demo).toBe(false);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════
+ *  DISPENSAR E RESTAURAR O PADRÃO  (AC-13)
+ *  -----------------------------------------------------------------------
+ *  *"o mestre pode excluir o mapa padrão da sua lista, como excluiria
+ *  qualquer outro"*, *"a exclusão não é porta de mão única"*, *"a marca é por
+ *  mestre"* e *"a marca não conta como mapa na cota"*.
+ *
+ *  Aqui mora a metade PURA do gate: dispensar esconde, restaurar traz de
+ *  volta, e a contagem da cota ignora o padrão. A metade de tela está em
+ *  `atelier-render.test.js`; a de persistência, no `worldMapStore`.
+ * ══════════════════════════════════════════════════════════════════════ */
+describe("mapa padrão — dispensa (AC-13)", () => {
+  const MEU = { id: "m1", name: "As Terras Partidas" };
+  const OUTRO = { id: "m2", name: "Vale do Sino" };
+
+  test("moldeDoMapaPadrao devolve o card sem montar o grafo, e sempre novo", () => {
+    const a = moldeDoMapaPadrao();
+    const b = moldeDoMapaPadrao();
+    expect(a.id).toBe(MAPA_PADRAO_ID);
+    expect(a).toEqual(b);
+    expect(a).not.toBe(b);
+    a.name = "ESTRAGADO";
+    expect(moldeDoMapaPadrao().name).not.toBe("ESTRAGADO");
+  });
+
+  test("só `true` literal dispensa — perfil ausente ou lixo mantém a oferta", () => {
+    expect(padraoDispensado({ [CAMPO_DISPENSA]: true })).toBe(true);
+    expect(padraoDispensado({ [CAMPO_DISPENSA]: false })).toBe(false);
+    expect(padraoDispensado({})).toBe(false);
+    expect(padraoDispensado(null)).toBe(false);
+    expect(padraoDispensado(undefined)).toBe(false);
+    /* o lado seguro é OFERECER: valor estranho não pode esconder conteúdo */
+    expect(padraoDispensado({ [CAMPO_DISPENSA]: "sim" })).toBe(false);
+    expect(padraoDispensado({ [CAMPO_DISPENSA]: 1 })).toBe(false);
+    expect(padraoDispensado("true")).toBe(false);
+  });
+
+  test("sem a marca, a lista oferece o padrão — por último, como oferta", () => {
+    const lista = listaComPadrao([MEU, OUTRO], { dispensado: false });
+    expect(lista).toHaveLength(3);
+    expect(lista.map((m) => m.id)).toEqual([MEU.id, OUTRO.id, MAPA_PADRAO_ID]);
+  });
+
+  test("com a marca, a lista deixa de oferecê-lo e nada mais muda", () => {
+    const lista = listaComPadrao([MEU, OUTRO], { dispensado: true });
+    expect(lista.map((m) => m.id)).toEqual([MEU.id, OUTRO.id]);
+  });
+
+  test("dispensar e restaurar são exatamente o inverso um do outro", () => {
+    const escondida = listaComPadrao([MEU], { dispensado: true });
+    const devolvida = listaComPadrao([MEU], { dispensado: false });
+    expect(escondida.some((m) => ehMapaPadrao(m.id))).toBe(false);
+    expect(devolvida.some((m) => ehMapaPadrao(m.id))).toBe(true);
+    /* a volta é idêntica à oferta original: nada se perde no caminho */
+    expect(devolvida.find((m) => ehMapaPadrao(m.id))).toEqual(moldeDoMapaPadrao());
+  });
+
+  test("mestre sem mapa nenhum e sem a marca vê só o padrão", () => {
+    expect(listaComPadrao([], {}).map((m) => m.id)).toEqual([MAPA_PADRAO_ID]);
+    expect(listaComPadrao(undefined, {})).toHaveLength(1);
+    expect(listaComPadrao([], { dispensado: true })).toEqual([]);
+  });
+
+  test("não duplica o padrão se um documento com o id reservado aparecer", () => {
+    const intruso = { id: MAPA_PADRAO_ID, name: "Falsificação" };
+    const lista = listaComPadrao([MEU, intruso], { dispensado: false });
+    expect(lista.filter((m) => ehMapaPadrao(m.id))).toHaveLength(1);
+    expect(lista.find((m) => ehMapaPadrao(m.id)).name).not.toBe("Falsificação");
+  });
+
+  test("a lista devolvida é nova — a do mestre não é tocada", () => {
+    const minhas = [MEU];
+    const lista = listaComPadrao(minhas, { dispensado: false });
+    expect(lista).not.toBe(minhas);
+    expect(minhas).toHaveLength(1);
+  });
+
+  /* ── A cota: o motivo de tudo isto existir ─────────────────────────
+     O free tem 1 mapa. Se o padrão contasse, o mestre free nasceria sem
+     poder criar o dele — e a dispensa viraria uma forma de comprar vaga. */
+  test("o padrão não conta na cota, esteja ou não na lista", () => {
+    expect(contarParaCota(listaComPadrao([], { dispensado: false }))).toBe(0);
+    expect(contarParaCota(listaComPadrao([], { dispensado: true }))).toBe(0);
+    expect(contarParaCota(listaComPadrao([MEU], { dispensado: false }))).toBe(1);
+    expect(contarParaCota(listaComPadrao([MEU], { dispensado: true }))).toBe(1);
+    expect(contarParaCota(undefined)).toBe(0);
+  });
+
+  test("com o padrão à mostra, o mestre free ainda pode criar o dele", () => {
+    const lista = listaComPadrao([], { dispensado: false });
+    expect(lista).toHaveLength(1);              // há um card na tela…
+    expect(canCreateMap("free", contarParaCota(lista)).ok).toBe(true); // …e a vaga está livre
+  });
+
+  test("dispensar não compra vaga: quem já tem 1 mapa no free continua no teto", () => {
+    const comMapa = listaComPadrao([MEU], { dispensado: true });
+    expect(canCreateMap("free", contarParaCota(comMapa)).ok).toBe(false);
+  });
+
+  test("a marca é um campo de perfil, não um mapa — nome estável para a persistência", () => {
+    /* Se este nome mudar, a marca de todo mestre que já dispensou some e o
+       padrão reaparece sozinho. É contrato com o Firestore, não detalhe. */
+    expect(CAMPO_DISPENSA).toBe("mapaPadraoDispensado");
+    expect(MAPA_PADRAO_CONSOME_COTA).toBe(false);
   });
 });
 
