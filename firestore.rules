@@ -224,15 +224,27 @@ service cloud.firestore {
         // O JOGADOR também escreve aqui — mas só o movimento (AC-8: "o jogador
         // clica em nó adjacente por trilha revelada para viajar"). A lista de
         // campos é o espelho de `CAMPOS_DO_MOVIMENTO` no `mesaStore.js`.
+        //
+        // `viagem` entrou na lista na F7 (AC-10): é o percurso em curso
+        // (`{id, trilhaId, deId, paraId, progresso, iniciadaEm, horas}`), e quem
+        // viaja é quem o grava — inclusive o jogador. Não abre superfície nova:
+        // a trilha e os dois nós já estão em `revealed/` para ele ter podido
+        // clicar, e escrever uma viagem falsa é exatamente tão possível quanto
+        // já era escrever um `currentNodeId` falso.
         match /party/{docId} {
           allow read: if request.auth != null && isMember(campaignId);
           allow write: if request.auth != null
             && (donoDaInstancia(instanceId) || isMaster(campaignId));
           allow update: if request.auth != null && isMember(campaignId)
-            && onlyUpdatingFields(['currentNodeId', 'x', 'y', 'movedBy', 'updatedAt']);
+            && onlyUpdatingFields(['currentNodeId', 'x', 'y', 'movedBy', 'viagem', 'updatedAt']);
         }
 
-        // A máscara de névoa daquele grupo (formato da F3, `model/fogMask.js`).
+        // A névoa daquele grupo: a base consolidada em `fog/estado` e os DELTAS
+        // da viagem em `fog/d_*` (F7 · AC-10 — "a névoa trafega em deltas, com
+        // flush consolidado"). Os dois são o mesmo formato da F3
+        // (`model/fogMask.js`) e caem na mesma regra de propósito: `{docId}` já
+        // cobre a coleção inteira, então o delta não custa access call nenhuma e
+        // o teto de 20 por lote continua onde estava.
         match /fog/{docId} {
           allow read: if request.auth != null && isMember(campaignId);
           allow write: if request.auth != null

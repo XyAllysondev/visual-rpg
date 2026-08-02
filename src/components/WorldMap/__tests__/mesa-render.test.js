@@ -28,9 +28,15 @@ jest.mock("../mesaStore", () => ({
   publicarRevelacao: jest.fn(),
   moverGrupo: jest.fn(),
   atualizarParty: jest.fn(),
-  salvarFogDaMesa: jest.fn(),
   getFundoDaMesa: jest.fn(),
   mestreDaInstancia: jest.fn(),
+  atualizarViagem: jest.fn(),
+  concluirViagem: jest.fn(),
+  projecaoDaViagem: jest.fn(),
+  reservarPendencia: jest.fn(),
+  resolverPendencia: jest.fn(),
+  salvarDeltaDaNevoa: jest.fn(),
+  consolidarNevoaDaMesa: jest.fn(),
   /* F5: a mesa passou a ler o painel do mestre (`gm/estado`) e a marcar nele
      o que já disparou. O dublê acompanha; o gate dos eventos é
      `evento-mesa.test.js`. */
@@ -46,8 +52,12 @@ jest.mock("../worldMapStore", () => ({
 import MesaDoMapaMundi from "../Mesa";
 import {
   useInstancias, useReveladoNaMesa, useParty, useFogDaMesa,
-  publicarRevelacao, moverGrupo, atualizarParty, salvarFogDaMesa, getFundoDaMesa,
+  publicarRevelacao, moverGrupo, atualizarParty, getFundoDaMesa,
   mestreDaInstancia, useGmDaMesa, atualizarGm,
+} from "../mesaStore";
+import {
+  atualizarViagem, concluirViagem, projecaoDaViagem, reservarPendencia, resolverPendencia,
+  salvarDeltaDaNevoa, consolidarNevoaDaMesa,
 } from "../mesaStore";
 import { useGrafo, useEventos } from "../worldMapStore";
 import { criarMascara, contarReveladas } from "../model/fogMask";
@@ -146,8 +156,18 @@ beforeEach(() => {
   publicarRevelacao.mockResolvedValue({ gravados: 2, pulados: 0 });
   moverGrupo.mockResolvedValue(undefined);
   atualizarParty.mockResolvedValue(undefined);
-  salvarFogDaMesa.mockResolvedValue({ bytes: 10 });
   getFundoDaMesa.mockResolvedValue(null);
+  /* ── F7 (tempo real) ───────────────────────────────────────────────
+     A chegada agora fecha `party.viagem` por transação e a decisão do
+     encontro é reivindicada antes de publicar. Sem estes dublês nada disso
+     resolve, e a mesa para na primeira estrada. */
+  concluirViagem.mockResolvedValue({ aplicou: true, motivo: "" });
+  atualizarViagem.mockResolvedValue(undefined);
+  projecaoDaViagem.mockImplementation((v, extra = {}) => ({ ...(v || {}), ...extra }));
+  reservarPendencia.mockImplementation(async (_c, _i, p) => ({ reservada: true, motivo: "", pendencia: p }));
+  resolverPendencia.mockImplementation(async () => ({ decidida: true, motivo: "", pendencia: null }));
+  salvarDeltaDaNevoa.mockResolvedValue({ id: "d_000001_teste", bytes: 12 });
+  consolidarNevoaDaMesa.mockResolvedValue({ bytes: 120, apagados: 0 });
 });
 
 afterEach(() => { jest.restoreAllMocks(); });
@@ -314,12 +334,15 @@ describe("a viagem", () => {
     expect(conteudo.nos.find((x) => x.no.id === "n4")).toBeUndefined();
     expect(conteudo.trilhas.find((x) => x.trilha.id === "t3")).toBeUndefined();
 
-    await waitFor(() => expect(atualizarParty).toHaveBeenCalledWith(
-      CAMPANHA, INSTANCIA,
+    /* Desde a F7 o preço da estrada viaja DENTRO do fecho da viagem: uma
+       transação que confere o id do percurso e só paga uma vez, mesmo com duas
+       abas do mestre vendo a mesma chegada (AC-10). */
+    await waitFor(() => expect(concluirViagem).toHaveBeenCalledWith(
+      CAMPANHA, INSTANCIA, expect.any(String),
       expect.objectContaining({ inGameDatetime: { dia: 1, hora: 6, minuto: 0 } }),
     ));
     // Seis horas de estrada custam um quarto de ração por dia de consumo.
-    expect(atualizarParty.mock.calls[0][2].supplies).toBeCloseTo(4.75, 5);
+    expect(concluirViagem.mock.calls.at(-1)[3].supplies).toBeCloseTo(4.75, 5);
   });
 
   it("o jogador NÃO publica revelação — só o mestre alcança o molde (design §3)", async () => {
@@ -382,7 +405,10 @@ describe("o console do mestre", () => {
     fireEvent.click(screen.getByLabelText(/Lugar Morro do Fogo/i));
     fireEvent.click(screen.getByTestId("wmm-revelar-agora"));
 
-    await waitFor(() => expect(salvarFogDaMesa).toHaveBeenCalled());
+    /* Revelação manual é ato humano e esparso: consolida (grava o bitmap
+       inteiro e limpa os deltas). Quem trafega em delta é a VIAGEM — o gate
+       disso é `f7-tempo-real.test.js`. */
+    await waitFor(() => expect(consolidarNevoaDaMesa).toHaveBeenCalled());
     expect(contarReveladas(mascara)).toBeGreaterThan(0);
   });
 

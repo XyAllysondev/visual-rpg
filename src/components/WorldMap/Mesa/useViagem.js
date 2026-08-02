@@ -27,11 +27,28 @@
  *  a chegada acontece igual. Quem pediu menos movimento pediu menos
  *  movimento, não menos jogo.
  *
+ *  ── PARAR NO MEIO DA ESTRADA (F7) ───────────────────────────────────
+ *  `pausar()` desliga o laço mas **mantém a viagem**: o marcador fica onde
+ *  parou e o grupo passa a estar *em trânsito* — que é o estado que o
+ *  acampamento da F6 exigia e nunca teve (`podeAcampar({viajando:true})`
+ *  só era verdade durante os poucos segundos da animação). `retomar()`
+ *  religa o laço de onde estava.
+ *
+ *  Daí a separação entre `viagem` (existe um percurso em curso) e
+ *  `viajando` (o marcador está se movendo AGORA). Quem desabilita botão
+ *  olha `viajando`; quem pergunta "o grupo está entre dois lugares?" olha
+ *  `viagem`.
+ *
+ *  ── RETOMAR DEPOIS DE UM RECARREGAMENTO (F7 · AC-10) ────────────────
+ *  `comecar(..., { progresso })` começa a viagem já andada. É o que faz o
+ *  F5 no meio da estrada devolver o grupo onde ele estava, em vez de
+ *  teleportá-lo para o destino ou fazê-lo recomeçar o trecho.
+ *
  *  ── DESMONTAGEM ─────────────────────────────────────────────────────
  *  O quadro pendente é cancelado no unmount, e um `vivo` de guarda impede
  *  que um `aoChegar` em voo escreva no Firestore depois que a tela morreu.
  *
- *  Gate: `__tests__/mesa-viagem.test.js`.
+ *  Gate: `__tests__/viagem.test.js` e `__tests__/f7-tempo-real.test.js`.
  * ════════════════════════════════════════════════════════════════════ */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -61,10 +78,11 @@ export function movimentoReduzido() {
  *   preferência do sistema).
  * @returns {{viagem:object|null, viajando:boolean,
  *            comecar:(grafo:object,deId:string,paraId:string,trilha?:object,extra?:object)=>boolean,
- *            cancelar:()=>void}}
+ *            pausar:()=>void, retomar:()=>boolean, cancelar:()=>void}}
  */
 export default function useViagem({ aoAndar, aoChegar, aoFalhar, reduzido } = {}) {
   const [viagem, setViagem] = useState(null);
+  const [andando, setAndando] = useState(false);
   const quadro = useRef(0);
   const curso = useRef(null);   // { viagem, velocidade, ultimo }
   const vivo = useRef(true);
@@ -78,12 +96,15 @@ export default function useViagem({ aoAndar, aoChegar, aoFalhar, reduzido } = {}
   chegarRef.current = aoChegar;
   falharRef.current = aoFalhar;
 
-  const parar = useCallback(() => {
+  /** Desliga o laço. `manter` preserva o curso para um `retomar()` depois. */
+  const parar = useCallback((manter = false) => {
     if (quadro.current && typeof cancelAnimationFrame === "function") {
       cancelAnimationFrame(quadro.current);
     }
     quadro.current = 0;
-    curso.current = null;
+    if (!manter) curso.current = null;
+    else if (curso.current) curso.current.ultimo = null;   // o dt não conta a pausa
+    setAndando(false);
   }, []);
 
   useEffect(() => {
@@ -118,6 +139,22 @@ export default function useViagem({ aoAndar, aoChegar, aoFalhar, reduzido } = {}
     quadro.current = requestAnimationFrame(passo);
   }, [parar]);
 
+  /** Para o marcador SEM encerrar a viagem: o grupo fica em trânsito (F7). */
+  const pausar = useCallback(() => {
+    if (!quadro.current) return;
+    parar(true);
+  }, [parar]);
+
+  /** Religa o laço de onde a pausa deixou. `false` se não havia o que retomar. */
+  const retomar = useCallback(() => {
+    const atual = curso.current;
+    if (!atual || quadro.current || !vivo.current) return false;
+    atual.ultimo = null;
+    setAndando(true);
+    quadro.current = requestAnimationFrame(passo);
+    return true;
+  }, [passo]);
+
   /**
    * Começa a viagem. Devolve `false` (e chama `aoFalhar`) quando o grafo não
    * comporta o percurso — a recusa vem em português do `model/viagem.js`.
@@ -130,6 +167,15 @@ export default function useViagem({ aoAndar, aoChegar, aoFalhar, reduzido } = {}
     let inicial;
     try {
       inicial = { ...iniciarViagem(grafo, deId, paraId, trilha), ...(extra || {}) };
+      /* Retomada (F7): `extra.progresso` chega de `party.viagem`, e a posição
+         tem de ser recalculada ANTES do primeiro quadro — senão o marcador
+         pisca uma vez no começo da estrada antes de saltar para onde o grupo
+         realmente está. `avancarViagem(_, 0)` faz exatamente isso e nada mais:
+         ele não anda, só resolve a posição do progresso informado. */
+      if (Number.isFinite(extra?.progresso) && extra.progresso > 0) {
+        inicial = { ...avancarViagem(inicial, 0), ...(extra || {}) };
+        inicial.chegou = inicial.progresso >= 1;
+      }
     } catch (err) {
       if (falharRef.current) falharRef.current(err?.message || "Não deu para começar a viagem.");
       return false;
@@ -156,10 +202,13 @@ export default function useViagem({ aoAndar, aoChegar, aoFalhar, reduzido } = {}
       ultimo: null,
     };
     setViagem(inicial);
+    setAndando(true);
     if (andarRef.current) andarRef.current(inicial);
     quadro.current = requestAnimationFrame(passo);
     return true;
   }, [parar, passo, reduzido]);
 
-  return { viagem, viajando: !!viagem, comecar, cancelar };
+  /* `viagem` é "existe um percurso em curso" (inclusive parado, em trânsito);
+     `viajando` é "o marcador está andando AGORA". Ver o cabeçalho. */
+  return { viagem, viajando: andando && !!viagem, emTransito: !!viagem && !andando, comecar, pausar, retomar, cancelar };
 }

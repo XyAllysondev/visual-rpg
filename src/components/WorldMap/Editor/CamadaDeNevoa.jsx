@@ -51,7 +51,9 @@
  *      `deriva` (design §5.4: "nada anima enquanto o mestre edita no ateliê").
  * ════════════════════════════════════════════════════════════════════ */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useMovimentoReduzido } from "./animacao";
+import { CICLO_DA_DERIVA } from "./nevoaStyles";
 
 /** As opacidades do AC-5, num lugar só. */
 export const OPACIDADE = {
@@ -72,8 +74,9 @@ export const OPACIDADE = {
  */
 export const COR_DA_NEVOA = { r: 11, g: 14, b: 24 };
 
-/** Ciclo da deriva, em segundos (design §5.4). */
-export const CICLO_DA_DERIVA = 40;
+/* Ciclo da deriva, em segundos (design §5.4). Mora junto do CSS que ele
+   comanda — reexportado aqui porque é daqui que a tela o consome. */
+export { CICLO_DA_DERIVA } from "./nevoaStyles";
 
 /** Nome do papel → só dois, e o padrão é o mais protetor. */
 const ehMestre = (papel) => papel === "mestre";
@@ -194,16 +197,6 @@ export function pintarNevoa(ctx, opcoes = {}) {
   return resultado;
 }
 
-/** `prefers-reduced-motion: reduce` está ligado? (jsdom sem matchMedia → não) */
-function movimentoReduzido() {
-  try {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
-    return !!window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  } catch {
-    return false;
-  }
-}
-
 /* ════════════════════════════════════════════════════════════════════
  *  O COMPONENTE
  * ════════════════════════════════════════════════════════════════════ */
@@ -237,7 +230,9 @@ export default function CamadaDeNevoa({
   const revisao = mascara?.revisao || 0;
   const revisaoAtual = mascaraAtual?.revisao || 0;
 
-  const reduzido = useMemo(movimentoReduzido, []);
+  /* Reativo: quem liga "reduzir movimento" no sistema com o mapa aberto vê a
+     deriva sumir do DOM na hora, sem recarregar (ver `Editor/animacao.js`). */
+  const reduzido = useMovimentoReduzido();
 
   /* ── Nada anima fora do viewport (AC-11) ───────────────────────────── */
   useEffect(() => {

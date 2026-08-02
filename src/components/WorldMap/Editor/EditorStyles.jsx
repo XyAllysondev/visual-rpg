@@ -24,6 +24,8 @@
  *  sozinho, e tudo some com `prefers-reduced-motion`.
  * ════════════════════════════════════════════════════════════════════ */
 
+import { CSS_DA_NEVOA } from "./nevoaStyles";
+
 export function EditorStyles() {
   return (
     <style>{`
@@ -79,34 +81,10 @@ export function EditorStyles() {
                             100%{transform:scale(1);opacity:1} }
   .wme-no[data-novo="sim"] { animation:wme-plantado 340ms cubic-bezier(.16,1,.3,1) both; }
 
-  /* ── NÉVOA (F3 · AC-5 e AC-11) ───────────────────────────────────── */
-  /* A camada não recebe evento: quem clica num lugar coberto é o mestre, e
-     ele precisa conseguir — o segredo é estrutural, não uma cortina por cima
-     (ver o cabeçalho de CamadaDeNevoa.jsx). */
-  .wmf-nevoa { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
-
-  /* A DERIVA (design §5.4, movimento 1). Só transform — composto na GPU, sem
-     uma linha de JavaScript por quadro. O tamanho de cada camada divide o
-     deslocamento (520 = 2×260 = 4×130), então o ciclo fecha sem emenda.
-     O soft-light com tons claros levanta fiapos de luz sobre o grafite da
-     névoa e é quase identidade sobre a ilustração já revelada. */
-  .wmf-deriva {
-    position:absolute; inset:-640px; pointer-events:none;
-    opacity:.42; mix-blend-mode:soft-light; will-change:transform;
-    background-repeat:repeat;
-    background-size:520px 520px, 260px 260px, 130px 130px;
-    background-image:
-      radial-gradient(closest-side at 30% 38%, rgba(196,212,246,.55), rgba(196,212,246,0)),
-      radial-gradient(closest-side at 70% 24%, rgba(148,168,214,.40), rgba(148,168,214,0)),
-      radial-gradient(closest-side at 45% 78%, rgba(112,134,186,.30), rgba(112,134,186,0));
-    animation-name:wmf-deriva;
-    animation-timing-function:linear;
-    animation-iteration-count:infinite;
-  }
-  @keyframes wmf-deriva {
-    from { transform:translate3d(0,0,0); }
-    to   { transform:translate3d(-520px,520px,0); }
-  }
+  /* ── NÉVOA E DERIVA (F3 · AC-5 e AC-11) ──────────────────────────── */
+  /* Mora em 'nevoaStyles.js' porque a mesa monta a MESMA névoa com outra
+     folha de estilo — ver o cabeçalho de lá. */
+  ${CSS_DA_NEVOA}
 
   /* ── SELO DE SEGREDO ─────────────────────────────────────────────── */
   /* O que é secreto tem de saltar aos olhos: é a informação que a F4 vai
@@ -128,10 +106,8 @@ export function EditorStyles() {
     .wme-no, .wme-no:hover, .wme-no:active { transition:none; transform:none; }
     .wme-no[data-novo="sim"] { animation:none; }
     .wme-painel { animation:none; }
-    /* AC-11: quem pediu menos movimento não recebe a deriva. O componente já
-       não monta o elemento (matchMedia), e o CSS é o cinto de segurança para
-       o caso de a preferência mudar com a tela aberta. */
-    .wmf-deriva { animation:none; display:none; }
+    /* A deriva é cortada no bloco de 'nevoaStyles.js', junto com o resto da
+       névoa — não se repete aqui para não haver duas verdades. */
   }
     `}</style>
   );

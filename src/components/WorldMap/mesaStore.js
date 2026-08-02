@@ -92,12 +92,13 @@
 import { useEffect, useState } from "react";
 import {
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, query, where,
-  onSnapshot, serverTimestamp, writeBatch,
+  onSnapshot, serverTimestamp, writeBatch, runTransaction,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import {
   cabeNoDocumento, criarMascara, desserializar, serializar, TETO_DA_MASCARA_BYTES,
 } from "./model/fogMask";
+import { ehDelta, idDoDelta, mesclarRecebidos } from "./model/fogDelta";
 import { construirMapaPadrao, ehMapaPadrao, moldeDoMapaPadrao } from "./model/mapaPadrao";
 import { ESTADOS_NO, ESTADOS_TRILHA } from "./model/revelacao";
 import { getBackground, NODES, EDGES, USERS, WORLDMAPS as WORLDMAPS_DO_ATELIE } from "./worldMapStore";
@@ -153,7 +154,9 @@ const instanciaRef = (cid, iid) => doc(db, CAMPAIGNS, cid, WORLDMAPS, iid);
 const reveladoCol = (cid, iid) => collection(db, CAMPAIGNS, cid, WORLDMAPS, iid, REVEALED);
 const reveladoRef = (cid, iid, docId) => doc(db, CAMPAIGNS, cid, WORLDMAPS, iid, REVEALED, docId);
 const partyRef = (cid, iid) => doc(db, CAMPAIGNS, cid, WORLDMAPS, iid, PARTY, ESTADO_DOC_ID);
+const fogCol = (cid, iid) => collection(db, CAMPAIGNS, cid, WORLDMAPS, iid, FOG);
 const fogRef = (cid, iid) => doc(db, CAMPAIGNS, cid, WORLDMAPS, iid, FOG, ESTADO_DOC_ID);
+const deltaRef = (cid, iid, docId) => doc(db, CAMPAIGNS, cid, WORLDMAPS, iid, FOG, docId);
 const gmRef = (cid, iid) => doc(db, CAMPAIGNS, cid, WORLDMAPS, iid, GM, ESTADO_DOC_ID);
 const fundoDaMesaRef = (cid, iid) => doc(db, CAMPAIGNS, cid, WORLDMAPS, iid, MEDIA, FUNDO_DOC_ID);
 
@@ -655,6 +658,11 @@ export async function levarParaMesa(uid, mapId, campaignId, opcoes = {}) {
 async function limparProgresso(cid, instanceId) {
   const revelados = await getDocs(reveladoCol(cid, instanceId));
   const ops = revelados.docs.map((d) => ({ type: "delete", ref: d.ref }));
+  /* A névoa é uma COLEÇÃO desde a F7 (base consolidada + deltas pendentes).
+     Apagar só `fog/estado` deixaria os deltas órfãos, e a mesa recomeçada
+     nasceria com pedaços do mapa antigo já abertos. */
+  const nevoa = await getDocs(fogCol(cid, instanceId)).catch(() => ({ docs: [] }));
+  nevoa.docs.forEach((d) => ops.push({ type: "delete", ref: d.ref }));
   ops.push({ type: "delete", ref: partyRef(cid, instanceId) });
   ops.push({ type: "delete", ref: fogRef(cid, instanceId) });
   ops.push({ type: "delete", ref: gmRef(cid, instanceId) });
@@ -926,7 +934,63 @@ export async function sincronizarMolde(uid, mapId, campaignId, instanceId) {
  * `firestore.rules`. Mudou aqui, muda lá — senão o movimento do jogador passa
  * a ser negado pelo servidor sem nenhuma pista na tela.
  */
-export const CAMPOS_DO_MOVIMENTO = ["currentNodeId", "x", "y", "movedBy", "updatedAt"];
+export const CAMPOS_DO_MOVIMENTO = ["currentNodeId", "x", "y", "movedBy", "viagem", "updatedAt"];
+
+/**
+ * O estado da VIAGEM EM CURSO, gravado em `party.viagem` (F7 · AC-10).
+ *
+ * Por que ele existe: até a F6 a viagem só vivia na memória do cliente que a
+ * começou. Recarregar a página no meio dela perdia o percurso, o outro cliente
+ * refazia o trajeto por conta própria a partir de `currentNodeId`, e "acampar
+ * em trânsito" era letra morta porque ninguém sabia dizer que o grupo estava
+ * *entre* dois lugares.
+ *
+ * Por que ele cabe na regra do JOGADOR (está em `CAMPOS_DO_MOVIMENTO`): quem
+ * viaja é quem grava, e o jogador também viaja (AC-8). Nada aqui é segredo —
+ * a trilha e os dois nós já estão em `revealed/` para ele poder tê-la clicado.
+ * Um jogador mal-intencionado consegue escrever uma viagem falsa exatamente
+ * como já conseguia escrever um `currentNodeId` falso; a superfície não muda.
+ *
+ * `id` é o que torna a CHEGADA idempotente: quem conclui grava `viagem: null`
+ * dentro de uma transação que confere o id, então duas abas do mestre não
+ * adiantam o relógio duas vezes pela mesma estrada (ver `concluirViagem`).
+ */
+export const CAMPOS_DA_VIAGEM = [
+  "id", "trilhaId", "deId", "paraId", "progresso", "iniciadaEm", "horas", "porQuem",
+];
+
+/**
+ * Monta o documento da viagem em curso, sem campo a mais nem a menos.
+ *
+ * Enumera o que sai, como as projeções do AC-1 — não porque haja segredo aqui,
+ * mas porque `party` é lido pelo grupo inteiro e um `...viagem` espalhado
+ * levaria para lá o objeto de animação completo (a polilinha amostrada, que
+ * pode ter centenas de pontos, a cada gravação).
+ *
+ * @param {object} viagem a viagem do `model/viagem.js`, ou o documento já pronto.
+ * @param {{id?:string, iniciadaEm?:number, porQuem?:string, progresso?:number}} [extra]
+ * @returns {object|null} `null` quando não há viagem descritível.
+ */
+export function projecaoDaViagem(viagem, extra = {}) {
+  if (!viagem || typeof viagem !== "object") return null;
+  const paraId = texto(viagem.paraId);
+  const deId = texto(viagem.deId);
+  if (!paraId || !deId) return null;
+
+  const progresso = Number.isFinite(extra.progresso) ? extra.progresso : viagem.progresso;
+  return {
+    id: texto(extra.id) || texto(viagem.id) || `${deId}>${paraId}`,
+    trilhaId: texto(viagem.trilhaId) || null,
+    deId,
+    paraId,
+    progresso: Math.min(1, Math.max(0, Number.isFinite(progresso) ? progresso : 0)),
+    iniciadaEm: Number.isFinite(extra.iniciadaEm)
+      ? extra.iniciadaEm
+      : (Number.isFinite(viagem.iniciadaEm) ? viagem.iniciadaEm : null),
+    horas: numero(viagem.horas, 0),
+    porQuem: texto(extra.porQuem) || texto(viagem.porQuem) || null,
+  };
+}
 
 /**
  * Move o marcador do grupo (AC-8: *"o jogador clica em nó adjacente por trilha
@@ -938,7 +1002,10 @@ export const CAMPOS_DO_MOVIMENTO = ["currentNodeId", "x", "y", "movedBy", "updat
  *
  * @param {string} campaignId
  * @param {string} instanceId
- * @param {{nodeId?:string, x:number, y:number, quem?:string}} destino
+ * `viagem` (F7) é o estado do percurso em curso. Ausente, o campo não é tocado;
+ * `null` explícito o apaga (é como a chegada e o cancelamento fecham a viagem).
+ *
+ * @param {{nodeId?:string, x:number, y:number, quem?:string, viagem?:object|null}} destino
  */
 export async function moverGrupo(campaignId, instanceId, destino = {}) {
   const cid = exigir(campaignId, "Informe em qual campanha o grupo está.");
@@ -946,12 +1013,82 @@ export async function moverGrupo(campaignId, instanceId, destino = {}) {
   if (!Number.isFinite(destino.x) || !Number.isFinite(destino.y)) {
     throw new Error("O grupo precisa de coordenadas x e y numéricas para se mover.");
   }
-  await updateDoc(partyRef(cid, iid), {
+  const data = {
     currentNodeId: texto(destino.nodeId) || null,
     x: destino.x,
     y: destino.y,
     movedBy: texto(destino.quem) || null,
     updatedAt: serverTimestamp(),
+  };
+  if ("viagem" in destino) data.viagem = destino.viagem || null;
+  await updateDoc(partyRef(cid, iid), data);
+}
+
+/**
+ * Grava só o andamento da viagem — o "onde o grupo está AGORA, entre dois
+ * lugares" (F7 · AC-10).
+ *
+ * Escrita separada de propósito: ela é a única que acontece **durante** o
+ * percurso, e escreve um campo só, dentro da lista que a regra do jogador
+ * aceita. Quem chama é responsável por não chamá-la a cada quadro — a Mesa a
+ * envia por marco de progresso, não por animação (ver `MARCOS_DA_VIAGEM`).
+ *
+ * @param {string} campaignId
+ * @param {string} instanceId
+ * @param {object|null} viagem já projetada por `projecaoDaViagem`, ou `null`.
+ */
+export async function atualizarViagem(campaignId, instanceId, viagem) {
+  const cid = exigir(campaignId, "Informe em qual campanha o grupo está.");
+  const iid = exigir(instanceId, "Informe em qual mapa da mesa o grupo está.");
+  await updateDoc(partyRef(cid, iid), {
+    viagem: viagem || null,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Fecha a viagem — **uma vez só, custe o que custar** (F7).
+ *
+ * Duas abas do mesmo mestre (ou o mestre e o jogador) podem ver a chegada no
+ * mesmo instante. Sem coordenação, as duas adiantariam o relógio e comeriam a
+ * comida do grupo pela mesma estrada. A transação lê `party.viagem`, confere o
+ * `id` e só então aplica: quem chegar primeiro vence, quem chegar depois recebe
+ * `{aplicou:false}` e não escreve nada.
+ *
+ * Repare no que NÃO está condicionado a isto: a publicação da revelação. Ela é
+ * idempotente por construção (`publicarRevelacao` pula documento idêntico), e
+ * perder revelação porque a outra aba "chegou primeiro" seria muito pior do que
+ * gravá-la duas vezes.
+ *
+ * @param {string} campaignId
+ * @param {string} instanceId
+ * @param {string} viagemId o `id` da viagem que se acredita estar em curso.
+ * @param {object} [patch] o que aplicar JUNTO do fechamento (relógio, comida).
+ * @returns {Promise<{aplicou:boolean, motivo:string}>}
+ */
+export async function concluirViagem(campaignId, instanceId, viagemId, patch = {}) {
+  const cid = exigir(campaignId, "Informe em qual campanha o grupo está.");
+  const iid = exigir(instanceId, "Informe em qual mapa da mesa o grupo está.");
+  const alvo = texto(viagemId);
+  const ref = partyRef(cid, iid);
+  const permitidos = ["currentNodeId", "x", "y", "inGameDatetime", "supplies", "speedModifier", "flags"];
+
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const atual = snap.exists() ? snap.data() : null;
+    const emCurso = atual?.viagem || null;
+
+    /* Já fechada por outro cliente (ou por outra aba desta mesma pessoa). Não é
+       erro: é a corrida acontecendo e sendo resolvida. */
+    if (alvo && emCurso && texto(emCurso.id) && texto(emCurso.id) !== alvo) {
+      return { aplicou: false, motivo: "outra-viagem" };
+    }
+    if (alvo && !emCurso) return { aplicou: false, motivo: "ja-concluida" };
+
+    const data = { viagem: null, updatedAt: serverTimestamp() };
+    permitidos.forEach((campo) => { if (campo in patch) data[campo] = patch[campo]; });
+    tx.set(ref, data, { merge: true });
+    return { aplicou: true, motivo: "" };
   });
 }
 
@@ -967,7 +1104,9 @@ export async function moverGrupo(campaignId, instanceId, destino = {}) {
 export async function atualizarParty(campaignId, instanceId, patch = {}) {
   const cid = exigir(campaignId, "Informe em qual campanha o grupo está.");
   const iid = exigir(instanceId, "Informe em qual mapa da mesa o grupo está.");
-  const permitidos = ["currentNodeId", "x", "y", "inGameDatetime", "supplies", "speedModifier", "flags"];
+  const permitidos = [
+    "currentNodeId", "x", "y", "inGameDatetime", "supplies", "speedModifier", "flags", "viagem",
+  ];
   const data = { updatedAt: serverTimestamp() };
   permitidos.forEach((campo) => { if (campo in patch) data[campo] = patch[campo]; });
   if (Object.keys(data).length === 1) {
@@ -976,19 +1115,82 @@ export async function atualizarParty(campaignId, instanceId, patch = {}) {
   await updateDoc(partyRef(cid, iid), data);
 }
 
-/**
- * Grava a névoa DA MESA. Mesmo formato serializado da F3 (`model/fogMask.js`)
- * — o que muda é só o caminho: o progresso da névoa é por grupo, não por molde.
+/*  ── POR QUE NÃO EXISTE MAIS UM "salvarFogDaMesa" ───────────────────
+ *  Até a F6 havia uma função que gravava o bitmap inteiro em `fog/estado`, e
+ *  a mesa a chamava a cada chegada e a cada revelação. O AC-10 proíbe isso
+ *  durante a viagem, e uma função exportada que faz exatamente o proibido é
+ *  uma armadilha: quem a chamasse quebraria o contrato sem perceber, porque a
+ *  tela continuaria correta.
  *
- * Recusa em português quando o payload não cabe no documento, antes de tentar.
+ *  Agora só existem DUAS portas, e as duas obedecem a política de
+ *  `model/fogDelta.js`: `salvarDeltaDaNevoa` (o passo) e
+ *  `consolidarNevoaDaMesa` (o flush). Quem decide qual das duas usar é
+ *  `planejarTransmissao`, nunca quem chama.
+ */
+
+/**
+ * Grava **um delta** de névoa (F7 · AC-10).
+ *
+ * O delta é a mesma coisa que a máscara — bitmap, mesmo formato serializado —
+ * só que com bits apenas nas células que acabaram de acender. Ele **não conta
+ * o que foi revelado**: não tem nome de lugar, não tem trilha, não tem evento.
+ * É geometria pura, e a geometria daquele pedaço já está sendo desenhada na
+ * tela do jogador no mesmo instante.
+ *
+ * Mora na MESMA coleção `fog/` da base consolidada, com id prefixado por `d_`.
+ * Isso é decisão, não acaso: a regra do `firestore.rules` é
+ * `match /fog/{docId}`, então o delta entra sem regra nova e sem gastar access
+ * call — o teto de 20 por lote continua intocado (F4).
  *
  * @param {string} campaignId
  * @param {string} instanceId
- * @param {object} mascara máscara de `model/fogMask.js`.
- * @param {{teto?:number}} [opcoes]
- * @returns {Promise<{bytes:number}>}
+ * @param {object} delta máscara-delta (saída de `planejarTransmissao`).
+ * @param {{sessao?:string, n?:number}} [opcoes] sessão da aba e contador local.
+ * @returns {Promise<{id:string, bytes:number}>}
  */
-export async function salvarFogDaMesa(campaignId, instanceId, mascara, opcoes = {}) {
+export async function salvarDeltaDaNevoa(campaignId, instanceId, delta, opcoes = {}) {
+  const cid = exigir(campaignId, "Informe em qual campanha o mapa está.");
+  const iid = exigir(instanceId, "Informe de qual mapa da mesa é a névoa.");
+  if (!delta || !delta.bits) throw new Error("Não há névoa nova para transmitir neste mapa.");
+
+  const id = idDoDelta(opcoes.sessao, opcoes.n);
+  const data = serializar(delta);
+  await setDoc(deltaRef(cid, iid, id), {
+    kind: "delta",
+    data,
+    largura: delta.largura,
+    altura: delta.altura,
+    escala: delta.escala,
+    bytes: data.length,
+    porQuem: texto(opcoes.sessao) || null,
+    updatedAt: serverTimestamp(),
+  });
+  return { id, bytes: data.length };
+}
+
+/**
+ * Consolida a névoa: grava o bitmap inteiro e **apaga os deltas que ele já
+ * contém**, num lote só (F7 · AC-10, *"flush consolidado"*).
+ *
+ * Apagar na mesma escrita é o que torna a leitura trivial do outro lado: a
+ * máscara é sempre `base + todos os deltas presentes`. Não há número de
+ * sequência para conferir, não há delta a "pular". Um delta gravado no meio do
+ * caminho — que portanto não está na lista de apagados — simplesmente
+ * sobrevive e continua sendo aplicado; como aplicar delta é união, aplicá-lo
+ * sobre uma base que já o continha não muda nada.
+ *
+ * `regrediu` marca a consolidação nascida de um RECOBRIMENTO. É o único sinal
+ * que autoriza o outro cliente a **substituir** a máscara local em vez de
+ * mesclar — sem ele, o pincel do mestre seria desfeito pela própria mesclagem
+ * do jogador (ver `aplicarRemota` em `model/fogDelta.js`).
+ *
+ * @param {string} campaignId
+ * @param {string} instanceId
+ * @param {object} mascara a máscara inteira.
+ * @param {{deltas?:string[], regrediu?:boolean, teto?:number}} [opcoes]
+ * @returns {Promise<{bytes:number, apagados:number}>}
+ */
+export async function consolidarNevoaDaMesa(campaignId, instanceId, mascara, opcoes = {}) {
   const cid = exigir(campaignId, "Informe em qual campanha o mapa está.");
   const iid = exigir(instanceId, "Informe de qual mapa da mesa é a névoa.");
   if (!mascara || !mascara.bits) throw new Error("Não há névoa para gravar neste mapa.");
@@ -998,15 +1200,29 @@ export async function salvarFogDaMesa(campaignId, instanceId, mascara, opcoes = 
   if (!cabe.ok) throw new Error(cabe.motivo);
 
   const data = serializar(mascara);
-  await setDoc(fogRef(cid, iid), {
-    data,
-    largura: mascara.largura,
-    altura: mascara.altura,
-    escala: mascara.escala,
-    bytes: data.length,
-    updatedAt: serverTimestamp(),
-  });
-  return { bytes: data.length };
+  const apagar = lista(opcoes.deltas).filter((id) => ehDelta(id));
+
+  const ops = [{
+    type: "set",
+    ref: fogRef(cid, iid),
+    data: {
+      kind: "base",
+      data,
+      largura: mascara.largura,
+      altura: mascara.altura,
+      escala: mascara.escala,
+      bytes: data.length,
+      /* Contador de consolidações: é por ele que o outro cliente distingue
+         "a mesma base de novo" de "uma base nova que preciso considerar". */
+      rev: Date.now(),
+      regrediu: !!opcoes.regrediu,
+      updatedAt: serverTimestamp(),
+    },
+  }];
+  apagar.forEach((id) => ops.push({ type: "delete", ref: deltaRef(cid, iid, id) }));
+
+  await commitOps(ops);
+  return { bytes: data.length, apagados: apagar.length };
 }
 
 /** Documento → máscara, tolerando payload quebrado (mesma postura do `fogStore`). */
@@ -1038,6 +1254,96 @@ export async function atualizarGm(campaignId, instanceId, patch = {}) {
     throw new Error("Informe o que deve mudar no painel do mestre.");
   }
   await setDoc(gmRef(cid, iid), data, { merge: true });
+}
+
+/* ════════════════════════════════════════════════════════════════════
+ *  A PENDÊNCIA DO ENCONTRO, EM TEMPO REAL  (F7 · AC-8, AC-10)
+ *  --------------------------------------------------------------------
+ *  `gm/estado` é assinado por `useGmDaMesa`, então DUAS ABAS do mesmo
+ *  mestre veem a mesma pendência ao mesmo tempo. Até a F6 as duas podiam
+ *  decidir: a primeira publicava o encontro e limpava a pendência, a
+ *  segunda — com o snapshot ainda velho na tela — publicava de novo.
+ *
+ *  As duas funções abaixo transformam isso em decisão ÚNICA, e a garantia
+ *  é do servidor, não da tela: a transação lê o documento, confere de que
+ *  pendência se trata, e só então escreve. Quem chega depois recebe
+ *  `false` e vê a pendência sumir — que é a resposta certa, porque ela
+ *  realmente já não existe.
+ * ══════════════════════════════════════════════════════════════════ */
+
+/**
+ * Reserva a vaga da pendência: só grava se **não houver** nenhuma.
+ *
+ * O sorteio da estrada roda no cliente do mestre; com duas abas abertas, as
+ * duas sorteiam. Sem esta reserva, a segunda sobrescreveria a pendência que a
+ * primeira criou — e o mestre decidiria sobre um encontro que substituiu outro
+ * que ele nunca viu.
+ *
+ * @param {string} campaignId
+ * @param {string} instanceId
+ * @param {object} pendencia já montada (`model/encontros.js`), com `id`.
+ * @returns {Promise<{reservada:boolean, motivo:string}>}
+ */
+export async function reservarPendencia(campaignId, instanceId, pendencia) {
+  const cid = exigir(campaignId, "Informe em qual campanha o mapa está.");
+  const iid = exigir(instanceId, "Informe qual mapa da mesa deve mudar.");
+  if (!pendencia || typeof pendencia !== "object") {
+    throw new Error("Não há encontro para pôr na fila do mestre.");
+  }
+  const ref = gmRef(cid, iid);
+
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const atual = snap.exists() ? snap.data() : null;
+    if (atual?.pendingEncounter) return { reservada: false, motivo: "ja-ha-pendencia" };
+    tx.set(ref, { pendingEncounter: pendencia, updatedAt: serverTimestamp() }, { merge: true });
+    return { reservada: true, motivo: "" };
+  });
+}
+
+/**
+ * Resolve a pendência **uma vez só**: quem decidir primeiro vence.
+ *
+ * Confere o `id` da pendência que está gravada contra o que quem decide tinha
+ * na tela. Diferente (ou ausente) significa que outra aba já decidiu — e aí
+ * nada é escrito e nada é publicado.
+ *
+ * Pendência LEGADA (gravada antes desta versão, portanto sem `id`) é aceita:
+ * recusar deixaria a mesa travada com um diálogo que não fecha, o que é pior
+ * do que a corrida que esta função previne. É um caso que se extingue sozinho
+ * na primeira decisão.
+ *
+ * @param {string} campaignId
+ * @param {string} instanceId
+ * @param {string} pendenciaId
+ * @param {object} [patch] o que gravar junto (`triggeredEventIds`, por exemplo).
+ * @returns {Promise<{decidida:boolean, motivo:string, pendencia:object|null}>}
+ *   `pendencia` é a que estava gravada — quem decidiu precisa dela para
+ *   devolvê-la ao lugar se a publicação falhar depois.
+ */
+export async function resolverPendencia(campaignId, instanceId, pendenciaId, patch = {}) {
+  const cid = exigir(campaignId, "Informe em qual campanha o mapa está.");
+  const iid = exigir(instanceId, "Informe qual mapa da mesa deve mudar.");
+  const alvo = texto(pendenciaId);
+  const ref = gmRef(cid, iid);
+  const permitidos = ["triggeredEventIds", "gmScratch"];
+
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const atual = snap.exists() ? snap.data() : null;
+    const emCurso = atual?.pendingEncounter || null;
+
+    if (!emCurso) return { decidida: false, motivo: "ja-decidida", pendencia: null };
+    const idGravado = texto(emCurso.id);
+    if (alvo && idGravado && idGravado !== alvo) {
+      return { decidida: false, motivo: "outra-pendencia", pendencia: emCurso };
+    }
+
+    const data = { pendingEncounter: null, updatedAt: serverTimestamp() };
+    permitidos.forEach((campo) => { if (campo in patch) data[campo] = patch[campo]; });
+    tx.set(ref, data, { merge: true });
+    return { decidida: true, motivo: "", pendencia: emCurso };
+  });
 }
 
 /**
@@ -1140,10 +1446,14 @@ export function useParty(campaignId, instanceId) {
       partyRef(campaignId, instanceId),
       (snap) => setEstado({
         party: snap.exists() ? { id: snap.id, ...snap.data({ serverTimestamps: "estimate" }) } : null,
+        /* Eco da própria escrita (ver `useFogDaMesa`): o Firestore entrega o
+           movimento otimista antes do servidor confirmar, e quem já animou o
+           percurso localmente não pode animá-lo de novo por causa dele. */
+        local: !!snap.metadata?.hasPendingWrites,
         loading: false,
         error: null,
       }),
-      (err) => setEstado({ party: null, loading: false, error: err }),
+      (err) => setEstado({ party: null, local: false, loading: false, error: err }),
     );
     return () => unsub();
   }, [campaignId, instanceId]);
@@ -1151,35 +1461,74 @@ export function useParty(campaignId, instanceId) {
   return estado;
 }
 
+const VAZIO_DA_NEVOA = Object.freeze({
+  mascara: null, base: null, deltas: [], bytes: 0, rev: 0,
+  regrediu: false, local: false, loading: false, error: null,
+});
+
 /**
- * A névoa daquele grupo, em tempo real. `mascara` é `null` enquanto ninguém
- * gravou névoa — a Mesa cria a primeira quando souber o tamanho do mundo.
+ * A névoa daquele grupo, em tempo real — **base consolidada + deltas** (F7).
+ *
+ * Assina a COLEÇÃO `fog/`, não só o documento `estado`: desde o AC-10 a
+ * revelação da viagem trafega em deltas (`fog/d_*`), e o que o outro cliente
+ * tem de ver é a soma. A soma é feita aqui, por união, então ordem de chegada,
+ * repetição e delta duplicado dão sempre o mesmo resultado.
+ *
+ * `local` repassa `metadata.hasPendingWrites` — é o eco da PRÓPRIA escrita
+ * deste cliente, que o Firestore entrega otimisticamente antes de o servidor
+ * confirmar. A Mesa o usa para não reprocessar o que ela mesma acabou de
+ * mandar (o mesmo padrão de `MapEditor/sync/campaignSync2.js`).
  *
  * @param {string} campaignId
  * @param {string} instanceId
- * @returns {{mascara:object|null, bytes:number, loading:boolean, error:Error|null}}
+ * @returns {{mascara:object|null, base:object|null, deltas:object[], bytes:number,
+ *            rev:number, regrediu:boolean, local:boolean,
+ *            loading:boolean, error:Error|null}}
  */
 export function useFogDaMesa(campaignId, instanceId) {
-  const [estado, setEstado] = useState({ mascara: null, bytes: 0, loading: false, error: null });
+  const [estado, setEstado] = useState(VAZIO_DA_NEVOA);
 
   useEffect(() => {
-    if (!campaignId || !instanceId) {
-      setEstado({ mascara: null, bytes: 0, loading: false, error: null });
-      return undefined;
-    }
-    setEstado({ mascara: null, bytes: 0, loading: true, error: null });
+    if (!campaignId || !instanceId) { setEstado(VAZIO_DA_NEVOA); return undefined; }
+    setEstado({ ...VAZIO_DA_NEVOA, loading: true });
+
     const unsub = onSnapshot(
-      fogRef(campaignId, instanceId),
+      fogCol(campaignId, instanceId),
       (snap) => {
-        const dados = snap.exists() ? snap.data() : null;
+        let base = null;
+        let bytes = 0;
+        let rev = 0;
+        let regrediu = false;
+        const deltas = [];
+        const ids = [];
+
+        snap.docs.forEach((d) => {
+          const dados = d.data();
+          if (ehDelta(d.id)) {
+            const m = decodificarFog(dados);
+            if (m) { deltas.push(m); ids.push(d.id); }
+            return;
+          }
+          if (d.id !== ESTADO_DOC_ID) return;
+          base = decodificarFog(dados);
+          bytes = Number.isFinite(dados?.bytes) ? dados.bytes : 0;
+          rev = Number.isFinite(dados?.rev) ? dados.rev : 0;
+          regrediu = !!dados?.regrediu;
+        });
+
         setEstado({
-          mascara: dados ? decodificarFog(dados) : null,
-          bytes: dados && Number.isFinite(dados.bytes) ? dados.bytes : 0,
+          mascara: mesclarRecebidos(base, deltas),
+          base,
+          deltas: ids,
+          bytes,
+          rev,
+          regrediu,
+          local: !!snap.metadata?.hasPendingWrites,
           loading: false,
           error: null,
         });
       },
-      (err) => setEstado({ mascara: null, bytes: 0, loading: false, error: err }),
+      (err) => setEstado({ ...VAZIO_DA_NEVOA, error: err }),
     );
     return () => unsub();
   }, [campaignId, instanceId]);

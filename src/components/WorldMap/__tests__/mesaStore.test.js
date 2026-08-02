@@ -22,7 +22,7 @@ import * as firestore from "firebase/firestore";
 import {
   idDaInstancia, mestreDaInstancia, podeEscreverNaInstancia,
   levarParaMesa, publicarRevelacao, publicarProjecao, sincronizarMolde, moverGrupo, atualizarParty,
-  salvarFogDaMesa, rebaixarRevelacao, removerDaMesa,
+  consolidarNevoaDaMesa, rebaixarRevelacao, removerDaMesa,
   projecaoDoNo, projecaoDaTrilha, projecaoDoEvento, garantirSemSegredo, estadoMaior,
   useInstancias, useReveladoNaMesa, useParty, useFogDaMesa, useGmDaMesa,
   idReveladoDoNo, idReveladoDaTrilha, idReveladoDoEvento,
@@ -678,7 +678,13 @@ describe("grupo, névoa e painel", () => {
     await moverGrupo(CID, IID, { nodeId: "n2", x: 900, y: 120, quem: "jogador-9" });
     const { ref, data } = state.updateDocs[0];
     expect(ref.path).toBe(`${BASE}/party/estado`);
-    expect(Object.keys(data).sort()).toEqual([...CAMPOS_DO_MOVIMENTO].sort());
+    /* Subconjunto, não igualdade: desde a F7 `viagem` está na lista permitida
+       mas só é escrito quando há percurso — mover sem viagem não pode apagar
+       o percurso de quem estava viajando. O que a regra proíbe é escrever ALÉM
+       da lista; escrever menos é sempre válido. */
+    expect(CAMPOS_DO_MOVIMENTO).toEqual(expect.arrayContaining(Object.keys(data)));
+    expect(Object.keys(data)).toContain("currentNodeId");
+    expect(Object.keys(data)).not.toContain("viagem");
   });
 
   test("moverGrupo recusa destino sem coordenadas", async () => {
@@ -691,14 +697,17 @@ describe("grupo, névoa e painel", () => {
     expect(state.updateDocs[0].data).toEqual({ supplies: 4, updatedAt: "__ts__" });
   });
 
-  test("salvarFogDaMesa grava no caminho da campanha e recusa o que não cabe", async () => {
+  test("consolidar grava no caminho da campanha e recusa o que não cabe", async () => {
+    /* Desde a F7 não há mais um gravador cru da máscara: a única porta para o
+       bitmap inteiro é a CONSOLIDAÇÃO (AC-10). O gate fino dela — inclusive o
+       apagamento dos deltas — está em `f7-mesa-store.test.js`. */
     const m = criarMascara(400, 400);
-    const r = await salvarFogDaMesa(CID, IID, m);
-    expect(state.setDocs[0].ref.path).toBe(`${BASE}/fog/estado`);
+    const r = await consolidarNevoaDaMesa(CID, IID, m);
+    expect(state.batches.at(-1).sets[0].ref.path).toBe(`${BASE}/fog/estado`);
     expect(r.bytes).toBeGreaterThan(0);
 
-    await expect(salvarFogDaMesa(CID, IID, m, { teto: 4 })).rejects.toThrow();
-    await expect(salvarFogDaMesa(CID, IID, null)).rejects.toThrow(/névoa/i);
+    await expect(consolidarNevoaDaMesa(CID, IID, m, { teto: 4 })).rejects.toThrow();
+    await expect(consolidarNevoaDaMesa(CID, IID, null)).rejects.toThrow(/névoa/i);
   });
 
   test("rebaixar sem estado remove o documento — é o único caminho que regride", async () => {

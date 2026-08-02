@@ -49,8 +49,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useMapCamera from "../../../hooks/useMapCamera";
 import {
   useInstancias, useReveladoNaMesa, useParty, useFogDaMesa,
-  publicarRevelacao, moverGrupo, atualizarParty, salvarFogDaMesa, getFundoDaMesa,
+  publicarRevelacao, moverGrupo, atualizarParty, getFundoDaMesa,
   mestreDaInstancia, useGmDaMesa, atualizarGm,
+  atualizarViagem, concluirViagem, projecaoDaViagem, reservarPendencia, resolverPendencia,
 } from "../mesaStore";
 import { useGrafo, useEventos } from "../worldMapStore";
 import {
@@ -63,7 +64,8 @@ import { rollDice } from "../../../domain/dice";
 import { construirMapaPadrao, ehMapaPadrao } from "../model/mapaPadrao";
 import CartografiaPadrao from "../model/CartografiaPadrao";
 import { limitesDoGrafo } from "../model/graph";
-import { mascaraParaOMundo, revelarCirculo } from "../model/fogMask";
+import { clonar, mascaraParaOMundo, mesmaGrade, revelarCirculo } from "../model/fogMask";
+import { absorver } from "../model/fogDelta";
 import {
   aoConcluirViagem, destinosPossiveis, podeViajarPara,
   projecaoDoJogador, revelarManualmente, RAIO_DE_REVELACAO_PADRAO,
@@ -85,6 +87,7 @@ import EventosDoGrupo from "./EventosDoGrupo";
 import PainelDeEncontro from "./PainelDeEncontro";
 import Acampamento from "./Acampamento";
 import useViagem from "./useViagem";
+import useNevoaAoVivo, { novaSessao } from "./useNevoaAoVivo";
 import {
   ID_DA_PROCURA, PEDIDO_DE_PROCURA, TITULO_DA_PROCURA,
   anuncioDoEvento, contextoDoPasso, flagsComAsNovas,
@@ -92,7 +95,7 @@ import {
 import {
   MARCA_DO_PERIGO, TEXTO_DA_PAUSA,
   anuncioDaDecisao, assinaturaDaPendencia, contextoDaPendencia,
-  flagsComPausa, formatarChance, formatarRolagem, idDoEncontro, nomesSugeridos,
+  flagsComPausa, formatarChance, formatarRolagem, idDaPendencia, idDoEncontro, nomesSugeridos,
   perigoDaRegiao, sugestaoDeEncontro, temPendencia, textoDoEncontro, tituloDoEncontro,
   viagemPausada,
 } from "./encontrosUi";
@@ -106,6 +109,18 @@ const PISCA_DA_REVELACAO = 900;
 
 /** De quantas unidades de mundo o grupo precisa andar para a visão atual mudar. */
 const PASSO_DA_VISAO = 24;
+
+/**
+ * De quanto em quanto tempo o andamento da viagem é gravado, em ms (F7).
+ *
+ * A viagem anda a 60 quadros por segundo e a mesa **não grava por quadro** —
+ * o marco de 2 s é o suficiente para um F5 no meio da estrada devolver o
+ * grupo praticamente onde ele estava, ao custo de duas ou três escritas por
+ * percurso. É deliberadamente mais lento que os 300 ms do delta de névoa:
+ * a névoa é o que o grupo VÊ acontecer; o andamento só importa quando alguém
+ * recarrega a página.
+ */
+const INTERVALO_DO_PROGRESSO_MS = 2000;
 
 const listaDe = (v) => (Array.isArray(v) ? v : []);
 
@@ -245,12 +260,82 @@ export default function MesaDoMapaMundi({
   const [mascara, setMascara] = useState(null);
   const [revisaoDaNevoa, setRevisaoDaNevoa] = useState(0);
 
+  /* Espelho da máscara para os efeitos a lerem sem entrar nas dependências —
+     ela é MUTADA em lugar (contrato da F3), então pô-la numa dependência faria
+     o efeito reagir à identidade do objeto, que justamente não muda. */
+  const mascaraRef = useRef(null);
+  mascaraRef.current = mascara;
+  /** Última base consolidada considerada — evita reprocessar o mesmo snapshot. */
+  const ultimaBase = useRef(0);
+
+  /* ── A NÉVOA QUE CHEGA DO OUTRO CLIENTE (F7 · AC-10) ───────────────
+     A regra é MESCLAR, nunca substituir: a revelação já aplicada aqui não
+     pode sumir porque um snapshot chegou (e a união é o que torna delta
+     perdido, repetido ou fora de ordem inofensivo).
+     A ÚNICA exceção é a consolidação marcada `regrediu` — o mestre recobriu
+     névoa de propósito, e mesclar devolveria exatamente o que ele tirou. */
+  /** Identificador desta aba. Entra no id da viagem para duas abas do mesmo
+   *  mestre não acharem que a viagem da outra é a sua. */
+  const sessao = useRef(novaSessao()).current;
+
+  const nevoaViva = useNevoaAoVivo({
+    campaignId,
+    instanciaId,
+    mascara,
+    revisao: revisaoDaNevoa,
+    /* Só quem pode escrever na instância transmite. O jogador vê a névoa
+       abrir pelo snapshot do mestre — ele não tem caminho de escrita aqui, e
+       fingir que tem só produziria `permission-denied` no console dele. */
+    ativo: nevoaLigada && !!uid && uid === donoDoMolde,
+    /* Sem `aoFalhar`: rede caída não pode virar erro na cara da mesa. O hook
+       registra no console e a revelação perdida volta no delta seguinte —
+       ela continua desenhada aqui o tempo todo (AC-10). */
+  });
+  const { transmitir: transmitirNevoa, registrarRemota } = nevoaViva;
+
+  useEffect(() => { ultimaBase.current = 0; }, [instanciaId]);
+
   useEffect(() => {
     if (!nevoaLigada || !instanciaId) { setMascara(null); return; }
     if (fog.loading) return;
-    setMascara((atual) => mascaraParaOMundo(fog.mascara || atual, mundo));
-    setRevisaoDaNevoa((r) => r + 1);
-  }, [nevoaLigada, instanciaId, fog.mascara, fog.loading, mundo]);
+    /* Eco da própria escrita (`metadata.hasPendingWrites`, o padrão de
+       `campaignSync2.js`): isto já está aplicado nesta tela. */
+    if (fog.local) return;
+
+    const atual = mascaraRef.current;
+    const remota = fog.mascara;
+
+    if (!atual) {
+      setMascara(mascaraParaOMundo(remota, mundo));
+      setRevisaoDaNevoa((r) => r + 1);
+      if (remota) registrarRemota(remota, true);
+      return;
+    }
+    if (!remota) return;                       // ninguém gravou névoa ainda
+
+    if (!mesmaGrade(atual, remota)) {          // o mapa mudou de tamanho
+      setMascara(mascaraParaOMundo(remota, mundo));
+      setRevisaoDaNevoa((r) => r + 1);
+      registrarRemota(remota, true);
+      return;
+    }
+
+    const recobriu = !!fog.regrediu && fog.rev > ultimaBase.current;
+    if (fog.rev) ultimaBase.current = fog.rev;
+
+    if (recobriu) {
+      setMascara(clonar(remota));
+      setRevisaoDaNevoa((r) => r + 1);
+      registrarRemota(remota, true);
+      return;
+    }
+
+    if (absorver(atual, remota) > 0) setRevisaoDaNevoa((r) => r + 1);
+    registrarRemota(remota, false);
+  }, [
+    nevoaLigada, instanciaId, fog.mascara, fog.loading, fog.local,
+    fog.rev, fog.regrediu, mundo, registrarRemota,
+  ]);
 
   /** Muta a máscara em lugar e só repinta quando algo mudou de verdade. */
   const mexerNaNevoa = useCallback((aplicar) => {
@@ -380,24 +465,34 @@ export default function MesaDoMapaMundi({
     );
     if (!sorteado.houve) return;
 
-    const nova = montarPendencia({
-      origem: "viagem",
-      trilhaId: v.trilhaId,
-      noId: v.paraId,
-      periodo,
-      chance: sorteado.chance,
-      rolagem: sorteado.rolagem,
-      sugestao: sugestaoDeEncontro(c.eventos, jaDisparados.current, Math.random()),
-    });
+    const nova = {
+      ...montarPendencia({
+        origem: "viagem",
+        trilhaId: v.trilhaId,
+        noId: v.paraId,
+        periodo,
+        chance: sorteado.chance,
+        rolagem: sorteado.rolagem,
+        sugestao: sugestaoDeEncontro(c.eventos, jaDisparados.current, Math.random()),
+      }),
+      /* O id da pendência (F7). É por ele que `resolverPendencia` sabe que a
+         decisão que chegou é sobre ESTE encontro, e não sobre um que outra aba
+         já resolveu. Sem ele, duas abas decidiriam o mesmo encontro duas vezes. */
+      id: idDaPendencia(sessao),
+    };
 
     /* A ORDEM IMPORTA. A pendência vai PRIMEIRO, a pausa depois: se a rede cair
        no meio, o pior caso é uma pendência sem pausa (o mestre a resolve e
        ninguém percebe), nunca uma pausa sem pendência (a mesa travada sem nada
-       que a destrave). */
-    await atualizarGm(c.campaignId, c.instanciaId, { pendingEncounter: nova });
+       que a destrave).
+       `reservarPendencia` é transação: com duas abas do mestre abertas, as duas
+       sorteiam, mas só a primeira grava — a segunda desiste em silêncio, em vez
+       de sobrescrever um encontro que o mestre ainda nem viu. */
+    const reserva = await reservarPendencia(c.campaignId, c.instanciaId, nova);
+    if (!reserva?.reservada) return;
     const flags = flagsComPausa(c.party?.flags, true);
     if (flags) await atualizarParty(c.campaignId, c.instanciaId, { flags });
-  }, []);
+  }, [sessao]);
 
   /**
    * **O mestre decidiu** — terceiro degrau, e a única porta para o jogador.
@@ -428,21 +523,42 @@ export default function MesaDoMapaMundi({
     try {
       setOcupado(true);
 
-      if (r.publicar) {
-        await publicarRevelacao(
-          c.campaignId, c.instanciaId, { eventos: [r.publicar] }, { existentes: c.revelado },
-        );
-      }
-
-      /* Aceitar CONSOME a sugestão: ela é um evento do molde, e deixá-la solta
-         faria o mesmo encontro sair de novo no próximo sorteio. Ignorar não
-         consome nada — o mestre disse "agora não", não "nunca". */
-      const patchDoGm = { pendingEncounter: null };
+      /* ── REIVINDICAR ANTES DE PUBLICAR (F7) ───────────────────────
+         A ordem é o contrário da intuição, e é de propósito. `resolverPendencia`
+         é uma transação que só apaga a pendência se ela ainda for ESTA: quem
+         reivindica primeiro vence, e a outra aba recebe `decidida:false` e vê o
+         diálogo fechar — porque a pendência realmente já não existe.
+         Publicar primeiro faria as duas abas publicarem o encontro antes de
+         qualquer uma limpar a pendência, que é exatamente o defeito da F6. */
+      const patchDoGm = {};
       if (decisao === "aceitar" && r.publicar?.id) {
         jaDisparados.current.add(r.publicar.id);
         patchDoGm.triggeredEventIds = [...jaDisparados.current];
       }
-      await atualizarGm(c.campaignId, c.instanciaId, patchDoGm);
+      const reivindicacao = await resolverPendencia(
+        c.campaignId, c.instanciaId, String(atual.id || ""), patchDoGm,
+      );
+      if (!reivindicacao?.decidida) {
+        if (vivo.current) setEncontroAberto(false);
+        anunciar("Este encontro já foi resolvido em outra tela.");
+        return;
+      }
+
+      if (r.publicar) {
+        try {
+          await publicarRevelacao(
+            c.campaignId, c.instanciaId, { eventos: [r.publicar] }, { existentes: c.revelado },
+          );
+        } catch (err) {
+          /* Reivindicou e não conseguiu publicar: devolve a pendência ao lugar.
+             Sem isto, o encontro sumiria da fila do mestre sem nunca ter chegado
+             à mesa — a pior das duas falhas possíveis. */
+          await atualizarGm(c.campaignId, c.instanciaId, {
+            pendingEncounter: reivindicacao.pendencia || atual,
+          }).catch(() => {});
+          throw err;
+        }
+      }
 
       const flags = flagsComPausa(c.party?.flags, false);
       if (flags) await atualizarParty(c.campaignId, c.instanciaId, { flags });
@@ -490,7 +606,11 @@ export default function MesaDoMapaMundi({
       }
       await atualizarParty(c.campaignId, c.instanciaId, patch);
       if (r.emboscada) {
-        await atualizarGm(c.campaignId, c.instanciaId, { pendingEncounter: r.emboscada });
+        /* Mesmo caminho do encontro da estrada: pendência com id, reservada por
+           transação. Acampar com duas abas abertas não põe duas emboscadas. */
+        await reservarPendencia(c.campaignId, c.instanciaId, {
+          ...r.emboscada, id: idDaPendencia(sessao),
+        });
       }
 
       if (vivo.current) {
@@ -508,7 +628,7 @@ export default function MesaDoMapaMundi({
     } finally {
       if (vivo.current) setOcupado(false);
     }
-  }, [anunciar]);
+  }, [anunciar, sessao]);
 
   /** O perigo da região, guardado nas bandeiras do grupo (só o mestre grava). */
   const ajustarPerigo = useCallback(async (valor) => {
@@ -739,15 +859,48 @@ export default function MesaDoMapaMundi({
       ? instancia.defaultRevealRadius
       : RAIO_DE_REVELACAO_PADRAO;
 
+  /* ── O ANDAMENTO PERSISTIDO (F7 · AC-10) ──────────────────────────
+     `party.viagem` é o percurso em curso. Quem viaja o grava; quem chega o
+     apaga. É o que faz o recarregamento retomar de onde estava, o outro
+     cliente concordar sobre onde o grupo está, e "acampar em trânsito"
+     deixar de ser letra morta.
+     O `progresso` é gravado por MARCO, nunca por quadro: escrever a cada
+     `requestAnimationFrame` seria 60 escritas por segundo. */
+  const viagemLocal = useRef({ id: "", ultimoMarco: 0, gravando: false });
+  useEffect(() => { viagemLocal.current = { id: "", ultimoMarco: 0, gravando: false }; }, [instanciaId]);
+
+  /** Grava o andamento, no máximo uma vez por `INTERVALO_DO_PROGRESSO_MS`. */
+  const marcarProgresso = useCallback((v, opcoes = {}) => {
+    const c = contexto.current;
+    const estadoLocal = viagemLocal.current;
+    if (!v || !estadoLocal.id || v.id !== estadoLocal.id) return;
+    if (estadoLocal.gravando) return;
+
+    const agora = Date.now();
+    if (!opcoes.forcar && agora - estadoLocal.ultimoMarco < INTERVALO_DO_PROGRESSO_MS) return;
+    estadoLocal.ultimoMarco = agora;
+    estadoLocal.gravando = true;
+
+    atualizarViagem(c.campaignId, c.instanciaId, projecaoDaViagem(v, {
+      id: estadoLocal.id, iniciadaEm: v.iniciadaEm, porQuem: c.uid,
+    }))
+      .catch((err) => console.warn("[mesa do mapa] o andamento da viagem não foi gravado:", err))
+      .finally(() => { estadoLocal.gravando = false; });
+  }, []);
+
   /** Cada quadro: a névoa abre sobre o que já foi andado. "Aos pouquinhos." */
   const aoAndar = useCallback((v) => {
     mexerNaNevoa((m) => nevoaDaViagem(m, v, raioDaEstrada(raioDeChegada)));
-  }, [mexerNaNevoa, raioDeChegada]);
+    if (!v?.remoto) marcarProgresso(v);
+  }, [mexerNaNevoa, raioDeChegada, marcarProgresso]);
 
   /** A chegada: AC-6 inteiro, mais o relógio, a comida e a publicação. */
   const aoChegar = useCallback(async (v) => {
     const c = contexto.current;
     setNoExibido(v.paraId);
+    /* Esta tela não tem mais percurso em curso — o documento de `party.viagem`
+       é fechado logo abaixo, e só pelo cliente do mestre (design §3). */
+    viagemLocal.current.id = "";
 
     const nome = nomeNaMesa(listaDe(grafoVisivel?.nos).find((n) => n?.id === v.paraId))
       || nomeNaMesa(listaDe(c.molde?.nos).find((n) => n?.id === v.paraId));
@@ -780,15 +933,28 @@ export default function MesaDoMapaMundi({
          estrada, e a estrada começou antes de o relógio andar. É a mesma
          escolha que `acampar` faz com a hora em que a fogueira foi acesa. */
       const relogioDaPartida = relogioDe(c.party);
+
+      /* ── FECHAR A VIAGEM, UMA VEZ SÓ (F7) ─────────────────────────
+         Duas abas do mestre podem ver a mesma chegada. `concluirViagem` é
+         uma transação que confere o id do percurso gravado: quem chega
+         primeiro apaga `party.viagem` e paga o preço da estrada; quem
+         chega depois recebe `aplicou:false` e não adianta o relógio de
+         novo. A REVELAÇÃO acima não depende disso de propósito — ela é
+         idempotente, e perdê-la seria muito pior do que repeti-la. */
+      const patch = {};
       if (horas > 0) {
-        const patch = { inGameDatetime: avancarRelogio(relogioDe(c.party), horas) };
+        patch.inGameDatetime = avancarRelogio(relogioDe(c.party), horas);
         if (Number.isFinite(c.party?.supplies)) {
           patch.supplies = consumirSuprimentos(c.party.supplies, horas, consumoPorDia(c.party)).restante;
         }
-        await atualizarParty(c.campaignId, c.instanciaId, patch);
       }
+      const fecho = await concluirViagem(c.campaignId, c.instanciaId, String(v?.id || ""), patch);
+      if (!fecho?.aplicou) return;   // outra tela já pagou esta estrada
 
-      if (c.mascara) await salvarFogDaMesa(c.campaignId, c.instanciaId, c.mascara);
+      /* A névoa da estrada fecha a conta aqui: um flush CONSOLIDADO, que
+         grava o bitmap inteiro e apaga os deltas daquela viagem. Durante o
+         percurso o que saiu foram só deltas (AC-10). */
+      await transmitirNevoa({ fim: true });
 
       /* ── Os gatilhos do passo (F5) ────────────────────────────────
          Uma avaliação só, com tudo que o passo produziu: o nó em que o
@@ -815,14 +981,17 @@ export default function MesaDoMapaMundi({
     } finally {
       if (vivo.current) setOcupado(false);
     }
-  }, [anunciar, grafoVisivel, mexerNaNevoa, raioDeChegada, avaliarNoPasso, rolarEncontroDaEstrada]);
+  }, [
+    anunciar, grafoVisivel, mexerNaNevoa, raioDeChegada,
+    avaliarNoPasso, rolarEncontroDaEstrada, transmitirNevoa,
+  ]);
 
   const viagemCtl = useViagem({
     aoAndar,
     aoChegar,
     aoFalhar: (mensagem) => setAviso(mensagem),
   });
-  const { viagem, viajando, comecar } = viagemCtl;
+  const { viagem, viajando, emTransito, comecar, pausar, retomar } = viagemCtl;
 
   /* ── Quem manda no marcador quando ninguém está viajando ───────────── */
   const noDoGrupo = noExibido || party?.currentNodeId || null;
@@ -838,15 +1007,74 @@ export default function MesaDoMapaMundi({
 
   const rastro = useMemo(() => (viagem ? trechoPercorrido(viagem) : []), [viagem]);
 
-  /* ── Movimento vindo de outro cliente (AC-10) ──────────────────────── */
+  /* ════════════════════════════════════════════════════════════════════
+   *  RETOMAR A VIAGEM  (F7 · AC-10)
+   *  ------------------------------------------------------------------
+   *  Uma porta para três situações que antes eram três comportamentos
+   *  diferentes (e duas delas simplesmente não existiam):
+   *
+   *   1. **F5 no meio da estrada.** `party.viagem` está lá, com o
+   *      progresso do último marco: a mesa recomeça o percurso de onde
+   *      estava, em vez de teleportar o grupo ou refazer o trecho todo.
+   *   2. **O outro cliente partiu.** O mesmo documento diz por qual
+   *      trilha — antes cada cliente adivinhava um caminho a partir de
+   *      `currentNodeId`, e dois clientes podiam animar estradas
+   *      diferentes para o mesmo movimento.
+   *   3. **Sem estado de viagem** (mesa antiga, ou movimento à força do
+   *      mestre): cai no comportamento da F4, que é reconstruir o
+   *      percurso pelo destino.
+   *
+   *  `tratada` é o que impede o eco da nossa própria partida de virar uma
+   *  segunda viagem: ele guarda o id do percurso que esta tela já assumiu.
+   * ══════════════════════════════════════════════════════════════════ */
+  const tratada = useRef("");
+  useEffect(() => { tratada.current = ""; }, [instanciaId]);
+
   useEffect(() => {
+    if (viajando || viagem) return;          // já há percurso nesta tela
+
+    const emCurso = party?.viagem;
+    if (emCurso?.deId && emCurso?.paraId) {
+      const idDela = String(emCurso.id || "");
+      if (tratada.current === idDela) return;
+      tratada.current = idDela;
+      /* Só quem PARTIU grava o andamento. Retomando a própria viagem depois de
+         um F5, esta tela volta a ser dona do marco; acompanhando a viagem de
+         outra pessoa, ela só anima — senão os dois clientes gravariam o mesmo
+         progresso duas vezes, com números ligeiramente diferentes. */
+      const meu = !!uid && emCurso.porQuem === uid;
+      viagemLocal.current = { id: meu ? idDela : "", ultimoMarco: Date.now(), gravando: false };
+      const ok = comecar(grafoDeNavegacao, emCurso.deId, emCurso.paraId, undefined, {
+        remoto: !meu,
+        id: idDela,
+        progresso: Number.isFinite(emCurso.progresso) ? emCurso.progresso : 0,
+        iniciadaEm: emCurso.iniciadaEm,
+      });
+      if (!ok) setNoExibido(emCurso.paraId); // a trilha não é conhecida aqui: salta
+      return;
+    }
+
     const alvo = party?.currentNodeId || null;
-    if (!alvo || viajando) return;
+    if (!alvo) return;
     if (noExibido === alvo) return;
     if (!noExibido) { setNoExibido(alvo); return; }   // primeira carga: sem percurso
     const ok = comecar(grafoDeNavegacao, noExibido, alvo, undefined, { remoto: true });
     if (!ok) setNoExibido(alvo);                       // sem trilha conhecida: salta
-  }, [party?.currentNodeId, viajando, noExibido, comecar, grafoDeNavegacao]);
+  }, [party?.currentNodeId, party?.viagem, viajando, viagem, noExibido, comecar, grafoDeNavegacao, uid]);
+
+  /* ── A PAUSA PARA O MARCADOR NO MEIO DA ESTRADA (F7) ───────────────
+     Até a F6 a pausa só recusava viagens NOVAS; quem já estava andando
+     chegava assim mesmo, e "acampar em trânsito" (`podeAcampar`) nunca era
+     verdade fora dos poucos segundos da animação. Agora o grupo para onde
+     está, o andamento é gravado, e o acampamento passa a fazer sentido. */
+  useEffect(() => {
+    if (pausada && viajando) {
+      pausar();
+      if (viagem) marcarProgresso(viagem, { forcar: true });
+      return;
+    }
+    if (!pausada && emTransito) retomar();
+  }, [pausada, viajando, emTransito, viagem, pausar, retomar, marcarProgresso]);
 
   /* ── Viajar (AC-8) ─────────────────────────────────────────────────── */
   const destinos = useMemo(
@@ -854,19 +1082,58 @@ export default function MesaDoMapaMundi({
     [estado, grafoDeNavegacao, noDoGrupo],
   );
 
-  const gravarMovimento = useCallback(async (noId, posicao) => {
+  /**
+   * Grava o movimento — e, quando há percurso, o **estado da viagem** (F7).
+   *
+   * Os dois vão na MESMA escrita de propósito: o destino e o caminho que leva
+   * até ele são o mesmo fato. Gravados separados, o outro cliente veria por um
+   * instante um grupo que já chegou sem ter andado.
+   */
+  const gravarMovimento = useCallback(async (noId, posicao, viagemEmCurso) => {
     try {
       await moverGrupo(campaignId, instanciaId, {
         nodeId: noId,
         x: Number.isFinite(posicao?.x) ? posicao.x : 0,
         y: Number.isFinite(posicao?.y) ? posicao.y : 0,
         quem: uid,
+        viagem: viagemEmCurso === undefined ? undefined : (viagemEmCurso || null),
       });
     } catch (err) {
       console.error("[mesa do mapa] o movimento do grupo não foi gravado:", err);
       if (vivo.current) setFalha(mensagemDeErro(err));
     }
   }, [campaignId, instanciaId, uid]);
+
+  /**
+   * Começa um percurso NESTA tela e o registra na mesa.
+   *
+   * O id da viagem carrega o relógio e a sessão da aba: é ele que
+   * `concluirViagem` confere para a chegada acontecer uma vez só, e é ele que
+   * `tratada` usa para não reagir ao eco da própria partida.
+   */
+  const iniciarPercurso = useCallback((grafo, deId, paraId, trilha, extra = {}) => {
+    const id = `${Date.now().toString(36)}_${sessao}`;
+    const iniciadaEm = Date.now();
+    tratada.current = id;
+    viagemLocal.current = { id, ultimoMarco: iniciadaEm, gravando: false };
+
+    const ok = comecar(grafo, deId, paraId, trilha, { ...extra, id, iniciadaEm, porQuem: uid });
+    if (!ok) {
+      tratada.current = "";
+      viagemLocal.current.id = "";
+      return null;
+    }
+    return projecaoDaViagem(
+      {
+        deId,
+        paraId,
+        trilhaId: trilha?.id || null,
+        horas: trilha?.travelHours,
+        progresso: 0,
+      },
+      { id, iniciadaEm, porQuem: uid },
+    );
+  }, [comecar, sessao, uid]);
 
   const viajar = useCallback((destino) => {
     if (!destino?.noId || viajando || !noDoGrupo) return;
@@ -884,12 +1151,18 @@ export default function MesaDoMapaMundi({
        viagem é instantânea e o `aoChegar` dispara ainda dentro desta linha —
        anunciar depois apagaria a chegada com a partida. */
     anunciar(`O grupo partiu para ${nomeNaMesa(alvo)}.`);
-    if (!comecar(grafoDeNavegacao, noDoGrupo, destino.noId, r.trilha, { ritmo })) return;
+    const percurso = iniciarPercurso(grafoDeNavegacao, noDoGrupo, destino.noId, r.trilha, { ritmo });
+    if (!percurso) return;
 
     /* O movimento é gravado NA PARTIDA: assim o outro cliente anima junto, em
-       vez de o grupo teleportar quando a viagem daqui termina. */
-    gravarMovimento(destino.noId, { x: alvo?.x, y: alvo?.y });
-  }, [viajando, pausada, noDoGrupo, estado, grafoDeNavegacao, comecar, party?.speedModifier, anunciar, gravarMovimento]);
+       vez de o grupo teleportar quando a viagem daqui termina. Desde a F7 vai
+       junto o percurso (`party.viagem`), que é o que permite ao outro cliente
+       animar a MESMA estrada e ao recarregamento retomar de onde parou. */
+    gravarMovimento(destino.noId, { x: alvo?.x, y: alvo?.y }, percurso);
+  }, [
+    viajando, pausada, noDoGrupo, estado, grafoDeNavegacao, iniciarPercurso,
+    party?.speedModifier, anunciar, gravarMovimento,
+  ]);
 
   /* ── Mover à força: o mestre conduz a mesa ─────────────────────────── */
   const moverPara = useCallback((noId) => {
@@ -900,16 +1173,30 @@ export default function MesaDoMapaMundi({
     /* Com trilha no molde (mesmo secreta ou oculta), o grupo ANDA — o mestre
        conduzindo continua sendo viagem. Sem trilha, ele salta: é a mão do
        mestre, e fingir uma estrada que não existe seria pior. */
-    const seguiu = noDoGrupo
-      ? comecar(molde, noDoGrupo, noId, undefined, { ritmo: 1 })
-      : false;
-    if (!seguiu) {
+    const trilha = noDoGrupo
+      ? listaDe(molde?.trilhas).find((t) => {
+        const de = t?.fromNodeId ?? t?.fromId;
+        const para = t?.toNodeId ?? t?.toId;
+        return (de === noDoGrupo && para === noId) || (de === noId && para === noDoGrupo);
+      })
+      : null;
+    const percurso = noDoGrupo
+      ? iniciarPercurso(molde, noDoGrupo, noId, trilha, { ritmo: 1 })
+      : null;
+    if (!percurso) {
       setNoExibido(noId);
       if (mascara) mexerNaNevoa((m) => revelarCirculo(m, alvo.x, alvo.y, raioDeChegada));
       anunciar(`O mestre levou o grupo para ${nomeNaMesa(alvo)}.`);
+      /* Salto do mestre: não há estrada, logo não há viagem em curso. O `null`
+         explícito apaga um percurso anterior em vez de deixá-lo pendurado. */
+      gravarMovimento(noId, { x: alvo.x, y: alvo.y }, null);
+      return;
     }
-    gravarMovimento(noId, { x: alvo.x, y: alvo.y });
-  }, [podeVerMolde, viajando, molde, noDoGrupo, comecar, mascara, mexerNaNevoa, raioDeChegada, anunciar, gravarMovimento]);
+    gravarMovimento(noId, { x: alvo.x, y: alvo.y }, percurso);
+  }, [
+    podeVerMolde, viajando, molde, noDoGrupo, iniciarPercurso, mascara,
+    mexerNaNevoa, raioDeChegada, anunciar, gravarMovimento,
+  ]);
 
   /* ── Revelar agora (AC-8) ──────────────────────────────────────────── */
   const estoque = useMemo(
@@ -946,7 +1233,10 @@ export default function MesaDoMapaMundi({
           if (mexerNaNevoa((m) => revelarCirculo(m, no.x, no.y, raio))) mexeu = true;
         });
       }
-      if (mexeu && mascara) await salvarFogDaMesa(campaignId, instanciaId, mascara);
+      /* A revelação manual é ato humano, esparso: consolidar aqui é barato e
+         deixa a mesa em dia para quem entrar agora. Durante a VIAGEM é que
+         nunca se grava o bitmap inteiro (AC-10) — lá saem deltas. */
+      if (mexeu && mascara) await transmitirNevoa({ fim: true });
 
       const resumo = resumoDaRevelacao(r.nosAlterados, r.trilhasAlteradas);
       anunciar(`Revelado para o grupo: ${resumo}.`);
@@ -956,7 +1246,10 @@ export default function MesaDoMapaMundi({
     } finally {
       if (vivo.current) setOcupado(false);
     }
-  }, [podeVerMolde, molde, estado, campaignId, instanciaId, revelado, mexerNaNevoa, mascara, raioDeChegada, anunciar]);
+  }, [
+    podeVerMolde, molde, estado, campaignId, instanciaId, revelado,
+    mexerNaNevoa, mascara, raioDeChegada, anunciar, transmitirNevoa,
+  ]);
 
   /* ── Relógio e comida na mão do mestre ─────────────────────────────── */
   const ajustarGrupo = useCallback(async (patch) => {
@@ -1131,6 +1424,10 @@ export default function MesaDoMapaMundi({
             onClicarNo={aoClicarNo}
             altura={altura}
             destaque={espiando ? COR_DA_VISAO_DE_JOGADOR : null}
+            /* F7 · movimento 5: o relógio CRU, não o normalizado. `null` (a
+               mesa que ainda não tem hora corrida) tem de chegar como `null`
+               para a tinta ficar neutra — ver `Mesa/animacaoUi.js`. */
+            relogio={party?.inGameDatetime ?? null}
           />
 
           <div style={{ display: "flex", flexDirection: "column", gap: SP.x3, minWidth: 0 }}>
@@ -1159,7 +1456,11 @@ export default function MesaDoMapaMundi({
               <Acampamento
                 party={party}
                 consumoPorDia={consumoPorDia(party)}
-                permissao={podeAcampar({ noAtual: noDoMoldeAtual, viajando })}
+                /* "Em trânsito" agora é um estado de verdade (F7): o grupo com
+                   percurso em curso e o marcador parado no meio da estrada. Até
+                   a F6 isto só era verdade durante os poucos segundos da
+                   animação — a regra existia e nunca acontecia. */
+                permissao={podeAcampar({ noAtual: noDoMoldeAtual, viajando: viajando || emTransito })}
                 perigo={perigoDaRegiao(party)}
                 onPerigo={ajustarPerigo}
                 onAcampar={acamparAgora}

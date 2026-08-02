@@ -337,6 +337,28 @@ export function idDoEncontro(dataHora) {
 }
 
 /**
+ * O id da PENDÊNCIA — o que identifica a decisão, não o encontro (F7 · AC-10).
+ *
+ * Nada a ver com `idDoEncontro` acima, e a diferença importa: aquele nomeia o
+ * conteúdo que o GRUPO vai ler (e por isso sai do relógio de jogo, para não
+ * contar quantos encontros o mestre ignorou); este nomeia a pergunta que está
+ * na tela do MESTRE, num documento que o jogador não lê.
+ *
+ * É ele que `resolverPendencia` confere na transação: quem decidir primeiro
+ * vence, e a segunda aba descobre que decidiu sobre algo que já não existe.
+ * Carrega a sessão da aba porque duas abas sorteando ao mesmo tempo, no mesmo
+ * milissegundo, escolheriam o mesmo id — e aí a transação acharia que são a
+ * mesma pendência.
+ *
+ * @param {string} [sessao] identificador curto da aba.
+ * @returns {string}
+ */
+export function idDaPendencia(sessao) {
+  const marca = String(sessao || "x").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || "x";
+  return `pend-${Date.now().toString(36)}-${marca}`;
+}
+
+/**
  * O anúncio que o MESTRE ouve quando decide. O grupo não ouve nada disto —
  * o `aria-live` da mesa é compartilhado, mas quem monta a frase é o cliente,
  * e só o do mestre chega aqui.

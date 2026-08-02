@@ -40,9 +40,15 @@ jest.mock("../mesaStore", () => ({
   moverGrupo: jest.fn(),
   atualizarParty: jest.fn(),
   atualizarGm: jest.fn(),
-  salvarFogDaMesa: jest.fn(),
   getFundoDaMesa: jest.fn(),
   mestreDaInstancia: jest.fn(),
+  atualizarViagem: jest.fn(),
+  concluirViagem: jest.fn(),
+  projecaoDaViagem: jest.fn(),
+  reservarPendencia: jest.fn(),
+  resolverPendencia: jest.fn(),
+  salvarDeltaDaNevoa: jest.fn(),
+  consolidarNevoaDaMesa: jest.fn(),
 }));
 
 jest.mock("../worldMapStore", () => ({
@@ -53,8 +59,12 @@ jest.mock("../worldMapStore", () => ({
 import MesaDoMapaMundi from "../Mesa";
 import {
   useInstancias, useReveladoNaMesa, useParty, useFogDaMesa, useGmDaMesa,
-  publicarRevelacao, moverGrupo, atualizarParty, atualizarGm, salvarFogDaMesa,
+  publicarRevelacao, moverGrupo, atualizarParty, atualizarGm,
   getFundoDaMesa, mestreDaInstancia,
+} from "../mesaStore";
+import {
+  atualizarViagem, concluirViagem, projecaoDaViagem, reservarPendencia, resolverPendencia,
+  salvarDeltaDaNevoa, consolidarNevoaDaMesa,
 } from "../mesaStore";
 import { useGrafo, useEventos } from "../worldMapStore";
 import { criarEvento } from "../model/eventos";
@@ -165,12 +175,22 @@ const montarJogador = (props = {}) => render(
 /** Fixa toda a aleatoriedade da mesa numa fração só. */
 const comSorte = (valor) => jest.spyOn(Math, "random").mockReturnValue(valor);
 
-/** A última pendência gravada em `gm.pendingEncounter`. */
+/**
+ * A última pendência posta na fila do mestre.
+ *
+ * Desde a F7 ela nasce por `reservarPendencia` — uma TRANSAÇÃO que só grava se
+ * não houver outra — em vez de um `atualizarGm` cego. É o que faz duas abas do
+ * mestre sorteando ao mesmo tempo não sobrescreverem uma à outra (AC-10).
+ */
 const ultimaPendencia = () => {
-  const chamada = atualizarGm.mock.calls
-    .filter(([, , patch]) => patch && "pendingEncounter" in patch)
-    .at(-1);
-  return chamada ? chamada[2].pendingEncounter : undefined;
+  const chamada = reservarPendencia.mock.calls.at(-1);
+  return chamada ? chamada[2] : undefined;
+};
+
+/** O patch da última DECISÃO reivindicada (`resolverPendencia`). */
+const ultimaDecisao = () => {
+  const chamada = resolverPendencia.mock.calls.at(-1);
+  return chamada ? chamada[3] : undefined;
 };
 
 /** As `flags` do grupo gravadas por `atualizarParty`, na última escrita. */
@@ -205,8 +225,18 @@ beforeEach(() => {
   moverGrupo.mockResolvedValue(undefined);
   atualizarParty.mockResolvedValue(undefined);
   atualizarGm.mockResolvedValue(undefined);
-  salvarFogDaMesa.mockResolvedValue({ bytes: 0 });
   getFundoDaMesa.mockResolvedValue(null);
+  /* ── F7 (tempo real) ───────────────────────────────────────────────
+     A chegada agora fecha `party.viagem` por transação e a decisão do
+     encontro é reivindicada antes de publicar. Sem estes dublês nada disso
+     resolve, e a mesa para na primeira estrada. */
+  concluirViagem.mockResolvedValue({ aplicou: true, motivo: "" });
+  atualizarViagem.mockResolvedValue(undefined);
+  projecaoDaViagem.mockImplementation((v, extra = {}) => ({ ...(v || {}), ...extra }));
+  reservarPendencia.mockImplementation(async (_c, _i, p) => ({ reservada: true, motivo: "", pendencia: p }));
+  resolverPendencia.mockImplementation(async () => ({ decidida: true, motivo: "", pendencia: null }));
+  salvarDeltaDaNevoa.mockResolvedValue({ id: "d_000001_teste", bytes: 12 });
+  consolidarNevoaDaMesa.mockResolvedValue({ bytes: 120, apagados: 0 });
   comCenario();
 });
 
@@ -342,7 +372,9 @@ describe("o encontro da estrada", () => {
     montarMestre();
 
     fireEvent.click(await screen.findByTestId("wmm-destino-n3"));
-    await waitFor(() => expect(atualizarParty).toHaveBeenCalled());
+    /* O sinal de "a chegada aconteceu" é o FECHO da viagem: desde a F7 é ele
+       que paga a estrada (relógio e comida), não mais um `atualizarParty`. */
+    await waitFor(() => expect(concluirViagem).toHaveBeenCalled());
 
     expect(ultimaPendencia()).toBeUndefined();
     expect(ultimasFlags()).toBeUndefined();
@@ -375,7 +407,7 @@ describe("o encontro da estrada", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     await waitFor(() => expect(screen.queryByTestId("wmm-encontro-do-mestre")).not.toBeInTheDocument());
-    expect(atualizarGm).not.toHaveBeenCalled();
+    expect(resolverPendencia).not.toHaveBeenCalled();
     expect(publicarRevelacao).not.toHaveBeenCalled();
     /* E há como voltar a ela — senão a mesa ficaria parada sem destravamento. */
     expect(screen.getByTestId("wmm-reabrir-encontro")).toBeInTheDocument();
@@ -410,11 +442,11 @@ describe("o mestre decide", () => {
     expect(Object.keys(publicados[0]).sort()).toEqual(["id", "playerText", "title"]);
     expect(JSON.stringify(publicados[0])).not.toContain("alfa está ferido");
 
-    /* A pendência é encerrada e a sugestão é CONSUMIDA (não sai de novo). */
+    /* A pendência é encerrada — pela transação, que é o que a torna ÚNICA — e a
+       sugestão é CONSUMIDA (não sai de novo). */
     await waitFor(() => {
-      const patch = atualizarGm.mock.calls.at(-1)[2];
-      expect(patch.pendingEncounter).toBeNull();
-      expect(patch.triggeredEventIds).toContain("ev-lobos");
+      expect(resolverPendencia).toHaveBeenCalled();
+      expect(ultimaDecisao().triggeredEventIds).toContain("ev-lobos");
     });
     /* E a viagem volta a andar. */
     await waitFor(() => expect(ultimasFlags()).toEqual({}));
@@ -434,19 +466,18 @@ describe("o mestre decide", () => {
     expect(publicado.playerText).toBe("Alguém toca um sino, três vezes.");
     expect(JSON.stringify(eventosPublicados())).not.toContain("Lobos na neblina");
     /* Trocar não consome a sugestão: o mestre disse "agora não", não "nunca". */
-    expect(atualizarGm.mock.calls.at(-1)[2].triggeredEventIds).toBeUndefined();
+    expect(ultimaDecisao().triggeredEventIds).toBeUndefined();
   });
 
   it("IGNORAR não deixa rastro nenhum — nem documento, nem id, nem marca", async () => {
     abrirComPendencia();
     fireEvent.click(await screen.findByTestId("wmm-encontro-ignorar"));
 
-    await waitFor(() => expect(atualizarGm).toHaveBeenCalled());
+    await waitFor(() => expect(resolverPendencia).toHaveBeenCalled());
 
     /* A prova: NADA foi escrito na coleção que o jogador lê. */
     expect(publicarRevelacao).not.toHaveBeenCalled();
-    const patch = atualizarGm.mock.calls.at(-1)[2];
-    expect(patch).toEqual({ pendingEncounter: null });
+    expect(ultimaDecisao()).toEqual({});
     /* E a única coisa que muda para o grupo é a viagem voltar a andar. */
     await waitFor(() => expect(ultimasFlags()).toEqual({}));
   });

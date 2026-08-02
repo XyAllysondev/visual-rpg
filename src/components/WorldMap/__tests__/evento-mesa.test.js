@@ -33,9 +33,15 @@ jest.mock("../mesaStore", () => ({
   moverGrupo: jest.fn(),
   atualizarParty: jest.fn(),
   atualizarGm: jest.fn(),
-  salvarFogDaMesa: jest.fn(),
   getFundoDaMesa: jest.fn(),
   mestreDaInstancia: jest.fn(),
+  atualizarViagem: jest.fn(),
+  concluirViagem: jest.fn(),
+  projecaoDaViagem: jest.fn(),
+  reservarPendencia: jest.fn(),
+  resolverPendencia: jest.fn(),
+  salvarDeltaDaNevoa: jest.fn(),
+  consolidarNevoaDaMesa: jest.fn(),
 }));
 
 jest.mock("../worldMapStore", () => ({
@@ -46,8 +52,12 @@ jest.mock("../worldMapStore", () => ({
 import MesaDoMapaMundi from "../Mesa";
 import {
   useInstancias, useReveladoNaMesa, useParty, useFogDaMesa, useGmDaMesa,
-  publicarRevelacao, moverGrupo, atualizarParty, atualizarGm, salvarFogDaMesa,
+  publicarRevelacao, moverGrupo, atualizarParty, atualizarGm,
   getFundoDaMesa, mestreDaInstancia,
+} from "../mesaStore";
+import {
+  atualizarViagem, concluirViagem, projecaoDaViagem, reservarPendencia, resolverPendencia,
+  salvarDeltaDaNevoa, consolidarNevoaDaMesa,
 } from "../mesaStore";
 import { useGrafo, useEventos } from "../worldMapStore";
 import { criarEvento } from "../model/eventos";
@@ -210,8 +220,18 @@ beforeEach(() => {
   moverGrupo.mockResolvedValue(undefined);
   atualizarParty.mockResolvedValue(undefined);
   atualizarGm.mockResolvedValue(undefined);
-  salvarFogDaMesa.mockResolvedValue({ bytes: 0 });
   getFundoDaMesa.mockResolvedValue(null);
+  /* ── F7 (tempo real) ───────────────────────────────────────────────
+     A chegada agora fecha `party.viagem` por transação e a decisão do
+     encontro é reivindicada antes de publicar. Sem estes dublês nada disso
+     resolve, e a mesa para na primeira estrada. */
+  concluirViagem.mockResolvedValue({ aplicou: true, motivo: "" });
+  atualizarViagem.mockResolvedValue(undefined);
+  projecaoDaViagem.mockImplementation((v, extra = {}) => ({ ...(v || {}), ...extra }));
+  reservarPendencia.mockImplementation(async (_c, _i, p) => ({ reservada: true, motivo: "", pendencia: p }));
+  resolverPendencia.mockImplementation(async () => ({ decidida: true, motivo: "", pendencia: null }));
+  salvarDeltaDaNevoa.mockResolvedValue({ id: "d_000001_teste", bytes: 12 });
+  consolidarNevoaDaMesa.mockResolvedValue({ bytes: 120, apagados: 0 });
   comCenario();
 });
 
