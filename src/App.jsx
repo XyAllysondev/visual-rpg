@@ -38,6 +38,8 @@ const OrdemParanormalSheet = lazy(() => import("./components/systems/OrdemParano
 // Construtor de tokens (paper-doll) — pesado em assets, carrega só quando aberto
 const TokenBuilder = lazy(() => import("./components/systems/OrdemParanormal/TokenBuilder"));
 const DungeonsAndDragonsSheet = lazy(() => import("./components/systems/DungeonsAndDragons/DungeonsAndDragonsSheet"));
+// A MESA do mapa-múndi (spec 0028 F4) — só carrega quando o grupo a abre.
+const MesaDoMapaMundi = lazy(() => import("./components/WorldMap/Mesa"));
 
 const googleProvider = new GoogleAuthProvider();
 
@@ -3055,6 +3057,10 @@ function MapaScreen({ uid, plan = 'free', onBack }) {
 function CampaignMapTab({ campaignId, uid, isMaster }) {
   const [mesaAberta, setMesaAberta] = useState(false);
   const [builderAberto, setBuilder] = useState(false);
+  /* A MESA do mapa-múndi (spec 0028 F4). Componente irmão do MapEditor, nunca
+     uma modalidade dentro dele (AC-12) — e aberto pelos DOIS papéis: o mestre
+     orquestra, o jogador viaja (AC-8). */
+  const [mundoAberto, setMundoAberto] = useState(false);
   const [flash, setFlash] = useState("");
 
   /* Token construído entra na biblioteca de assets do usuário como
@@ -3093,6 +3099,13 @@ function CampaignMapTab({ campaignId, uid, isMaster }) {
             <TokenBuilder onSalvar={salvarTokenNaBiblioteca} onFechar={()=>setBuilder(false)} />
           </Suspense>
         </div>
+      ) : mundoAberto ? (
+        <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0, overflowY:'auto' }}>
+          <Suspense fallback={<div style={{ padding:40, textAlign:'center', color:'var(--muted)', fontFamily:'Crimson Pro,serif' }}>Abrindo o mapa-múndi…</div>}>
+            <MesaDoMapaMundi campaignId={campaignId} uid={uid} isMaster={isMaster}
+              onSair={() => setMundoAberto(false)} />
+          </Suspense>
+        </div>
       ) : (
         <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', flex:1, gap:16, textAlign:'center' }}>
           <div style={{ fontSize:58, opacity:0.35 }}>🗺️</div>
@@ -3106,6 +3119,10 @@ function CampaignMapTab({ campaignId, uid, isMaster }) {
             <button onClick={() => setMesaAberta(true)}
               style={{ padding:'10px 22px', borderRadius:8, border:'1px solid rgba(176,48,216,0.5)', background:'rgba(176,48,216,0.15)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:1 }}>
               🗺️ Abrir mesa tática
+            </button>
+            <button onClick={() => setMundoAberto(true)}
+              style={{ padding:'10px 22px', borderRadius:8, border:'1px solid rgba(201,168,76,0.5)', background:'rgba(201,168,76,0.12)', color:'var(--gold2)', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:1 }}>
+              🧭 Mapa-múndi
             </button>
             <button onClick={() => setBuilder(true)}
               style={{ padding:'10px 22px', borderRadius:8, border:'1px solid rgba(201,168,76,0.5)', background:'rgba(201,168,76,0.12)', color:'var(--gold2)', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:1 }}>

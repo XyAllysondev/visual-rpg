@@ -26,6 +26,7 @@ import {
 import { PLAN_QUOTAS } from "../model/quotas";
 import { ehMapaPadrao } from "../model/mapaPadrao";
 import EditorDoGrafo from "../Editor";
+import LevarParaMesa from "./LevarParaMesa";
 import {
   SP, R, FS, T, SURF, LINE, HIT, btnStyle, contarNos, tempoRelativo,
   mensagemDeErro, DANGER_TEXT_AA,
@@ -76,13 +77,15 @@ export function urlDoFundo(molde) {
  * @param {number} props.limiteNos   teto de nós do plano (AC-3)
  * @param {string} [props.plan]      identificador do plano, quando o ateliê o tiver
  * @param {Array}  [props.cenas]     cenas táticas do mestre, para vincular a um lugar
+ * @param {Array}  [props.campanhas] mesas do mestre; sem ela, o painel de "Levar para a
+ *   mesa" as busca sozinho (ver `LevarParaMesa.jsx`)
  * @param {Function} [props.onUsarComoBase] cria uma cópia editável do mapa padrão (AC-13)
  * @param {Function} props.onVoltar
  * @param {Function} props.onRenomear
  * @param {Function} props.onExcluir
  */
 export default function MoldeDetalhe({
-  molde, uid, limiteNos, plan, cenas = [], onUsarComoBase,
+  molde, uid, limiteNos, plan, cenas = [], campanhas, onUsarComoBase,
   onVoltar, onRenomear, onExcluir,
 }) {
   const [preview, setPreview] = useState("");     // dataURL local, antes de subir
@@ -361,6 +364,9 @@ export default function MoldeDetalhe({
           onUsarComoBase={onUsarComoBase}
         />
       </div>
+
+      {/* ── Ateliê → Mesa (F4 · AC-7) ─────────────────────────────── */}
+      <LevarParaMesa uid={uid} molde={molde} campanhas={campanhas} />
     </section>
   );
 }

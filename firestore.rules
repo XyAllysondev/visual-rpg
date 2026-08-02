@@ -158,6 +158,95 @@ service cloud.firestore {
             && layerPerm(campaignId, docId, resource.data.layerId, 'delete') == 'owner';
         }
       }
+
+      // ── Mapa-múndi · MESA (spec 0028 / F4 · AC-1, AC-7, AC-10) ───────────────
+      // A instância é o molde levado a ESTA mesa: guarda o progresso do grupo e
+      // NADA do que o mestre escondeu. O molde (com `gmNotes`, trilhas secretas e
+      // nós ocultos) continua só em `users/{uid}/worldmaps/**` — o bloco lá em
+      // cima nega a qualquer outro uid, e é isso que sustenta o AC-1. Aqui embaixo
+      // só chega o que já foi revelado, em documentos criados no ato da revelação.
+      //
+      // Subcoleção NÃO herda a regra do documento pai: cada uma é declarada.
+      //
+      // ═══ O TETO DE 20 ACCESS CALLS — leia antes de trocar qualquer condição ═══
+      //
+      // O Firestore permite no máximo 20 `get()`/`exists()` por escrita em LOTE, e
+      // o orçamento é do lote inteiro, não de cada documento. `isMaster()` é um
+      // `get()`. Uma revelação de região grava dezenas de documentos em `revealed/`
+      // de uma vez: com a regra baseada em `get()`, o lote INTEIRO é negado e nada
+      // é revelado. Não é teoria — foi exatamente o que aconteceu com o mundo demo
+      // da Forja no bloco `worlds/` (~48 documentos), que nascia vazio.
+      //
+      // A saída é a mesma de lá: denormalizar. Aqui a denormalização está no ID da
+      // instância, que é `{uidDoMestre}~{mapId}` (ver `WorldMap/mesaStore.js`,
+      // `idDaInstancia`). `donoDaInstancia()` compara o prefixo do id com
+      // `request.auth.uid` — ZERO access calls — e o `||` curto-circuita antes de
+      // chegar em `isMaster()`. Um lote de 300 revelações custa 0 leituras de regra.
+      //
+      // Isso é seguro porque o documento RAIZ da instância só nasce por `isMaster()`
+      // (escrita de documento único: 1 access call, muito abaixo do teto). Logo, só
+      // existe instância cujo id nomeia o mestre da campanha, e só o uid nomeado no
+      // id escreve na subárvore dela. O `isMaster()` fica como segunda alternativa
+      // para o caso de a mesa trocar de mestre.
+      //
+      // O que sobra, dito por extenso: um membro qualquer consegue escrever numa
+      // subárvore cujo id comece com o PRÓPRIO uid — mas o documento raiz dela
+      // nunca existe (só `isMaster()` cria), então nenhuma consulta a devolve e
+      // nenhuma tela a mostra. É lixo invisível no espaço dele, não acesso ao
+      // mapa do grupo: a instância de verdade tem o uid do MESTRE no id, e a
+      // escrita dele ali continua negada.
+      //
+      // Trocar o separador `~` aqui obriga a trocar `SEPARADOR_DA_INSTANCIA` no
+      // `mesaStore.js` no mesmo commit — os dois leem o mesmo id.
+      match /worldmaps/{instanceId} {
+        allow read: if request.auth != null && isMember(campaignId);
+        allow write: if request.auth != null && isMaster(campaignId);
+
+        // O que já foi revelado: nós, trilhas e o texto público dos eventos.
+        // É a única fonte do mapa para o jogador — o que não está aqui não existe
+        // para ele nem no tráfego de rede.
+        match /revealed/{docId} {
+          allow read: if request.auth != null && isMember(campaignId);
+          allow write: if request.auth != null
+            && (donoDaInstancia(instanceId) || isMaster(campaignId));
+        }
+
+        // Cópia da ilustração de fundo (plano B do ADR-0008: base64 no Firestore).
+        // Existe porque o jogador não alcança o documento do ateliê onde a arte
+        // original mora — sem a cópia, o mapa chegaria à mesa sem ilustração.
+        match /media/{docId} {
+          allow read: if request.auth != null && isMember(campaignId);
+          allow write: if request.auth != null
+            && (donoDaInstancia(instanceId) || isMaster(campaignId));
+        }
+
+        // Onde o grupo está, o relógio e os suprimentos.
+        // O JOGADOR também escreve aqui — mas só o movimento (AC-8: "o jogador
+        // clica em nó adjacente por trilha revelada para viajar"). A lista de
+        // campos é o espelho de `CAMPOS_DO_MOVIMENTO` no `mesaStore.js`.
+        match /party/{docId} {
+          allow read: if request.auth != null && isMember(campaignId);
+          allow write: if request.auth != null
+            && (donoDaInstancia(instanceId) || isMaster(campaignId));
+          allow update: if request.auth != null && isMember(campaignId)
+            && onlyUpdatingFields(['currentNodeId', 'x', 'y', 'movedBy', 'updatedAt']);
+        }
+
+        // A máscara de névoa daquele grupo (formato da F3, `model/fogMask.js`).
+        match /fog/{docId} {
+          allow read: if request.auth != null && isMember(campaignId);
+          allow write: if request.auth != null
+            && (donoDaInstancia(instanceId) || isMaster(campaignId));
+        }
+
+        // Painel do mestre: eventos disparados, encontro aguardando decisão,
+        // rascunho. O jogador NEM LÊ — não há `isMember` nenhum nesta linha, e
+        // isso é proposital (design §3).
+        match /gm/{docId} {
+          allow read, write: if request.auth != null
+            && (donoDaInstancia(instanceId) || isMaster(campaignId));
+        }
+      }
     }
 
     // ── Worlds (Forja do Mestre — spec 0027) ─────────────────────────────────
@@ -227,6 +316,14 @@ service cloud.firestore {
 
     function isMaster(campaignId) {
       return request.auth.uid == get(/databases/$(database)/documents/campaigns/$(campaignId)).data.masterId;
+    }
+
+    // Dono da instância do mapa-múndi na mesa (spec 0028 F4), lido do PRÓPRIO id
+    // do documento: `{uidDoMestre}~{mapId}`. **Zero access calls** — é o que faz
+    // um lote de dezenas de revelações caber no teto de 20 `get()` por escrita em
+    // lote. Ver o bloco `campaigns/{id}/worldmaps` para o porquê por extenso.
+    function donoDaInstancia(instanceId) {
+      return instanceId.split('~')[0] == request.auth.uid;
     }
 
     // Dono do mundo da Forja do Mestre (spec 0027) — lido do documento raiz.
