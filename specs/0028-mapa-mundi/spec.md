@@ -37,7 +37,14 @@ eventos escondidos disparam. O mestre orquestra; os jogadores veem e participam.
 - **Porque** esses dados vivem em `users/{uid}/worldmaps/**`, que as rules negam a qualquer outro
   uid; a campanha só recebe documentos criados **no ato da revelação**
 - **E** `gmNotes`/`gmText` nunca são copiados para a projeção pública — o campo não existe no payload
-- **Gate:** teste de rules (deny) + verificação manual de payload no DevTools
+- **Gate:** teste de rules (deny) + verificação de payload real
+  > ✅ **PROVADO EM PRODUÇÃO (2026-08-02).** Duas contas reais, SDK autenticado como jogador
+  > membro da campanha, atacando fora do app. As 6 tentativas de leitura do ateliê e do doc `gm`
+  > voltaram `permission-denied`. O payload real do cliente do jogador tem **1 nó** — o mapa tem
+  > **12 nós e 16 trilhas**, sendo 3 secretas. Os outros 11 nós e todas as trilhas não foram
+  > filtrados no render: nunca saíram do ateliê. Nenhum campo venenoso (`gmNotes`, `gmText`,
+  > `isSecret`, `discoveryCheck`, `dangerLevel`) existe no payload. Evidência em
+  > `scratchpad/e2e/RELATORIO-AC1.md` e nos scripts `ac1-final.mjs` / `ac1-conteudo.mjs`.
 
 ### AC-2: O Ateliê é o lugar do mestre `[F1]`
 - **Dado** um mestre na aba **Mapas**
@@ -185,7 +192,7 @@ eventos escondidos disparam. O mestre orquestra; os jogadores veem e participam.
 | F4 | Levar para a mesa + máquina de estados + viagem + revelação | ✅ |
 | F5 | Eventos, gatilhos, testes de descoberta (+ `domain/dice.js` extraído) | ✅ |
 | F6 | Tempo, suprimentos, encontros, acampamento | ✅ |
-| **F7** | Tempo real com deltas + as 5 animações + polimento | **próxima** |
+| F7 | Tempo real com deltas + as 5 animações + polimento | ✅ |
 
 ## Verificação
 
