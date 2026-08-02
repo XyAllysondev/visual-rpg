@@ -27,6 +27,7 @@ import WorldMapAtelier from './components/WorldMap/Atelier';
 import { saveAsset } from './components/MapEditor/assets/assetLib';
 import LicencaOP from "./components/LicencaOP";
 import { getActiveAvatar } from "./domain/character";
+import { rollDice, rollNotation, rollOP } from "./domain/dice";
 import REGRAS_OFICIAIS from "./data/ordemParanormal/regras-oficiais.json";
 import RITUAIS_LIB from "./data/ordemParanormal/rituais-oficiais.json";
 import ITENS_LIB from "./data/ordemParanormal/itens-oficiais.json";
@@ -109,18 +110,7 @@ const createPixPayment = async (userId, userEmail) => {
   return res.json();
 };
 
-/* ── Dice roller: parses "2d6+3", "1d20", "1d100-5" ── */
-const rollDice = (expr) => {
-  const clean = expr.replace(/\s/g,"").toLowerCase();
-  const match = clean.match(/^(\d+)d(\d+)([+-]\d+)?$/);
-  if (!match) return null;
-  const count = Math.min(parseInt(match[1]),20);
-  const sides = Math.min(parseInt(match[2]),100);
-  const mod = match[3] ? parseInt(match[3]) : 0;
-  const rolls = Array.from({length:count},()=>Math.floor(Math.random()*sides)+1);
-  const total = rolls.reduce((a,b)=>a+b,0)+mod;
-  return { expr:clean, rolls, mod, total, sides, count };
-};
+/* ── Dice roller: ver src/domain/dice.js (motor único — spec 0028 AC-9) ── */
 
 /* ── Campaign helpers ── */
 const generateInviteCode = () => {
@@ -3158,15 +3148,6 @@ const EMPTY_OP_CREATURE = {
   acoes:[], poderes:[], descricaoTexto:'', enigmas:[],
 };
 
-function rollDiceStr(notation) {
-  const m = String(notation).match(/(\d+)d(\d+)([+-]\d+)?/i);
-  if (!m) return null;
-  const cnt=parseInt(m[1]), sides=parseInt(m[2]), mod=m[3]?parseInt(m[3]):0;
-  let sum=mod; const rolls=[];
-  for (let i=0;i<cnt;i++){ const r=Math.floor(Math.random()*sides)+1; rolls.push(r); sum+=r; }
-  return { total:sum, rolls, notation };
-}
-
 
 // Condições fiéis ao livro base de Ordem Paranormal (spec 0021). Textos verificados contra
 // as fontes oficiais/compilações (Guia Rápido de Regras). São de referência (o app não aplica
@@ -3397,7 +3378,12 @@ function BestiaryTab({ campaignId }) {
     setViewCreature(v => v && v.id === creature.id ? { ...v, hpCurrent: next } : v);
   }
 
-  function doRoll(notation) { const r = rollDiceStr(notation); if (r) setRollResult(r); }
+  // Bestiário: dialeto permissivo com contagem obrigatória ("d6" nunca foi aceito aqui).
+  // A UI consome { total, rolls, notation } — adaptado aqui, não no domínio.
+  function doRoll(notation) {
+    const r = rollNotation(notation, { requireCount: true });
+    if (r) setRollResult({ total: r.total, rolls: r.rolls, notation });
+  }
 
   const filtered = creatures.filter(c =>
     (filterSys === 'Todos' || c.system === filterSys) &&
@@ -6899,15 +6885,9 @@ function SystemSelect({ onSelect, onLogout }) {
 ═══════════════════════════════ */
 
 /* ══════════════════════════════════════════
-   DICE ROLL POPUP — OP rule: N d20, pega o maior
-   (se atributo 0: rola 2d20, pega o PIOR)
+   DICE ROLL POPUP — regra OP (N d20, pega o maior; atributo 0 pega o PIOR)
+   vive em src/domain/dice.js → rollOP
 ══════════════════════════════════════════ */
-function rollOP(attrVal) {
-  const n = attrVal === 0 ? 2 : attrVal;
-  const rolls = Array.from({ length: n }, () => Math.floor(Math.random() * 20) + 1);
-  const result = attrVal === 0 ? Math.min(...rolls) : Math.max(...rolls);
-  return { rolls, result, worst: attrVal === 0, crit: rolls.includes(20), dice: "D20" };
-}
 
 /* ── Attribute Diagram SVG — clickable nodes with roll popup ── */
 const AttrDiagram = ({ attrs, onChange, onEdit, onRoll, readOnly = false }) => {
@@ -8288,12 +8268,12 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
   }, [attrs.AGI, attrs.FOR, attrs.INT, attrs.PRE, attrs.VIG]);
 
   const rollFreeInput = () => {
-    const match = diceInput.match(/^(\d+)?[dD](\d+)([+-]\d+)?$/);
-    if (!match) { setRollPopup({ attr:"Erro", rolls:[], result:"Ex: 1d20+3", worst:false }); return; }
-    const n=parseInt(match[1]||"1"), d=parseInt(match[2]), mod=parseInt(match[3]||"0");
-    const rolls=Array.from({length:n},()=>Math.floor(Math.random()*d)+1);
-    const crit=d===20&&rolls.includes(20);
-    const popup = { attr:diceInput.toUpperCase(), rolls, result:rolls.reduce((a,b)=>a+b,0)+mod, worst:false, crit, dice:`D${d}`, expr:diceInput };
+    // Campo livre da ficha: notação permissiva (N opcional, sem tetos), mas âncorada —
+    // o usuário digitou a expressão inteira, então lixo em volta continua sendo erro.
+    const r = /^(\d+)?[dD](\d+)([+-]\d+)?$/.test(diceInput) ? rollNotation(diceInput) : null;
+    if (!r) { setRollPopup({ attr:"Erro", rolls:[], result:"Ex: 1d20+3", worst:false }); return; }
+    const crit=r.sides===20&&r.rolls.includes(20);
+    const popup = { attr:diceInput.toUpperCase(), rolls:r.rolls, result:r.total, worst:false, crit, dice:`D${r.sides}`, expr:diceInput };
     setRollPopup(popup);
     onRoll?.({ ...popup, charName: form.personagem || character.form?.personagem || "Agente" });
   };
@@ -9305,31 +9285,28 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                                 const ATTR_MAP={"Agilidade":"AGI","Força":"FOR","Intelecto":"INT","Presença":"PRE","Vigor":"VIG","Nenhum":null};
                                 const attrKey=ATTR_MAP[atk.attrDmg]||null;
                                 const attrVal=attrKey ? (attrs[attrKey]||1) : 1;
-                                const poolSize=attrVal===0?2:attrVal;
-                                const atkRolls=Array.from({length:poolSize},()=>Math.floor(Math.random()*20)+1);
-                                const atkResult=attrVal===0?Math.min(...atkRolls):Math.max(...atkRolls);
+                                const pool=rollOP(attrVal);
                                 const atkBonus=parseInt(atk.bonus||"0");
                                 const critThreshold=parseInt(atk.crit||"20");
-                                const crit=atkResult>=critThreshold;
+                                // Margem de ameaça da arma vence o crit "qualquer 20" do rollOP.
+                                const crit=pool.result>=critThreshold;
                                 // Calcula dano (crítico = resultado × multiplicador)
-                                const dm=(atk.dmg||"").match(/(\d+)?[dD](\d+)([+-]\d+)?/);
+                                const dmg=rollNotation(atk.dmg||"");
                                 let dmgRolls=[],dmgTotal=0;
-                                if(dm){
-                                  const dn=parseInt(dm[1]||"1"),dd=parseInt(dm[2]),dmod=parseInt(dm[3]||"0");
-                                  dmgRolls=Array.from({length:dn},()=>Math.floor(Math.random()*dd)+1);
-                                  const base=dmgRolls.reduce((a,b)=>a+b,0)+dmod;
-                                  dmgTotal=crit ? base*parseInt(atk.mult||"2") : base;
+                                if(dmg){
+                                  dmgRolls=dmg.rolls;
+                                  dmgTotal=crit ? dmg.total*parseInt(atk.mult||"2") : dmg.total;
                                 }
                                 setRollPopup({
                                   type:"attack",
                                   name:atk.name,
                                   skill:atk.skill||"",
                                   attrKey:attrKey||"",
-                                  rolls:atkRolls,
-                                  ataque:atkResult+atkBonus,
+                                  rolls:pool.rolls,
+                                  ataque:pool.result+atkBonus,
                                   dmgRolls,
                                   dmgTotal,
-                                  worst:attrVal===0,
+                                  worst:pool.worst,
                                   crit,
                                   dice:"D20"
                                 });

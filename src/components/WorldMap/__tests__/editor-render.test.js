@@ -26,11 +26,19 @@ jest.mock("../worldMapStore", () => ({
   createEdge: jest.fn(),
   updateEdge: jest.fn(),
   deleteEdge: jest.fn(),
+  /* F5: os eventos entraram no editor. O dublê precisa acompanhar, senão o
+     hook chega `undefined` e a tela quebra antes de qualquer asserção. O gate
+     dos eventos é `evento-atelie.test.js`; aqui eles só não podem atrapalhar. */
+  useEventos: jest.fn(),
+  createEvent: jest.fn(),
+  updateEvent: jest.fn(),
+  deleteEvent: jest.fn(),
 }));
 
 import EditorDoGrafo from "../Editor";
 import {
   useGrafo, createNode, updateNode, deleteNode, createEdge, updateEdge, deleteEdge,
+  useEventos,
 } from "../worldMapStore";
 import { criarNo, criarTrilha } from "../model/graph";
 import { MAPA_PADRAO_ID } from "../model/mapaPadrao";
@@ -78,6 +86,7 @@ beforeEach(() => {
     disconnect() {}
   };
   comGrafo([VILA, COVA]);
+  useEventos.mockReturnValue({ eventos: [], loading: false, error: null });
   createNode.mockResolvedValue("novo-1");
   updateNode.mockResolvedValue(undefined);
   deleteNode.mockResolvedValue({ trilhasRemovidas: 0 });

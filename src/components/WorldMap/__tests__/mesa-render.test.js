@@ -31,19 +31,25 @@ jest.mock("../mesaStore", () => ({
   salvarFogDaMesa: jest.fn(),
   getFundoDaMesa: jest.fn(),
   mestreDaInstancia: jest.fn(),
+  /* F5: a mesa passou a ler o painel do mestre (`gm/estado`) e a marcar nele
+     o que já disparou. O dublê acompanha; o gate dos eventos é
+     `evento-mesa.test.js`. */
+  useGmDaMesa: jest.fn(),
+  atualizarGm: jest.fn(),
 }));
 
 jest.mock("../worldMapStore", () => ({
   useGrafo: jest.fn(),
+  useEventos: jest.fn(),
 }));
 
 import MesaDoMapaMundi from "../Mesa";
 import {
   useInstancias, useReveladoNaMesa, useParty, useFogDaMesa,
   publicarRevelacao, moverGrupo, atualizarParty, salvarFogDaMesa, getFundoDaMesa,
-  mestreDaInstancia,
+  mestreDaInstancia, useGmDaMesa, atualizarGm,
 } from "../mesaStore";
-import { useGrafo } from "../worldMapStore";
+import { useGrafo, useEventos } from "../worldMapStore";
 import { criarMascara, contarReveladas } from "../model/fogMask";
 
 /* ── Geometria fingida: o jsdom devolve tudo zerado ──────────────────── */
@@ -132,6 +138,9 @@ beforeEach(() => {
   useParty.mockReturnValue({ party: PARTY, loading: false, error: null });
   useFogDaMesa.mockReturnValue({ mascara: null, bytes: 0, loading: false, error: null });
   useGrafo.mockReturnValue({ nos: MOLDE.nos, trilhas: MOLDE.trilhas, loading: false, error: null });
+  useEventos.mockReturnValue({ eventos: [], loading: false, error: null });
+  useGmDaMesa.mockReturnValue({ gm: null, loading: false, error: null });
+  atualizarGm.mockResolvedValue(undefined);
   mestreDaInstancia.mockImplementation((id) => String(id || "").split("~")[0]);
 
   publicarRevelacao.mockResolvedValue({ gravados: 2, pulados: 0 });

@@ -240,22 +240,26 @@ describe("pintura das trilhas no canvas", () => {
  *  4 · FERRAMENTAS E ATALHOS
  * ════════════════════════════════════════════════════════════════════ */
 describe("ferramentas", () => {
-  it("são as quatro do grafo (AC-4) mais o pincel de névoa (AC-5), com atalho único", () => {
-    expect(FERRAMENTAS.map((f) => f.id)).toEqual(["selecionar", "no", "trilha", "mao", "nevoa"]);
+  it("são as quatro do grafo (AC-4), o pincel de névoa (AC-5) e o evento (F5), com atalho único", () => {
+    expect(FERRAMENTAS.map((f) => f.id))
+      .toEqual(["selecionar", "no", "trilha", "mao", "nevoa", "evento"]);
     const atalhos = FERRAMENTAS.map((f) => f.atalho);
     expect(new Set(atalhos).size).toBe(atalhos.length);
   });
 
   it("o pincel de névoa só é oferecido com a névoa ligada", () => {
     /* Oferecer um pincel que não pinta nada seria mentira — e em somente
-       leitura (mapa padrão) sobram só as duas que não escrevem no molde. */
+       leitura (mapa padrão) sobram só as duas que não escrevem no molde.
+       A ferramenta de evento (F5) escreve no molde, então segue a mesma regra
+       do nó e da trilha: existe sempre, some em somente leitura. */
     expect(ferramentasDisponiveis({ comNevoa: true }).map((f) => f.id))
-      .toEqual(["selecionar", "no", "trilha", "mao", "nevoa"]);
+      .toEqual(["selecionar", "no", "trilha", "mao", "nevoa", "evento"]);
     expect(ferramentasDisponiveis({ comNevoa: false }).map((f) => f.id))
-      .toEqual(["selecionar", "no", "trilha", "mao"]);
+      .toEqual(["selecionar", "no", "trilha", "mao", "evento"]);
     expect(ferramentasDisponiveis({ somenteLeitura: true, comNevoa: true }).map((f) => f.id))
       .toEqual(["selecionar", "mao"]);
-    expect(ferramentasDisponiveis().map((f) => f.id)).toEqual(["selecionar", "no", "trilha", "mao"]);
+    expect(ferramentasDisponiveis().map((f) => f.id))
+      .toEqual(["selecionar", "no", "trilha", "mao", "evento"]);
   });
 
   it("toda ferramenta explica o que faz, em português", () => {

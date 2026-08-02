@@ -79,6 +79,7 @@ import { db } from "../../firebase";
 import { mensagemDeErro } from "../MasterSuite/model/erros";
 import { canAddNode, canCreateMap, quotaFor } from "./model/quotas";
 import { criarNo, criarTrilha, pontasDaTrilha, trilhaDuplicada } from "./model/graph";
+import { criarEvento } from "./model/eventos";
 import { CAMPO_DISPENSA, CAMPO_DISPENSA_EM, padraoDispensado } from "./model/mapaPadrao";
 
 /* ── Constantes ──────────────────────────────────────────────────────────── */
@@ -92,6 +93,16 @@ export const SUBCOLECOES = ["nodes", "edges", "events"];
 /** Nomes das subcoleções do grafo (design §3). Um documento por nó / por trilha. */
 export const NODES = "nodes";
 export const EDGES = "edges";
+
+/**
+ * Subcoleção dos eventos do molde (design §3, F5).
+ *
+ * Mora ao lado de `nodes` e `edges`, sob `users/{uid}/worldmaps/{mapId}` — a
+ * mesma regra do bloco do ateliê nega a leitura a qualquer outro uid, e é isso
+ * (não um filtro de render) que mantém `gmText`, gatilho e revelações fora do
+ * alcance do jogador enquanto o evento não dispara (AC-1).
+ */
+export const EVENTS = "events";
 
 /**
  * Subcoleção de mídia do molde e o id fixo do documento do fundo.
@@ -815,6 +826,7 @@ export function useMapaPadraoDispensado(uid) {
 
 const nodeRef = (uid, mapId, nodeId) => doc(db, USERS, uid, WORLDMAPS, mapId, NODES, nodeId);
 const edgeRef = (uid, mapId, edgeId) => doc(db, USERS, uid, WORLDMAPS, mapId, EDGES, edgeId);
+const eventRef = (uid, mapId, eventId) => doc(db, USERS, uid, WORLDMAPS, mapId, EVENTS, eventId);
 
 /** `id` é a chave do documento, nunca um campo dentro dele. */
 const semId = (obj) => { const { id, ...resto } = obj; return resto; };
@@ -1016,6 +1028,82 @@ export async function deleteEdge(uid, mapId, edgeId) {
   await updateDoc(mapRef(ownerUid, id), { updatedAt: serverTimestamp() });
 }
 
+/* ── Eventos (F5 · AC-1, AC-8) ───────────────────────────────────────────
+ *
+ *  O evento é o único documento do molde que tem DUAS caras: uma que o grupo
+ *  lê quando ele dispara (`title` + `playerText`) e outra que só o mestre vê
+ *  (`gmText`, `trigger`, `triggerConfig`, `reveals`, `linkedSceneId`). As duas
+ *  moram no MESMO documento aqui — e é seguro, porque este documento vive no
+ *  ateliê, onde as rules negam a leitura a qualquer outro uid. O que vai para a
+ *  campanha é a projeção de `mesaStore.projecaoDoEvento`, montada por lista
+ *  branca literal.
+ *
+ *  A régua do que é um evento válido é `model/eventos.js` (`criarEvento`), como
+ *  a do nó é `criarNo`. Aqui não há uma segunda. `validarEvento` é diagnóstico
+ *  do ateliê (avisa antes de a mesa começar), não bloqueio de escrita: evento
+ *  pela metade é trabalho em andamento. */
+
+/**
+ * Ancora um evento novo no molde.
+ *
+ * Nasce com gatilho `manual` (`GATILHO_PADRAO`) quando o chamador não diz
+ * outro — o único gatilho que não dispara sozinho, para um evento meio escrito
+ * nunca surpreender a mesa.
+ *
+ * @param {string} uid dono do mapa.
+ * @param {string} mapId id do mapa.
+ * @param {object} dados ver `criarEvento` (âncora, textos, gatilho, reveals).
+ * @returns {Promise<string>} id do evento criado.
+ */
+export async function createEvent(uid, mapId, dados) {
+  const ownerUid = requireText(uid, "É preciso estar autenticado para criar um evento.");
+  const id = requireText(mapId, "Informe em qual mapa-múndi o evento deve ser ancorado.");
+
+  const evento = criarEvento(dados);
+  const ref = await addDoc(subCol(ownerUid, id, EVENTS), {
+    ...semId(evento),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  await updateDoc(mapRef(ownerUid, id), { updatedAt: serverTimestamp() });
+  return ref.id;
+}
+
+/**
+ * Altera campos de um evento (âncora, textos, gatilho, configuração, revelações).
+ *
+ * @param {string} uid dono do mapa.
+ * @param {string} mapId id do mapa.
+ * @param {string} eventId id do evento.
+ * @param {object} patch campos a alterar.
+ */
+export async function updateEvent(uid, mapId, eventId, patch = {}) {
+  const ownerUid = requireText(uid, "É preciso estar autenticado para editar um evento.");
+  const id = requireText(mapId, "Informe de qual mapa-múndi é o evento.");
+  const evId = requireText(eventId, "Informe qual evento deve ser atualizado.");
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+    throw new Error("Informe os campos do evento que devem ser atualizados.");
+  }
+  await updateDoc(eventRef(ownerUid, id, evId), { ...semId(patch), updatedAt: serverTimestamp() });
+  await updateDoc(mapRef(ownerUid, id), { updatedAt: serverTimestamp() });
+}
+
+/**
+ * Apaga um evento. Os nós e as trilhas continuam onde estavam — o evento é uma
+ * coisa ancorada no mapa, não parte do mapa.
+ *
+ * @param {string} uid dono do mapa.
+ * @param {string} mapId id do mapa.
+ * @param {string} eventId id do evento.
+ */
+export async function deleteEvent(uid, mapId, eventId) {
+  const ownerUid = requireText(uid, "É preciso estar autenticado para remover um evento.");
+  const id = requireText(mapId, "Informe de qual mapa-múndi é o evento.");
+  const evId = requireText(eventId, "Informe qual evento deve ser removido.");
+  await deleteDoc(eventRef(ownerUid, id, evId));
+  await updateDoc(mapRef(ownerUid, id), { updatedAt: serverTimestamp() });
+}
+
 /**
  * Grava um grafo inteiro de uma vez, com ids explícitos.
  *
@@ -1108,4 +1196,36 @@ export function useGrafo(uid, mapId) {
   }, [uid, mapId]);
 
   return { nos, trilhas, loading: !(chegada.nos && chegada.trilhas), error };
+}
+
+/**
+ * Os eventos do molde, em tempo real (F5).
+ *
+ * Separado de `useGrafo` de propósito: quem desenha o mapa não precisa dos
+ * eventos, e a mesa do jogador **nunca** assina isto — só o cliente do mestre,
+ * que é o dono do documento. Assinatura com `uid` ou `mapId` vazio não abre
+ * listener nenhum, então a tela pode chamá-lo sempre, sem hook condicional.
+ *
+ * @param {string} uid dono do mapa.
+ * @param {string} mapId id do mapa.
+ * @returns {{eventos:object[], loading:boolean, error:Error|null}}
+ */
+export function useEventos(uid, mapId) {
+  const [estado, setEstado] = useState({ eventos: [], loading: false, error: null });
+
+  useEffect(() => {
+    if (!uid || !mapId) {
+      setEstado({ eventos: [], loading: false, error: null });
+      return undefined;
+    }
+    setEstado({ eventos: [], loading: true, error: null });
+    const unsub = onSnapshot(
+      subCol(uid, mapId, EVENTS),
+      (snap) => setEstado({ eventos: snapToList(snap), loading: false, error: null }),
+      (err) => setEstado({ eventos: [], loading: false, error: err }),
+    );
+    return () => unsub();
+  }, [uid, mapId]);
+
+  return estado;
 }

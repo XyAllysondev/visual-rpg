@@ -30,10 +30,19 @@
  *  e uma viagem remota NÃO regrava o movimento (senão os dois clientes
  *  ficariam se empurrando).
  *
+ *  ── OS EVENTOS E A PROCURA (F5) ─────────────────────────────────────
+ *  A chegada avalia os seis gatilhos (`avaliarGatilhos`) com o molde em
+ *  mãos, publica só `{id,title,playerText}` e anota o id em
+ *  `gm.triggeredEventIds`. A procura (AC-9) é oferecida em TODO nó e o
+ *  fracasso responde a mesma frase de um lugar vazio — a régua está no
+ *  cabeçalho de `EventosDoGrupo.jsx` e o gate em `evento-mesa.test.js`.
+ *
  *  ── O QUE NÃO ESTÁ AQUI ─────────────────────────────────────────────
- *  Eventos e gatilhos (F5), encontros e acampamento (F6), deltas de névoa
- *  e as cinco animações completas (F7). E nada de `MapEditor` — o
- *  mapa-múndi é componente irmão (AC-12).
+ *  Encontros e acampamento (F6), deltas de névoa e as cinco animações
+ *  completas (F7). O pedido de procura FEITO PELO JOGADOR também é F6:
+ *  hoje ele avisa a mesa e o mestre resolve, porque o cliente dele não lê
+ *  o molde e as rules não lhe dão canal de escrita (design §3). E nada de
+ *  `MapEditor` — o mapa-múndi é componente irmão (AC-12).
  * ════════════════════════════════════════════════════════════════════ */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -41,9 +50,16 @@ import useMapCamera from "../../../hooks/useMapCamera";
 import {
   useInstancias, useReveladoNaMesa, useParty, useFogDaMesa,
   publicarRevelacao, moverGrupo, atualizarParty, salvarFogDaMesa, getFundoDaMesa,
-  mestreDaInstancia,
+  mestreDaInstancia, useGmDaMesa, atualizarGm,
 } from "../mesaStore";
-import { useGrafo } from "../worldMapStore";
+import { useGrafo, useEventos } from "../worldMapStore";
+import {
+  aplicarEvento, avaliarGatilhos, dispararManualmente, dispararPorTeste, projecaoDoEvento,
+} from "../model/eventos";
+import {
+  aplicarDescoberta, resultadoDaDescoberta, testesDisponiveis,
+} from "../model/descoberta";
+import { rollDice } from "../../../domain/dice";
 import { construirMapaPadrao, ehMapaPadrao } from "../model/mapaPadrao";
 import CartografiaPadrao from "../model/CartografiaPadrao";
 import { limitesDoGrafo } from "../model/graph";
@@ -60,7 +76,13 @@ import MesaStyles from "./MesaStyles";
 import TelaDaMesa from "./TelaDaMesa";
 import PainelDoGrupo from "./PainelDoGrupo";
 import ConsoleDoMestre from "./ConsoleDoMestre";
+import FilaDeEventos from "./FilaDeEventos";
+import EventosDoGrupo from "./EventosDoGrupo";
 import useViagem from "./useViagem";
+import {
+  ID_DA_PROCURA, PEDIDO_DE_PROCURA, TITULO_DA_PROCURA,
+  anuncioDoEvento, contextoDoPasso, flagsComAsNovas,
+} from "./eventosUi";
 import {
   consumoPorDia, estadoDoRevelado, estoqueOculto, grafoDoRevelado, moldeDaInstancia,
   nomeNaMesa, raioDaEstrada, relogioDe, resumoDaRevelacao,
@@ -81,6 +103,10 @@ const listaDe = (v) => (Array.isArray(v) ? v : []);
  * @param {boolean} props.isMaster papel REAL (nunca a visão).
  * @param {number} [props.altura] altura do palco, em px.
  * @param {()=>void} [props.onSair]
+ * @param {(sceneId:string, evento:object)=>void} [props.onEntrarNaCena] leva a
+ *   mesa para a cena tática vinculada a um evento (F5). Sem esta prop o atalho
+ *   simplesmente não aparece — o mapa-múndi não sabe navegar sozinho, e fingir
+ *   um botão que não leva a lugar nenhum seria pior do que não tê-lo.
  */
 export default function MesaDoMapaMundi({
   campaignId,
@@ -88,6 +114,7 @@ export default function MesaDoMapaMundi({
   isMaster = false,
   altura = 560,
   onSair,
+  onEntrarNaCena,
 }) {
   /* ── Qual mapa desta mesa ──────────────────────────────────────────── */
   const { instancias, loading: carregandoInstancias, error: erroInstancias } = useInstancias(campaignId);
@@ -115,8 +142,23 @@ export default function MesaDoMapaMundi({
     return { nos: remoto.nos, trilhas: remoto.trilhas };
   }, [podeVerMolde, seed, remoto.nos, remoto.trilhas]);
 
-  const { revelado, loading: carregandoRevelado } = useReveladoNaMesa(campaignId, instanciaId);
+  const {
+    revelado, eventos: eventosPublicos, loading: carregandoRevelado,
+  } = useReveladoNaMesa(campaignId, instanciaId);
   const { party } = useParty(campaignId, instanciaId);
+
+  /* ── Eventos: as DUAS pontas, e elas nunca se cruzam (AC-1) ────────
+     · o MOLDE (`useEventos`) só o dono lê. É de lá que saem `gmText`,
+       gatilho e revelações — e é o cliente do mestre que os avalia.
+     · o PÚBLICO (`eventosPublicos`) sai de `revealed/`, e é o único que o
+       jogador tem. O que ainda não disparou não existe na rede dele.
+     · `gm/estado` guarda `triggeredEventIds` e o jogador NEM LÊ o documento. */
+  const eventosDoMolde = useEventos(
+    podeVerMolde && !ehPadrao ? donoDoMolde : "",
+    podeVerMolde && !ehPadrao ? mapId : "",
+  );
+  const eventos = eventosDoMolde.eventos;
+  const { gm } = useGmDaMesa(campaignId, instanciaId, podeVerMolde);
 
   const estado = useMemo(() => estadoDoRevelado(revelado), [revelado]);
   const doRevelado = useMemo(() => grafoDoRevelado(revelado), [revelado]);
@@ -216,6 +258,10 @@ export default function MesaDoMapaMundi({
   const [ocupado, setOcupado] = useState(false);
   const [selecionadoId, setSelecionadoId] = useState(null);
   const [recemRevelados, setRecemRevelados] = useState([]);
+  const [procurando, setProcurando] = useState(false);
+  /* A frase da procura NUNCA é escrita aqui: chega pronta das constantes de
+     `model/descoberta.js`. Ver o cabeçalho de `EventosDoGrupo.jsx` (AC-9). */
+  const [resultadoDaProcura, setResultadoDaProcura] = useState("");
 
   const vivo = useRef(true);
   useEffect(() => () => { vivo.current = false; }, []);
@@ -226,7 +272,18 @@ export default function MesaDoMapaMundi({
   const contexto = useRef({});
   contexto.current = {
     campaignId, instanciaId, uid, podeVerMolde, molde, estado, revelado, party, mascara,
+    eventos, gm,
   };
+
+  /* Os ids já disparados vivem em `gm.triggeredEventIds` (design §3), mas o
+     snapshot volta do servidor com atraso. Este espelho local é o que impede o
+     mesmo evento de disparar duas vezes entre a gravação e a volta — sem ele,
+     dois passos rápidos do grupo repetiriam a mesma cena. */
+  const jaDisparados = useRef(new Set());
+  useEffect(() => { jaDisparados.current = new Set(); }, [instanciaId]);
+  useEffect(() => {
+    listaDe(gm?.triggeredEventIds).forEach((id) => jaDisparados.current.add(id));
+  }, [gm?.triggeredEventIds]);
 
   /* ── O pulso da revelação (design §5.4, movimento 2) ───────────────── */
   const vistos = useRef(null);
@@ -242,6 +299,207 @@ export default function MesaDoMapaMundi({
   }, [estado]);
 
   useEffect(() => { vistos.current = null; }, [instanciaId]);
+
+  /* ════════════════════════════════════════════════════════════════════
+   *  OS EVENTOS  (F5 · AC-1, AC-8)
+   *  ------------------------------------------------------------------
+   *  Só o cliente do MESTRE roda daqui para baixo — é o único que lê o
+   *  molde, e portanto o único que pode saber que existe um evento antes
+   *  de ele acontecer (design §3). O jogador recebe o resultado pelos
+   *  documentos de `revealed/`, que é exatamente o que ele pode ver.
+   * ══════════════════════════════════════════════════════════════════ */
+
+  /**
+   * Aplica uma lista de disparos: revela o que eles revelam, publica o texto
+   * público, marca os ids em `gm` e acende as marcas no grupo.
+   *
+   * A ORDEM É PROPOSITAL. As revelações e o texto do evento vão numa escrita
+   * só (`publicarRevelacao` é lote), e só DEPOIS o id entra em
+   * `triggeredEventIds`. Se a rede cair no meio, o evento fica por disparar e
+   * sai de novo no próximo passo — repetir uma cena é recuperável; perdê-la
+   * porque o "já disparou" foi gravado antes do conteúdo, não é.
+   *
+   * @param {Array<{evento:object, motivo:string}>} disparos
+   * @param {object} estadoBase estado de visibilidade a partir do qual revelar.
+   */
+  const aplicarDisparos = useCallback(async (disparos, estadoBase) => {
+    const c = contexto.current;
+    if (!c.podeVerMolde || !c.molde || disparos.length === 0) return;
+
+    let corrente = estadoBase || c.estado;
+    const nosPub = [];
+    const trilhasPub = [];
+    const marcas = [];
+
+    disparos.forEach(({ evento }) => {
+      const r = aplicarEvento(corrente, evento, c.molde);
+      corrente = r.estado;
+      r.nosAlterados.forEach(({ id, para }) => {
+        const no = listaDe(c.molde.nos).find((n) => n?.id === id);
+        if (no) nosPub.push({ no, state: para });
+      });
+      r.trilhasAlteradas.forEach(({ id, para }) => {
+        const trilha = listaDe(c.molde.trilhas).find((t) => t?.id === id);
+        if (trilha) trilhasPub.push({ trilha, state: para });
+      });
+      marcas.push(...r.flags);
+    });
+
+    try {
+      setOcupado(true);
+
+      /* `projecaoDoEvento` (model) devolve `{id,title,playerText}` — três
+         campos escritos à mão. O store reprojeta por lista branca de novo antes
+         de gravar. Duas barreiras, e nenhuma delas é "tudo menos gmText". */
+      await publicarRevelacao(c.campaignId, c.instanciaId, {
+        nos: nosPub,
+        trilhas: trilhasPub,
+        eventos: disparos.map(({ evento }) => projecaoDoEvento(evento)).filter(Boolean),
+      }, { existentes: c.revelado });
+
+      disparos.forEach(({ evento }) => jaDisparados.current.add(evento.id));
+      await atualizarGm(c.campaignId, c.instanciaId, {
+        triggeredEventIds: [...jaDisparados.current],
+      });
+
+      /* As marcas NÃO voltam no estado de visibilidade: elas moram em
+         `party.flags` (design §3), e é de lá que o gatilho `flag` as lê. */
+      const flags = flagsComAsNovas(c.party?.flags, marcas);
+      if (flags) await atualizarParty(c.campaignId, c.instanciaId, { flags });
+
+      anunciar(anuncioDoEvento(disparos.map(({ evento }) => evento)));
+    } catch (err) {
+      console.error("[mesa do mapa] o evento não pôde ser publicado:", err);
+      if (vivo.current) setFalha(mensagemDeErro(err));
+    } finally {
+      if (vivo.current) setOcupado(false);
+    }
+  }, [anunciar]);
+
+  /**
+   * Um passo do grupo: quais eventos disparam agora?
+   *
+   * O contexto sai de `contextoDoPasso` — inclusive o `grafo`, sem o qual a
+   * proximidade **não dispara** (o modelo falha fechado de propósito). O
+   * `sorteio` é `Math.random` e entra por parâmetro: `model/eventos.js` não
+   * sorteia nada, e é isso que deixa a mesa reproduzível no teste.
+   */
+  const avaliarNoPasso = useCallback(async (passo, estadoBase) => {
+    const c = contexto.current;
+    if (!c.podeVerMolde || !c.molde) return;
+    const disparos = avaliarGatilhos(
+      c.eventos,
+      contextoDoPasso(passo, { molde: c.molde, party: c.party, sorteio: Math.random }),
+      jaDisparados.current,
+    );
+    if (disparos.length > 0) await aplicarDisparos(disparos, estadoBase);
+  }, [aplicarDisparos]);
+
+  /** O mestre solta um evento na mesa, de qualquer gatilho (AC-8). */
+  const dispararAMao = useCallback(async (evento) => {
+    const saida = dispararManualmente(evento);
+    if (!saida) return;
+    setFalha("");
+    await aplicarDisparos([saida], contexto.current.estado);
+  }, [aplicarDisparos]);
+
+  /**
+   * O mestre resolve o teste de um evento `on_check` (AC-9).
+   *
+   * A rolagem é `rollDice` de `src/domain/dice.js` — o motor único do projeto.
+   * O fracasso não publica nada e não diz nada ao grupo: um evento que não
+   * aconteceu não pode deixar rastro, senão o rastro vira o aviso de que havia
+   * algo ali.
+   */
+  const resolverTesteDoEvento = useCallback(async (evento, bonus = 0) => {
+    const cd = evento?.triggerConfig?.check?.dc;
+    if (!Number.isFinite(cd)) return;
+    const rolagem = rollDice("1d20");
+    const total = (rolagem?.total ?? 0) + (Number.isFinite(bonus) ? bonus : 0);
+    const saida = dispararPorTeste(evento, total >= cd);
+    const pericia = evento?.triggerConfig?.check?.skill || "o teste";
+    anunciar(`${pericia}: ${total} contra CD ${cd}.`);
+    if (saida) await aplicarDisparos([saida], contexto.current.estado);
+  }, [aplicarDisparos, anunciar]);
+
+  /* ════════════════════════════════════════════════════════════════════
+   *  A PROCURA  (F5 · AC-9)
+   *  ------------------------------------------------------------------
+   *  A regra dura: o botão existe em TODO nó, e o fracasso responde a
+   *  MESMA frase de um lugar onde não há nada. Por isso:
+   *
+   *   · `testesDisponiveis` só é chamado no cliente do MESTRE. É função do
+   *     lado do molde e montar tela de jogador com ela seria vazar o mapa
+   *     de segredos (o próprio JSDoc dela avisa);
+   *   · o resultado sai de `resultadoDaDescoberta`, que devolve o MESMO
+   *     objeto de duas chaves para "não achou" e "não havia nada";
+   *   · o texto é publicado num documento de id FIXO (`ID_DA_PROCURA`),
+   *     nos dois desfechos. Um documento por procura contaria quantas
+   *     vezes o grupo procurou; um documento só quando acha contaria onde
+   *     há segredo. Um documento fixo não conta nada.
+   * ══════════════════════════════════════════════════════════════════ */
+  const procurar = useCallback(async () => {
+    const c = contexto.current;
+    setFalha("");
+
+    /* O JOGADOR não resolve: ele não lê o molde, e não há como validar a
+       descoberta sem antes ler o segredo (design §3, alternativa descartada).
+       A frase é a mesma em todo lugar do mapa — não diz nada sobre o lugar. */
+    /* Onde o grupo está, sem depender de `noDoGrupo` — ele é calculado mais
+       abaixo neste arquivo, e citá-lo aqui estouraria a zona morta do `const`
+       na hora de montar as dependências deste callback. */
+    const aqui = noExibido || c.party?.currentNodeId || null;
+
+    if (!c.podeVerMolde || !c.molde || !aqui) {
+      setResultadoDaProcura(PEDIDO_DE_PROCURA);
+      anunciar(PEDIDO_DE_PROCURA);
+      return;
+    }
+
+    setProcurando(true);
+    try {
+      const rolagem = rollDice("1d20");
+      const total = rolagem?.total ?? 0;
+
+      /* Todas as trilhas testáveis daqui, na ordem: a primeira que a rolagem
+         vencer é a achada. Sem nenhuma, `resultadoDaDescoberta(null, …)` cai na
+         mesma saída do fracasso — é o caminho do lugar sem segredo. */
+      const candidatas = testesDisponiveis(c.estado, c.molde, aqui);
+      const achada = candidatas.find((x) => resultadoDaDescoberta(x.trilha, total).sucesso) || null;
+      const r = resultadoDaDescoberta(achada?.trilha || null, total);
+
+      setResultadoDaProcura(r.mensagem);
+      anunciar(r.mensagem);
+
+      const revelacao = achada
+        ? aplicarDescoberta(c.estado, c.molde, achada.trilhaId, true)
+        : { mudou: false, nosAlterados: [], trilhasAlteradas: [] };
+
+      const nos = revelacao.nosAlterados
+        .map(({ id, para }) => ({ no: listaDe(c.molde.nos).find((n) => n?.id === id), state: para }))
+        .filter((x) => x.no);
+      const trilhas = revelacao.trilhasAlteradas
+        .map(({ id, para }) => ({ trilha: listaDe(c.molde.trilhas).find((t) => t?.id === id), state: para }))
+        .filter((x) => x.trilha);
+
+      /* Uma escrita só, com o mesmo formato nos dois desfechos: o cartão da
+         procura sempre, o que foi achado só quando houve. */
+      await publicarRevelacao(c.campaignId, c.instanciaId, {
+        nos,
+        trilhas,
+        eventos: [{ id: ID_DA_PROCURA, title: TITULO_DA_PROCURA, playerText: r.mensagem }],
+      }, { existentes: c.revelado });
+    } catch (err) {
+      console.error("[mesa do mapa] a procura não pôde ser publicada:", err);
+      if (vivo.current) setFalha(mensagemDeErro(err));
+    } finally {
+      if (vivo.current) setProcurando(false);
+    }
+  }, [anunciar, noExibido]);
+
+  /* Trocar de lugar apaga o resultado da procura anterior: deixá-lo na tela
+     faria o grupo achar que a frase é sobre onde ele está agora. */
+  useEffect(() => { setResultadoDaProcura(""); }, [noExibido, instanciaId]);
 
   /* ════════════════════════════════════════════════════════════════════
    *  A VIAGEM
@@ -301,13 +559,27 @@ export default function MesaDoMapaMundi({
       }
 
       if (c.mascara) await salvarFogDaMesa(c.campaignId, c.instanciaId, c.mascara);
+
+      /* ── Os gatilhos do passo (F5) ────────────────────────────────
+         Uma avaliação só, com tudo que o passo produziu: o nó em que o
+         grupo parou (`on_arrival`), a trilha que ele acabou de percorrer
+         (`on_travel`), onde ele está (`on_proximity`) e as marcas que ele
+         carrega (`flag`). Chamar duas vezes — uma na partida e outra na
+         chegada — dobraria a chance de o mesmo evento sair repetido antes
+         de `gm` voltar do servidor. */
+      const parou = listaDe(c.molde.nos).find((n) => n?.id === v.paraId);
+      await avaliarNoPasso({
+        noId: v.paraId,
+        trilhaId: v.trilhaId,
+        posicao: parou ? { x: parou.x, y: parou.y } : v.posicao,
+      }, r.estado);
     } catch (err) {
       console.error("[mesa do mapa] a chegada não pôde ser publicada:", err);
       if (vivo.current) setFalha(mensagemDeErro(err));
     } finally {
       if (vivo.current) setOcupado(false);
     }
-  }, [anunciar, grafoVisivel, mexerNaNevoa, raioDeChegada]);
+  }, [anunciar, grafoVisivel, mexerNaNevoa, raioDeChegada, avaliarNoPasso]);
 
   const viagemCtl = useViagem({
     aoAndar,
@@ -636,6 +908,18 @@ export default function MesaDoMapaMundi({
               />
             ) : null}
 
+            {podeVerMolde ? (
+              <FilaDeEventos
+                eventos={eventos}
+                disparados={listaDe(gm?.triggeredEventIds)}
+                onDisparar={dispararAMao}
+                onResolverTeste={resolverTesteDoEvento}
+                onEntrarNaCena={onEntrarNaCena}
+                ocupado={ocupado || viajando}
+                carregando={eventosDoMolde.loading}
+              />
+            ) : null}
+
             <PainelDoGrupo
               party={party}
               noAtual={noAtualDesenhado}
@@ -644,6 +928,16 @@ export default function MesaDoMapaMundi({
               viajando={viajando}
               podeMover
               aviso={aviso}
+            />
+
+            {/* O mural é do GRUPO: ele lê `revealed/`, nunca o molde. O mestre
+                também o vê — é o que ele acabou de dar à mesa (AC-1). */}
+            <EventosDoGrupo
+              eventos={eventosPublicos}
+              onProcurar={procurar}
+              procurando={procurando}
+              resultadoDaProcura={resultadoDaProcura}
+              ocupado={viajando}
             />
 
             {!podeVerMolde && isMaster ? (

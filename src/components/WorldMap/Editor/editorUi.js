@@ -76,6 +76,13 @@ export const FERRAMENTAS = [
     icone: "🌫",
     dica: "Arraste sobre o mapa para abrir ou fechar a névoa. O tamanho e o que ele faz ficam na barra da névoa.",
   },
+  {
+    id: "evento",
+    label: "Novo evento",
+    atalho: "E",
+    icone: "✦",
+    dica: "Clique num lugar, numa trilha ou no vazio para ancorar um evento ali. O painel abre para escolher o gatilho.",
+  },
 ];
 
 /**
@@ -281,6 +288,97 @@ export function rotuloDaTrilha(trilha, nos) {
   if (trilha?.isOneWay) partes.push("mão única");
   const perigo = rotuloDoPerigo(trilha?.dangerLevel);
   if (perigo.valor > 0) partes.push(`perigo ${perigo.label.toLowerCase()}`);
+  return partes.join(", ");
+}
+
+/* ── EVENTOS ANCORADOS (F5 · AC-1, AC-8) ──────────────────────────────
+ * O evento não é geometria: ele PEGA CARONA na geometria do grafo. Um
+ * evento de nó fica onde o nó está; um de trilha, no meio da curva dela;
+ * um de ponto tem coordenada própria. Traduzir isso em pixels é problema
+ * de tela, e por isso mora aqui — puro, testável sem DOM. */
+
+/** O selo do evento no mapa. Um só, para o mestre reconhecer de relance. */
+export const ICONE_DO_EVENTO = "✦";
+
+/**
+ * Onde o selo do evento é desenhado, em coordenadas de mundo.
+ *
+ * - **ponto** — a coordenada guardada na âncora;
+ * - **nó** — em cima do nó ancorado;
+ * - **trilha** — no MEIO DA CURVA amostrada, não no meio da corda entre as
+ *   pontas: numa trilha bem entortada as duas coisas ficam longe uma da outra,
+ *   e o selo apareceria fora do caminho que ele marca.
+ *
+ * Âncora que não resolve devolve `null` — o selo simplesmente não é desenhado,
+ * e o painel acusa `ancora-orfa` por `validarEvento`. Chutar uma posição seria
+ * pior: o mestre veria o evento num lugar onde ele não acontece.
+ *
+ * @param {object} evento
+ * @param {{nos:Array, trilhas:Array}} grafo
+ * @returns {{x:number,y:number}|null}
+ */
+export function posicaoDoEvento(evento, grafo) {
+  const anchor = evento?.anchor;
+  if (!anchor || typeof anchor !== "object") return null;
+  const nos = Array.isArray(grafo?.nos) ? grafo.nos : [];
+  const trilhas = Array.isArray(grafo?.trilhas) ? grafo.trilhas : [];
+
+  if (anchor.type === "point") {
+    return Number.isFinite(anchor.x) && Number.isFinite(anchor.y)
+      ? { x: anchor.x, y: anchor.y }
+      : null;
+  }
+  if (anchor.type === "node") {
+    const no = nos.find((n) => n?.id === anchor.refId);
+    return no && Number.isFinite(no.x) && Number.isFinite(no.y) ? { x: no.x, y: no.y } : null;
+  }
+  if (anchor.type === "edge") {
+    const trilha = trilhas.find((t) => t?.id === anchor.refId);
+    if (!trilha) return null;
+    const pontos = pontosDaTrilha(trilha, nos);
+    if (pontos.length === 0) return null;
+    /* Com número ÍMPAR de amostras há um ponto do meio; com número par (o caso
+       da trilha reta, que vem só com as duas pontas) o meio fica ENTRE dois, e
+       pegar um índice qualquer colocaria o selo em cima de um dos nós. */
+    const i = Math.floor(pontos.length / 2);
+    const meio = pontos.length % 2 === 1
+      ? pontos[i]
+      : { x: (pontos[i - 1].x + pontos[i].x) / 2, y: (pontos[i - 1].y + pontos[i].y) / 2 };
+    return meio && Number.isFinite(meio.x) ? { x: meio.x, y: meio.y } : null;
+  }
+  return null;
+}
+
+/** "no lugar Vila Candeia" · "na trilha X ↔ Y" · "num ponto do mapa". */
+export function ondeOEventoEsta(evento, grafo) {
+  const anchor = evento?.anchor;
+  const nos = Array.isArray(grafo?.nos) ? grafo.nos : [];
+  const trilhas = Array.isArray(grafo?.trilhas) ? grafo.trilhas : [];
+
+  if (anchor?.type === "node") {
+    const no = nos.find((n) => n?.id === anchor.refId);
+    return no ? `no lugar ${(no.name || "").trim() || "sem nome"}` : "num lugar que não existe mais";
+  }
+  if (anchor?.type === "edge") {
+    const trilha = trilhas.find((t) => t?.id === anchor.refId);
+    return trilha ? `na trilha ${nomeDaTrilha(trilha, nos)}` : "numa trilha que não existe mais";
+  }
+  if (anchor?.type === "point") return "num ponto do mapa";
+  return "sem âncora";
+}
+
+/**
+ * O `aria-label` do selo do evento — o que o leitor de tela anuncia no palco.
+ *
+ * Diz o título, onde ele está ancorado e por qual gatilho ele sai. **É rótulo
+ * do ATELIÊ**: pode falar de gatilho e de segredo à vontade, porque só o mestre
+ * entra aqui (design §2, S1). Nada disto vai para a mesa do jogador.
+ */
+export function rotuloDoEvento(evento, grafo, gatilhoLabel) {
+  const titulo = (typeof evento?.title === "string" && evento.title.trim()) || "Evento sem título";
+  const partes = [`Evento: ${titulo}`, ondeOEventoEsta(evento, grafo)];
+  if (gatilhoLabel) partes.push(gatilhoLabel.toLocaleLowerCase("pt-BR"));
+  if (evento?.gmText) partes.push("com texto só seu");
   return partes.join(", ");
 }
 

@@ -26,6 +26,11 @@ jest.mock("../worldMapStore", () => ({
   /* F2: o molde aberto agora monta o editor do grafo, que também lê o store.
      A fronteira mockada continua sendo só o I/O — o editor roda de verdade. */
   useGrafo: jest.fn(),
+  /* F5: o editor do grafo passou a assinar os eventos do molde. */
+  useEventos: jest.fn(),
+  createEvent: jest.fn(),
+  updateEvent: jest.fn(),
+  deleteEvent: jest.fn(),
   /* F3 · AC-13: a marca de dispensa do mapa padrão mora no perfil do mestre —
      I/O, portanto mockado. Quem decide o que a lista mostra a partir dela é
      `model/mapaPadrao.js`, que roda de verdade. */
@@ -47,7 +52,7 @@ jest.mock("../worldMapStore", () => ({
 import Atelier from "../Atelier";
 import {
   useWorldMaps, createWorldMap, updateWorldMap, deleteWorldMap, uploadBackground,
-  getBackground, fundoDisponivel, useGrafo, semearGrafo,
+  getBackground, fundoDisponivel, useGrafo, useEventos, semearGrafo,
   useMapaPadraoDispensado, dispensarMapaPadrao, restaurarMapaPadrao,
 } from "../worldMapStore";
 import { construirMapaPadrao } from "../model/mapaPadrao";
@@ -77,6 +82,7 @@ beforeEach(() => {
   uploadBackground.mockResolvedValue({ url: "https://exemplo/f.png", path: "p", width: 10, height: 10 });
   getBackground.mockResolvedValue(null);
   useGrafo.mockReturnValue({ nos: [], trilhas: [], loading: false, error: null });
+  useEventos.mockReturnValue({ eventos: [], loading: false, error: null });
   semearGrafo.mockResolvedValue({ nos: 12, trilhas: 16 });
   /* Estado de fábrica do AC-13: o mapa padrão está à mostra. Dispensá-lo é
      escolha do mestre, e cada teste que precisa dela a liga explicitamente. */

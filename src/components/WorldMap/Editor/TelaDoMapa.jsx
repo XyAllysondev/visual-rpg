@@ -205,6 +205,11 @@ function NoDoMapa({
  * @param {(de:{x:number,y:number}, para:{x:number,y:number})=>void} props.onPincel
  * @param {string|null} props.destaque cor da moldura do palco (marca a Visão do
  *   Jogador — AC-5: o modo se anuncia por borda, não só por ícone).
+ * @param {Array<{id:string,x:number,y:number,rotulo:string,titulo:string,secreto:boolean}>}
+ *   [props.eventos] selos de evento já POSICIONADOS (F5). A tela não resolve
+ *   âncora: quem faz isso é `posicaoDoEvento` em `editorUi.js`, que é pura.
+ * @param {string|null} [props.eventoSelecionadoId]
+ * @param {(eventoId:string)=>void} [props.onClicarEvento]
  */
 export default function TelaDoMapa({
   nos = [],
@@ -230,6 +235,9 @@ export default function TelaDoMapa({
   pincel = null,
   onPincel,
   destaque = null,
+  eventos = [],
+  eventoSelecionadoId = null,
+  onClicarEvento,
 }) {
   const palcoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -444,7 +452,9 @@ export default function TelaDoMapa({
        hit-test é geométrico (`trilhaEmPonto`, já testado em `graph.test.js`).
        A tolerância cresce quando o mapa está afastado: 8 unidades de mundo com
        zoom 0,1 seriam menos de um pixel de tela. */
-    if (ferramenta === "selecionar") {
+    /* A ferramenta de evento também precisa do hit-test: ancorar um evento
+       NUMA TRILHA é clicar na curva dela, e a curva é canvas. */
+    if (ferramenta === "selecionar" || ferramenta === "evento") {
       const perto = noEmPonto(nos, ponto);
       if (perto && onClicarNo) { onClicarNo(perto); return; }
       const tolerancia = Math.max(8, 10 / (scale || 1));
@@ -564,6 +574,72 @@ export default function TelaDoMapa({
               }
             }}
           />
+        ))}
+
+        {/* ── Selos de evento (F5 · AC-8) ─────────────────────────────
+            Ficam ACIMA dos nós de propósito: o evento é o que o mestre
+            precisa achar no meio da sessão, e um selo escondido atrás de
+            um ícone de cidade é um evento esquecido. O deslocamento para
+            cima e para a direita evita cobrir o nó que ele marca. */}
+        {eventos.map((ev) => (
+          <div
+            key={ev.id}
+            className="wme-ancora"
+            style={{
+              left: ev.x,
+              top: ev.y,
+              transform: `translate(-50%,-50%) scale(${1 / (scale || 1)})`,
+              zIndex: 3,
+            }}
+          >
+            <button
+              type="button"
+              className="wme-no wme-focus"
+              data-testid={`wm-evento-${ev.id}`}
+              aria-label={ev.rotulo}
+              aria-pressed={eventoSelecionadoId === ev.id || undefined}
+              title={ev.titulo}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                cliqueRef.current = null;
+                if (onClicarEvento) onClicarEvento(ev.id);
+              }}
+              style={{
+                position: "relative",
+                width: ALVO_MINIMO,
+                height: ALVO_MINIMO,
+                marginLeft: 16,
+                marginBottom: 16,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: "50%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 12,
+                  lineHeight: 1,
+                  /* Violeta é a cor do que é só do mestre no Nexus (a mesma da
+                     trilha secreta). O evento com texto de mestre veste o
+                     violeta cheio; o resto fica dourado. */
+                  color: ev.secreto ? "#0b0b11" : "#0b0b11",
+                  background: ev.secreto ? "#a99bec" : "var(--gold2,var(--gold))",
+                  border: `2px solid ${eventoSelecionadoId === ev.id ? "#fff" : "rgba(10,10,16,0.85)"}`,
+                  boxShadow: "0 2px 8px rgba(0,0,0,.7)",
+                }}
+              >
+                ✦
+              </span>
+            </button>
+          </div>
         ))}
 
         {punho && !somenteLeitura ? (

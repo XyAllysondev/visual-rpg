@@ -29,6 +29,12 @@ jest.mock("../worldMapStore", () => ({
   updateEdge: jest.fn(),
   deleteEdge: jest.fn(),
   updateWorldMap: jest.fn(),
+  /* F5: o editor passou a assinar os eventos do molde. O dublê acompanha para
+     o hook não chegar `undefined`; o gate deles é `evento-atelie.test.js`. */
+  useEventos: jest.fn(() => ({ eventos: [], loading: false, error: null })),
+  createEvent: jest.fn(),
+  updateEvent: jest.fn(),
+  deleteEvent: jest.fn(),
 }));
 
 jest.mock("../fogStore", () => ({
@@ -37,7 +43,7 @@ jest.mock("../fogStore", () => ({
 }));
 
 import EditorDoGrafo from "../Editor";
-import { useGrafo, updateWorldMap } from "../worldMapStore";
+import { useGrafo, updateWorldMap, useEventos } from "../worldMapStore";
 import { useFog, useSalvarFog } from "../fogStore";
 import { criarNo } from "../model/graph";
 import { MAPA_PADRAO_ID } from "../model/mapaPadrao";
@@ -71,6 +77,7 @@ beforeEach(() => {
      `Event` cru — que descarta `clientX`/`button` e faria o pincel pintar em
      NaN. `MouseEvent` tem exatamente os campos que o palco lê. */
   window.PointerEvent = window.MouseEvent;
+  useEventos.mockReturnValue({ eventos: [], loading: false, error: null });
   jest.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(RETANGULO);
   jest.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
   global.ResizeObserver = class {

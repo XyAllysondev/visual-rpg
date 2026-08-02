@@ -37,7 +37,9 @@ import useMapCamera from "../../../hooks/useMapCamera";
 import {
   useGrafo, createNode, updateNode, deleteNode,
   createEdge, updateEdge, deleteEdge, updateWorldMap,
+  useEventos, createEvent, updateEvent, deleteEvent,
 } from "../worldMapStore";
+import { getGatilho } from "../model/eventos";
 import { useFog, useSalvarFog } from "../fogStore";
 import {
   cobrirAoLongoDe, cobrirTudo, fracaoRevelada, mascaraParaOMundo,
@@ -52,11 +54,12 @@ import TelaDoMapa from "./TelaDoMapa";
 import BarraDeFerramentas from "./BarraDeFerramentas";
 import PainelDoNo from "./PainelDoNo";
 import PainelDaTrilha from "./PainelDaTrilha";
+import PainelDoEvento from "./PainelDoEvento";
 import ConfirmarRemocao from "./ConfirmarRemocao";
 import ControlesDaNevoa, { COR_DA_VISAO_DE_JOGADOR, RAIO_PADRAO } from "./ControlesDaNevoa";
 import {
   FERRAMENTA_PADRAO, MUNDO_DE_RESERVA, ferramentaPorTecla, nomeDaTrilha,
-  rotuloDoNo, usaCartografiaPadrao,
+  posicaoDoEvento, rotuloDoEvento, rotuloDoNo, usaCartografiaPadrao,
 } from "./editorUi";
 import { SP, R, FS, T, SURF, LINE, btnStyle, mensagemDeErro, DANGER_TEXT_AA } from "../Atelier/ui";
 
@@ -106,6 +109,11 @@ export default function EditorDoGrafo({
   const nosBrutos = ehPadrao ? seed.nos : remoto.nos;
   const trilhasBrutas = ehPadrao ? seed.trilhas : remoto.trilhas;
   const carregando = ehPadrao ? false : remoto.loading;
+
+  /* Os eventos vivem numa subcoleção própria (F5). O mapa padrão não tem —
+     ele é código, e um evento que não pode ser editado não serve de exemplo. */
+  const eventosRemotos = useEventos(ehPadrao ? "" : uid, ehPadrao ? "" : moldeId);
+  const eventos = eventosRemotos.eventos;
 
   /* ── Estado da edição ──────────────────────────────────────────────── */
   const [ferramenta, setFerramenta] = useState(FERRAMENTA_PADRAO);
@@ -363,6 +371,28 @@ export default function EditorDoGrafo({
     }
   }, [somenteLeitura, ligandoDe, uid, moldeId, trilhasBrutas, limpar]);
 
+  /**
+   * Ancora um evento novo onde o mestre clicou (briefing §8).
+   *
+   * Nasce com o gatilho `manual` (padrão de `criarEvento`) — o único que não
+   * dispara sozinho. Um evento meio escrito nunca pode surpreender a mesa, e
+   * escolher o gatilho é a primeira coisa que o painel pede.
+   */
+  const ancorarEvento = useCallback(async (anchor) => {
+    if (somenteLeitura) return;
+    limpar();
+    try {
+      const id = await createEvent(uid, moldeId, { anchor });
+      if (!vivo.current) return;
+      setSelecao({ tipo: "evento", id });
+      setFerramenta("selecionar");
+      setAviso("Evento ancorado. Escolha o gatilho e escreva os dois textos no painel ao lado.");
+    } catch (err) {
+      console.error("[editor do mapa] não deu para ancorar o evento:", err);
+      if (vivo.current) setFalha(mensagemDeErro(err));
+    }
+  }, [somenteLeitura, uid, moldeId, limpar]);
+
   const aoClicarNo = useCallback((no) => {
     limpar();
     if (ferramenta === "trilha" && !somenteLeitura) {
@@ -370,20 +400,32 @@ export default function EditorDoGrafo({
       ligar(no.id);
       return;
     }
+    if (ferramenta === "evento" && !somenteLeitura) {
+      ancorarEvento({ type: "node", refId: no.id });
+      return;
+    }
     setSelecao({ tipo: "no", id: no.id });
-  }, [ferramenta, somenteLeitura, ligandoDe, ligar, limpar]);
+  }, [ferramenta, somenteLeitura, ligandoDe, ligar, ancorarEvento, limpar]);
 
   const aoClicarVazio = useCallback((ponto) => {
     limpar();
     if (ferramenta === "no") { plantarNo(ponto); return; }
+    if (ferramenta === "evento" && !somenteLeitura) {
+      ancorarEvento({ type: "point", x: ponto.x, y: ponto.y });
+      return;
+    }
     if (ligandoDe) { setLigandoDe(null); setAviso("Trilha cancelada."); return; }
     setSelecao(null);
-  }, [ferramenta, ligandoDe, plantarNo, limpar]);
+  }, [ferramenta, somenteLeitura, ligandoDe, plantarNo, ancorarEvento, limpar]);
 
   const aoClicarTrilha = useCallback((trilha) => {
     limpar();
+    if (ferramenta === "evento" && !somenteLeitura) {
+      ancorarEvento({ type: "edge", refId: trilha.id });
+      return;
+    }
     setSelecao({ tipo: "trilha", id: trilha.id });
-  }, [limpar]);
+  }, [ferramenta, somenteLeitura, ancorarEvento, limpar]);
 
   /* Arraste: a posição só existe em estado local até o dedo parar. */
   const aoArrastarNo = useCallback((noId, ponto) => {
@@ -415,15 +457,39 @@ export default function EditorDoGrafo({
   /* ── Seleção resolvida ─────────────────────────────────────────────── */
   const noSelecionado = selecao?.tipo === "no" ? nos.find((n) => n.id === selecao.id) : null;
   const trilhaSelecionada = selecao?.tipo === "trilha" ? trilhas.find((t) => t.id === selecao.id) : null;
+  const eventoSelecionado = selecao?.tipo === "evento" ? eventos.find((e) => e.id === selecao.id) : null;
 
   /* Seleção que sumiu (apagada em outra aba) não pode deixar painel fantasma. */
   useEffect(() => {
     if (!selecao) return;
-    const existe = selecao.tipo === "no"
-      ? nosBrutos.some((n) => n.id === selecao.id)
-      : trilhasBrutas.some((t) => t.id === selecao.id);
-    if (!existe && !carregando) setSelecao(null);
-  }, [selecao, nosBrutos, trilhasBrutas, carregando]);
+    const colecao = selecao.tipo === "no" ? nosBrutos
+      : selecao.tipo === "trilha" ? trilhasBrutas
+        : eventos;
+    const existe = colecao.some((x) => x.id === selecao.id);
+    /* O evento acabou de ser criado e o snapshot ainda não voltou: esperar o
+       `loading` dele evita o painel piscar e fechar sozinho. */
+    const aindaChegando = selecao.tipo === "evento" ? eventosRemotos.loading : carregando;
+    if (!existe && !aindaChegando) setSelecao(null);
+  }, [selecao, nosBrutos, trilhasBrutas, eventos, carregando, eventosRemotos.loading]);
+
+  /* ── Selos de evento no palco ──────────────────────────────────────
+     A âncora vira pixel aqui, não na tela: `posicaoDoEvento` é pura e tem
+     teste próprio. Evento de âncora órfã não ganha selo (o painel acusa). */
+  const marcadoresDeEvento = useMemo(() => (
+    eventos.reduce((saida, ev) => {
+      const p = posicaoDoEvento(ev, { nos, trilhas });
+      if (!p) return saida;
+      saida.push({
+        id: ev.id,
+        x: p.x,
+        y: p.y,
+        titulo: (ev.title || "").trim() || "Evento sem título",
+        rotulo: rotuloDoEvento(ev, { nos, trilhas }, getGatilho(ev.trigger)?.label),
+        secreto: !!(ev.gmText || "").trim(),
+      });
+      return saida;
+    }, [])
+  ), [eventos, nos, trilhas]);
 
   /* ── Remoção ───────────────────────────────────────────────────────── */
   const pedirRemocao = useCallback(() => {
@@ -465,6 +531,30 @@ export default function EditorDoGrafo({
       return;
     }
 
+    if (selecao.tipo === "evento") {
+      const ev = eventos.find((e) => e.id === selecao.id);
+      if (!ev) return;
+      setConfirmando({
+        titulo: "Apagar este evento?",
+        rotulo: "Apagar evento",
+        descricao: (
+          <>
+            O evento <strong style={{ color: "var(--text)" }}>{(ev.title || "").trim() || "sem título"}</strong>{" "}
+            some do mapa, com os dois textos. Os lugares e as trilhas continuam onde estão.
+            Não dá para desfazer.
+          </>
+        ),
+        executar: async () => {
+          await deleteEvent(uid, moldeId, ev.id);
+          if (!vivo.current) return;
+          setConfirmando(null);
+          setSelecao(null);
+          setAviso("Evento apagado.");
+        },
+      });
+      return;
+    }
+
     const trilha = trilhasBrutas.find((t) => t.id === selecao.id);
     if (!trilha) return;
     setConfirmando({
@@ -484,7 +574,7 @@ export default function EditorDoGrafo({
         setAviso("Trilha apagada.");
       },
     });
-  }, [somenteLeitura, selecao, nosBrutos, trilhasBrutas, nos, uid, moldeId, limpar]);
+  }, [somenteLeitura, selecao, nosBrutos, trilhasBrutas, eventos, nos, uid, moldeId, limpar]);
 
   /* ── Teclado ───────────────────────────────────────────────────────── */
   useEffect(() => {
@@ -538,7 +628,7 @@ export default function EditorDoGrafo({
   }, [ligandoDe, selecao, nos, somenteLeitura, pedirRemocao, aoArrastarNo, aoSoltarNo, nevoaLigada]);
 
   /* ── Render ────────────────────────────────────────────────────────── */
-  const painelAberto = !!(noSelecionado || trilhaSelecionada);
+  const painelAberto = !!(noSelecionado || trilhaSelecionada || eventoSelecionado);
 
   return (
     <section
@@ -669,6 +759,9 @@ export default function EditorDoGrafo({
             : null}
           onPincel={aoPincelar}
           destaque={comoJogador ? COR_DA_VISAO_DE_JOGADOR : null}
+          eventos={marcadoresDeEvento}
+          eventoSelecionadoId={eventoSelecionado?.id || null}
+          onClicarEvento={(id) => { limpar(); setSelecao({ tipo: "evento", id }); }}
         />
 
         {painelAberto ? (
@@ -686,6 +779,20 @@ export default function EditorDoGrafo({
                 onSalvar={async (patch) => {
                   await updateNode(uid, moldeId, noSelecionado.id, patch);
                   if (vivo.current) setAviso("Lugar salvo.");
+                }}
+                onRemover={pedirRemocao}
+                onFechar={() => setSelecao(null)}
+              />
+            ) : eventoSelecionado ? (
+              <PainelDoEvento
+                evento={eventoSelecionado}
+                nos={nos}
+                trilhas={trilhas}
+                cenas={cenas}
+                somenteLeitura={somenteLeitura}
+                onSalvar={async (patch) => {
+                  await updateEvent(uid, moldeId, eventoSelecionado.id, patch);
+                  if (vivo.current) setAviso("Evento salvo.");
                 }}
                 onRemover={pedirRemocao}
                 onFechar={() => setSelecao(null)}
@@ -736,6 +843,12 @@ export default function EditorDoGrafo({
               {trilhas.filter((t) => t.isSecret).length} secreta(s)
             </span>
           ) : null}
+          {eventos.length > 0 ? (
+            <span data-testid="wme-contagem-de-eventos">
+              {" · "}
+              {eventos.length === 1 ? "1 evento" : `${eventos.length} eventos`}
+            </span>
+          ) : null}
         </span>
         {Number.isFinite(cota.limite) && !somenteLeitura ? (
           <span style={{ ...T.meta, fontSize: FS.micro }}>
@@ -776,6 +889,9 @@ export default function EditorDoGrafo({
       }}>
         {noSelecionado ? `Selecionado — ${rotuloDoNo(noSelecionado)}` : null}
         {trilhaSelecionada ? `Selecionada — trilha ${nomeDaTrilha(trilhaSelecionada, nos)}` : null}
+        {eventoSelecionado
+          ? `Selecionado — ${rotuloDoEvento(eventoSelecionado, { nos, trilhas }, getGatilho(eventoSelecionado.trigger)?.label)}`
+          : null}
       </div>
 
       {/* A moldura violeta avisa quem enxerga; isto avisa quem ouve. */}
