@@ -10,7 +10,133 @@ alwaysApply: true
 > todo. Diferente do **ADR** (decisão durável e imutável). Decisão estrutural → ADR; estado do
 > trabalho → aqui. Atualize ao **pausar/encerrar**; leia ao **retomar**. Use a skill `/handoff`.
 
-**Última atualização:** 2026-07-25 por Claude (SPEC 0026 — conteúdo do livro v1.4; 28 suítes/324 testes + build exit 0; NÃO commitado/deployado)
+**Última atualização:** 2026-08-01 por Claude (SPEC 0028 — fundo do mapa-múndi decidido: base64 no Firestore, plano B; 627 testes / 40 suítes verdes)
+
+> **2026-08-01 (tarde): SPEC 0028 — FUNDO DO MAPA-MÚNDI DESTRAVADO PELO PLANO B.** O Andre decidiu:
+> *"vamos fazer no gratuito hoje, quando estivermos finalizando o desenvolvimento do projeto eu faço
+> isso"* (subir para Blaze). Registrado no **ADR-0009**, que resolve o ADR-0008 escolhendo a opção B.
+> - `uploadBackground` agora tem **dois caminhos** com o mesmo contrato
+>   (`{url, path, width, height}`), escolhidos por `fundoDisponivel()`: Storage (escrito, com
+>   `import()` dinâmico, esperando o Blaze) e **base64 no Firestore** (o que roda hoje).
+> - Base64 segue o padrão da casa (`campaignSync2.js`): dois estágios de redução (1600/q0.82 →
+>   1200/q0.7), teto `LIMITE_FUNDO_BYTES = 900.000`, dedup por hash SHA-256, cache de módulo.
+>   Acima do teto, **recusa em PT-BR** — nada é gravado pela metade.
+> - A ilustração mora em documento **separado** (`.../worldmaps/{mapId}/media/background`); o doc
+>   raiz guarda só `backgroundRef` + miniatura de ~200px. Isso é o que impede `useWorldMaps` de
+>   trafegar todos os fundos inteiros a cada snapshot — **tem teste de regressão dedicado**.
+> - **Lacuna fechada:** `WorldMap/__tests__/worldMapStore.test.js` existe (29 testes). Total:
+>   **627 testes / 40 suítes**, build Compiled, `MapEditor/` intocado (AC-12).
+> - **Próximo passo:** F2 (editor de grafo — nós e trilhas). Quando o Andre subir para Blaze, ver a
+>   lista de 5 itens em ADR-0009 §"O que muda quando o Andre subir para o Blaze".
+
+> **2026-08-02: SPEC 0028 — MAPA-MÚNDI, F2 a F6 ENTREGUES E NO AR.** Gate: **63 suítes / 1550
+> testes**, build Compiled, `MapEditor/` intocado em toda fase (git diff vazio — AC-12).
+> - **F2** editor de grafo + MAPA PADRÃO (12 nós / 16 trilhas, ambientado na mesma *Coroa de
+>   Cinzas* do mundo demo da Forja; carta VETORIAL de 23 KB embutida, sem peso no Firestore).
+>   Render híbrido: canvas pinta fundo e trilhas, DOM carrega os nós virtualizados.
+>   **ARMADILHA:** o padrão foi criado na F2 mas NÃO era oferecido na lista — só virou visível na
+>   F3. Eu afirmei ao Andre que já aparecia; estava errado.
+> - **F3** névoa em bitmap (1 bit/px, downscale 4x, RLE+varint). MEDIDO: névoa típica de sessão
+>   **2,3 KB**, mapa vazio **21 B** — 390× abaixo do teto de 900 KB. O Storage bloqueado não faz
+>   falta. Mais o padrão dispensável/restaurável (marca em `users/{uid}`, FORA da coleção de
+>   mapas: doc de config ali contaria na cota e o mestre free perderia a vaga dele).
+> - **F4** a mesa: viagem animada pela curva em velocidade constante, névoa abrindo ao longo do
+>   trecho percorrido, console de "Revelar agora". Rules: o teto de **20 access calls por lote**
+>   (o bug que esvaziou o mundo demo da Forja) foi resolvido pondo o uid do mestre NO ID da
+>   instância — a regra faz split de string, zero `get()`.
+> - **F5** eventos com os 6 gatilhos + procura por passagens secretas. Extraído
+>   `src/domain/dice.js`: havia **SEIS** cópias de rolagem inline no App.jsx (uma a mais que o
+>   levantamento achou). Diferenças reais preservadas (dialeto com/sem contagem, 3 regras de
+>   crítico, tetos que só uma tinha).
+> - **F6** encontros e acampamento, sempre em DUAS etapas: sorteio no cliente do mestre →
+>   `gm.pendingEncounter` (que o jogador nem lê) → decisão → só então publica.
+>
+> **O PADRÃO DE SEGREDO QUE SE REPETIU EM TODA FASE** (vale para quem continuar): segredo não
+> vaza pelo dado, vaza pela DIFERENÇA. Por isso: a recusa de viagem é a mesma frase para "não há
+> trilha", "é secreta" e "está oculta"; a falha da procura é idêntica à de um lugar vazio; o botão
+> "Procurar aqui" aparece em TODO nó (se só surgisse onde há segredo, ele seria a resposta); a
+> pausa do encontro é neutra ("a mesa está com o mestre"), e desligar APAGA a flag em vez de
+> gravar `false`. Vários desses foram verificados por MUTAÇÃO — quebrar o código de propósito e
+> conferir que o teste cai.
+>
+> **PENDÊNCIAS CONHECIDAS:** (1) acampar em trânsito é letra morta — exige estado de viagem
+> persistido (F7); (2) `pendingEncounter` não tem tempo real — duas abas do mestre podem se
+> sobrescrever; (3) bônus de rolagem é digitado pelo mestre: a ficha do personagem não chega ao
+> mapa-múndi; (4) o pedido de procura do JOGADOR só avisa a mesa — validar no cliente dele exigiria
+> ler o segredo (alternativa descartada no design §3).
+>
+> **AINDA VALE:** Storage segue bloqueado (Spark); o Andre decidiu subir para Blaze só ao
+> finalizar o projeto. Fundo em base64, ADR-0009.
+
+> **2026-08-01: SPEC 0028 — MAPA-MÚNDI (exploração + névoa), FASE 1 ENTREGUE.** Briefing do Andre
+> pedindo mapa-múndi estilo Pathfinder: WotR, com visão de mestre e de jogador.
+> - **F0 (descoberta)** achou 5 contradições com o briefing. A maior: **não existe servidor** — sem
+>   Cloud Functions, cliente fala direto com o Firestore, e rules são tudo-ou-nada por documento.
+>   Hoje o Nexus **não tem segredo real**: névoa e tokens `hidden` viajam inteiros ao jogador e são
+>   só filtrados no render.
+> - **Arquitetura ATELIÊ/MESA** (design.md), aprovada pelo Andre: o molde vive em
+>   `users/{uid}/worldmaps` (privado; a aba Mapas vira a oficina do mestre) e a campanha recebe uma
+>   INSTÂNCIA com só o que foi revelado. **A separação de documento É o mecanismo de segredo** —
+>   satisfaz o AC-1 sem servidor e sem Blaze.
+> - **F1 entregue:** aba Mapas com 3 sub-abas (Mesas Táticas / Mapas-Múndi / Tokens), CRUD do molde,
+>   cotas por plano, rules do ateliê. **595 testes / 39 suítes verdes**, build Compiled,
+>   `MapEditor/` intocado (git diff vazio — AC-12).
+> - **BLOQUEIO PARA O ANDRE — Firebase Storage não existe.** Provado por HTTP cru: 404 (bucket
+>   inexistente), não 403. `firebase.js:9` declara um bucket nunca provisionado; criar exige
+>   **plano Blaze** (projeto está no Spark). Opções no ADR-0008: (A) subir para Blaze — destrava
+>   também Cloud Functions e a exploração assíncrona; (B) base64 no Firestore, teto ~900 KB.
+>   O upload está implementado atrás de `fundoDisponivel()`; quando o bucket subir, o flag vira.
+> - **Achado:** não existe string de plano pago no código. Só `'free'` é real; quem pagou é
+>   detectado por `users/{uid}.subscribedSystems`. `fsGetUserPlan` (App.jsx:86) é código morto.
+> - **Lacuna assumida:** falta `worldMapStore.test.js` (o gate do AC-2 pede).
+> - **Próximo passo:** decisão do Andre sobre Blaze; depois F2 (editor de grafo).
+
+> **2026-07-31: SPEC 0027 — FORJA DO MESTRE (Ajudante do Mestre 2.0), FASE 1.** Andre pediu que
+> o Ajudante do Mestre deixe de ser IA e vire uma suíte de worldbuilding/sessão "igual ao
+> WorldCraft" (worldcraft.com.br), clonando TODAS as funcionalidades. O site foi explorado
+> logado (mundo demo) e o inventário está na spec. Fase 1 (Fundação) em andamento:
+> - **IA REMOVIDA**: 577 linhas do App.jsx (bloco MASTER AI ASSISTANT: RPG_ONLY_RULE,
+>   SYSTEM_PROMPTS, callGemini, generateSceneImage, MasterAssistant). App.jsx 12.586 → 12.011.
+>   Cópia de produto ajustada (card do dashboard, 3 planos, roadmapData). Gate
+>    impede o retorno da IA.
+>   **ARMADILHA**:  vivia DENTRO desse bloco e é usado pelo fluxo PIX
+>   (createPixPayment) — foi restaurado perto do uso. Confira antes de remover blocos grandes.
+> - **Camadas prontas** ():  puro (entityTypes 11 tipos,
+>   entityFilters, connections, dashboardStats, demoWorld) +  (Firestore:
+>   worlds/{id}/{entities,connections,folders}, hooks onSnapshot, seedDemoWorld em writeBatch).
+> - **UI ENTREGUE**: casca (seletor de mundo, rail de 9 ferramentas com 7 marcadas "Em breve",
+>   estado vazio, React.lazy + error boundary), Painel (11 contadores, recentes, primeiros passos)
+>   e Wiki completa (grade/lista, filtros, busca sem acento, pastas, detalhe com conexões pelo
+>   lado certo, modal de criar/editar). 27 arquivos em `src/components/MasterSuite/`.
+> - **Gate final: 36 suítes / 485 testes PASS**, build "Compiled" (warnings pré-existentes de
+>   outros arquivos). Testes da suíte: 161 (91 lógica pura + 36 store + 25 renderização + 9 anti-IA).
+> - **ARMADILHA DE PARALELISMO**: dois agentes na mesma pasta se atropelaram — o da casca gravou
+>   um placeholder por cima do `Wiki/index.jsx` do outro. Ao paralelizar, dê a cada agente uma
+>   pasta exclusiva.
+> - **ARMADILHA DE TESTE**: o preset Jest do CRA usa `resetMocks: true` — implementações passadas
+>   na fábrica do `jest.mock` são apagadas antes de cada teste; reinstale no `beforeEach`.
+> - **Correção de bug pré-existente**:  (peer do RTL 16) não estava
+>   instalado — 3 suítes RTL estavam vermelhas. Instalado em devDependencies.
+> - **PENDÊNCIAS MANUAIS DO ANDRE (não feitas por mim):**
+>   1. [1m[37m===[39m Deploying to 'nexus-rpg-app'...[22m
+
+[36m[1mi [22m[39m deploying [1mfirestore[22m
+[36m[1mi  firestore:[22m[39m ensuring required API [1mfirestore.googleapis.com[22m is enabled...
+[36m[1mi  firestore:[22m[39m ensuring required API [1mfirestore.googleapis.com[22m is enabled...
+[36m[1mi  cloud.firestore:[22m[39m checking [1mfirestore.rules[22m for compilation errors...
+[32m[1m+  cloud.firestore:[22m[39m rules file [1mfirestore.rules[22m compiled successfully
+[36m[1mi  firestore:[22m[39m uploading rules [1mfirestore.rules[22m...
+[36m[1mi [22m[39m [1m[36mfirestore: [39m[22mdeploying indexes...
+[32m[1m+  firestore:[22m[39m released rules [1mfirestore.rules[22m to [1mcloud.firestore[22m
+
+[32m[1m+ [22m[39m [1m[4mDeploy complete![24m[22m
+
+[1mProject Console:[22m https://console.firebase.google.com/project/nexus-rpg-app/overview — as regras novas do bloco  só valem
+>      após o deploy.
+>   2. **Índice composto** no Firestore: coleção , .
+>      Sem ele o  falha (o erro traz o link de criação).
+> - **Próximo passo:** Andre validar no navegador (E4, único item aberto da Fase 1); depois
+>   Fase 2 (Grafo interativo de conexões).
 
 > **2026-07-25 (11): SPEC 0026 — CONTEÚDO DO LIVRO v1.4 (itens antes bloqueados por fonte).**
 > Andre forneceu o PDF oficial ("Ordem Paranormal 1.4 (2).pdf", Desktop/livros ordem paranormal,

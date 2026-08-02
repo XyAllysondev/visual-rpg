@@ -6,6 +6,8 @@
  *  patentes NÃO espelham mais o FullSheet legado do App.jsx.
  * ════════════════════════════════════════════════════════════════════════ */
 
+import { rollOP, rollPool } from "../../../domain/dice";
+
 /* The five attributes, in display order. attrs object is keyed by these. */
 export const ATTR_KEYS = ["AGI", "FOR", "INT", "PRE", "VIG"];
 export const ATTR_LABELS = {
@@ -135,24 +137,19 @@ export function dtRituais(nex, attrs, bonus = 0) {
 }
 
 /*
- * Ordem Paranormal d20 test: roll N d20 (N = attribute, min handling for 0),
- * keep the best (or worst when the attribute is 0). Identical to App.jsx rollOP.
+ * Teste de d20 de Ordem Paranormal. O motor vive em src/domain/dice.js (spec 0028 AC-9);
+ * aqui só reexportamos para não quebrar quem já importa de `rules`.
  */
-export function rollOP(attrVal) {
-  const n = attrVal === 0 ? 2 : attrVal;
-  const rolls = Array.from({ length: n }, () => Math.floor(Math.random() * 20) + 1);
-  const result = attrVal === 0 ? Math.min(...rolls) : Math.max(...rolls);
-  return { rolls, result, worst: attrVal === 0, crit: rolls.includes(20), dice: "D20" };
-}
+export { rollOP };
 
-/* Parse + roll a free expression like "2d6+3" / "1d20" / "d100-5". */
+/* Parse + roll a free expression like "2d6+3" / "1d20" / "d100-5". Teto próprio de 30 dados. */
 export function rollExpr(expr) {
   const m = String(expr).replace(/\s/g, "").match(/^(\d+)?[dD](\d+)([+-]\d+)?$/);
   if (!m) return null;
   const count = Math.min(parseInt(m[1] || "1", 10), 30);
   const sides = parseInt(m[2], 10);
   const mod = m[3] ? parseInt(m[3], 10) : 0;
-  const rolls = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
+  const rolls = rollPool(count, sides);
   const sum = rolls.reduce((a, b) => a + b, 0) + mod;
   return {
     rolls,

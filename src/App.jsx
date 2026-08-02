@@ -22,9 +22,16 @@ import { doc, setDoc, getDoc, updateDoc, deleteField, collection, addDoc, query,
 import { roadmapData } from './roadmapData';
 import { useLocale } from "./i18n/useLocale";
 import MapEditor from './components/MapEditor';
+import MasterSuite from './components/MasterSuite';
+import WorldMapAtelier from './components/WorldMap/Atelier';
 import { saveAsset } from './components/MapEditor/assets/assetLib';
-import LicencaOP, { TEXTO_IA } from "./components/LicencaOP";
+/* O "Entrar na cena" do mapa-múndi (spec 0028 F5/F6) reusa o MESMO canal que o
+   MapEditor já usa para trocar de cena em modo campanha: o doc `map/state`. Não
+   é navegação nova — é a que existe, chamada de outro lugar. */
+import { setActiveScene as apontarCenaDaCampanha } from './components/MapEditor/sync/campaignSync2';
+import LicencaOP from "./components/LicencaOP";
 import { getActiveAvatar } from "./domain/character";
+import { rollDice, rollNotation, rollOP } from "./domain/dice";
 import REGRAS_OFICIAIS from "./data/ordemParanormal/regras-oficiais.json";
 import RITUAIS_LIB from "./data/ordemParanormal/rituais-oficiais.json";
 import ITENS_LIB from "./data/ordemParanormal/itens-oficiais.json";
@@ -36,6 +43,8 @@ const OrdemParanormalSheet = lazy(() => import("./components/systems/OrdemParano
 // Construtor de tokens (paper-doll) — pesado em assets, carrega só quando aberto
 const TokenBuilder = lazy(() => import("./components/systems/OrdemParanormal/TokenBuilder"));
 const DungeonsAndDragonsSheet = lazy(() => import("./components/systems/DungeonsAndDragons/DungeonsAndDragonsSheet"));
+// A MESA do mapa-múndi (spec 0028 F4) — só carrega quando o grupo a abre.
+const MesaDoMapaMundi = lazy(() => import("./components/WorldMap/Mesa"));
 
 const googleProvider = new GoogleAuthProvider();
 
@@ -90,6 +99,10 @@ const fsGetUserPlan = async (uid) => {
   } catch (e) { console.error("[fsGetUserPlan] falhou:", e); return 'free'; }
 };
 
+// REACT_APP_API_URL = URL base do backend na Vercel (ex: https://api.playnexusrpg.com).
+// Vazio em dev local → as chamadas caem em caminho relativo do próprio host.
+const API_BASE = process.env.REACT_APP_API_URL || '';
+
 /* ── Criação de cobrança PIX ── */
 const createPixPayment = async (userId, userEmail) => {
   const res = await fetch(`${API_BASE}/api/create-payment`, {
@@ -101,18 +114,7 @@ const createPixPayment = async (userId, userEmail) => {
   return res.json();
 };
 
-/* ── Dice roller: parses "2d6+3", "1d20", "1d100-5" ── */
-const rollDice = (expr) => {
-  const clean = expr.replace(/\s/g,"").toLowerCase();
-  const match = clean.match(/^(\d+)d(\d+)([+-]\d+)?$/);
-  if (!match) return null;
-  const count = Math.min(parseInt(match[1]),20);
-  const sides = Math.min(parseInt(match[2]),100);
-  const mod = match[3] ? parseInt(match[3]) : 0;
-  const rolls = Array.from({length:count},()=>Math.floor(Math.random()*sides)+1);
-  const total = rolls.reduce((a,b)=>a+b,0)+mod;
-  return { expr:clean, rolls, mod, total, sides, count };
-};
+/* ── Dice roller: ver src/domain/dice.js (motor único — spec 0028 AC-9) ── */
 
 /* ── Campaign helpers ── */
 const generateInviteCode = () => {
@@ -872,7 +874,7 @@ function Login({ onLogin }) {
             <div className="nx-stagger" style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
               {[
                 {icon:"◈",title:"Fichas Digitais",desc:"Gerencie personagens com atributos, perícias e inventário completos"},
-                {icon:"◉",title:"Ajudante do Mestre",desc:"Narração assistida por inteligência artificial para suas campanhas"},
+                {icon:"◉",title:"Ajudante do Mestre",desc:"Wiki do mundo, conexões, diário e ferramentas de mesa para suas campanhas"},
                 {icon:"⬙",title:"Mapas Interativos",desc:"Crie e explore mapas colaborativos com sua mesa"},
                 {icon:"♪",title:"Trilhas Sonoras",desc:"Atmosfera imersiva com músicas e ambientações para cada cena"},
               ].map(({icon,title,desc},i)=>(
@@ -2907,43 +2909,57 @@ function CampaignRollDrawer({ campaign, onClose }) {
    O tile-based foi aposentado; o doc legado map/current é ignorado. */
 /* Tela de Mapas do menu lateral: escolhe entre a mesa tática e o construtor
    de tokens. Fora de campanha o construtor salva na biblioteca do usuário. */
-function MapaScreen({ uid, onBack }) {
-  const [modo, setModo] = useState(null);   // null | 'mesa' | 'builder'
+/* As três superfícies do ateliê (spec 0028 · design §2 · AC-2). "Mesas
+   Táticas" e "Tokens" são o que já existia, agora com endereço próprio;
+   "Mapas-Múndi" é o componente IRMÃO — nada disso entra no MapEditor. */
+const MAPAS_SUBABAS = [
+  { id:'mesas',  rotulo:'Mesas Táticas' },
+  { id:'mundi',  rotulo:'Mapas-Múndi'  },
+  { id:'tokens', rotulo:'Tokens'       },
+];
+
+function MapaScreen({ uid, plan = 'free', onBack }) {
+  const [aba, setAba] = useState('mesas');   // 'mesas' | 'mundi' | 'tokens'
+  const [mesaAberta, setMesaAberta] = useState(false);
   const [flash, setFlash] = useState("");
+  const pill = useSlidingPill(aba);
 
   const salvarToken = async ({ nome, dataUrl }) => {
     if (!uid) { setFlash('Faça login para salvar na biblioteca. Use "Baixar PNG" enquanto isso.'); return; }
     try {
       await saveAsset(db, uid, { type:'character', name:nome, tags:['construtor'], folder:null, data:dataUrl, w:512, h:512 });
       setFlash(`"${nome}" salvo — abra a mesa tática e use a Biblioteca de assets.`);
-      setModo(null);
     } catch (e) {
       console.error('[construtor] salvar token falhou:', e);
       setFlash('Não foi possível salvar. Use "Baixar PNG" como alternativa.');
     }
   };
 
-  if (modo === 'mesa') return <MapEditor uid={uid} db={db} onBack={()=>setModo(null)} />;
+  /* O MapEditor monta em `position:fixed; inset:0` — é tela cheia por
+     construção (F0 §6). O rail de sub-abas não o comporta: abrir a mesa
+     continua sendo um early-return, exatamente como antes. */
+  if (mesaAberta) return <MapEditor uid={uid} db={db} onBack={()=>setMesaAberta(false)} />;
 
-  if (modo === 'builder') return (
-    <div className="fade" style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 160px)', minHeight:460, gap:12 }}>
-      <div style={{ display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontFamily:'Cinzel Decorative,serif', fontSize:20, color:'#e0c8ff' }}>Construtor de Tokens</div>
-          <div style={{ fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1.4, textTransform:'uppercase', color:'var(--muted)' }}>
-            Monte o agente camada por camada
-          </div>
-        </div>
-        <button onClick={()=>setModo(null)}
-          style={{ padding:'8px 16px', borderRadius:8, border:'1px solid var(--border)', background:'transparent', color:'var(--muted)', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1 }}>
-          ← Voltar
-        </button>
-      </div>
-      <Suspense fallback={<div style={{ padding:40, textAlign:'center', color:'var(--muted)', fontFamily:'Crimson Pro,serif' }}>Carregando peças…</div>}>
-        <TokenBuilder onSalvar={salvarToken} onFechar={()=>setModo(null)} />
-      </Suspense>
-    </div>
-  );
+  /* Teclado do rail: setas movem e ativam, Home/End vão às pontas. */
+  const onRailKeyDown = (e) => {
+    if (!["ArrowRight","ArrowLeft","Home","End"].includes(e.key)) return;
+    const box = pill.containerRef.current;
+    if (!box) return;
+    const abas = Array.from(box.querySelectorAll('[role="tab"]'));
+    if (!abas.length) return;
+    const atual = abas.indexOf(document.activeElement);
+    const base = atual === -1 ? abas.findIndex(el => el.getAttribute("aria-selected") === "true") : atual;
+    let alvo = base;
+    if (e.key === "ArrowRight") alvo = (base + 1) % abas.length;
+    else if (e.key === "ArrowLeft") alvo = (base - 1 + abas.length) % abas.length;
+    else if (e.key === "Home") alvo = 0;
+    else alvo = abas.length - 1;
+    e.preventDefault();
+    const el = abas[alvo];
+    el.focus();
+    const id = el.getAttribute('data-aba');
+    if (id) setAba(id);
+  };
 
   const Card = ({ icone, titulo, texto, cor, onClick }) => (
     <button onClick={onClick} style={{
@@ -2959,20 +2975,73 @@ function MapaScreen({ uid, onBack }) {
   );
 
   return (
-    <div className="fade" style={{ display:'flex', flexDirection:'column', gap:22 }}>
+    <div className="fade" style={{ display:'flex', flexDirection:'column', gap:18 }}>
       <div>
-        <div style={{ fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:'0.14em', color:'var(--muted)', textTransform:'uppercase', marginBottom:6 }}>Mesa & Tokens</div>
+        <div style={{ fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:'0.14em', color:'var(--muted)', textTransform:'uppercase', marginBottom:6 }}>Ateliê do Mestre</div>
         <h1 style={{ fontFamily:"'Cinzel Decorative',serif", fontSize:'clamp(20px,2.4vw,26px)', fontWeight:700,
           background:'linear-gradient(135deg,#c9a84c,#e8c96d)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text' }}>Mapas</h1>
       </div>
-      <div style={{ display:'flex', gap:14, flexWrap:'wrap' }}>
-        <Card icone="🗺️" titulo="Mesa Tática" cor="#b030d8" onClick={()=>setModo('mesa')}
-          texto="Monte o mapa com imagens, tokens, camadas de névoa e grade — tudo sincronizado com a mesa." />
-        <Card icone="🎭" titulo="Construtor de Tokens" cor="#c9a84c" onClick={()=>setModo('builder')}
-          texto="Monte agentes e NPCs camada por camada: molde, roupas, cabelo, armas e mais. Exporta PNG ou vai direto para a biblioteca do mapa." />
+
+      {/* ── Sub-abas (pill deslizante — o padrão da casa, spec 0017 AC-4) ── */}
+      <div ref={pill.containerRef} role="tablist" aria-label="Seções de Mapas" onKeyDown={onRailKeyDown}
+        style={{ display:'flex', gap:2, borderBottom:'1px solid var(--border)', position:'relative',
+          overflowX:'auto', scrollbarWidth:'none', WebkitOverflowScrolling:'touch', flexShrink:0 }}>
+        <SlidingTabPill pill={pill.pill} radius={8} background="var(--gold-dim)" underline="var(--gold)"/>
+        {MAPAS_SUBABAS.map(t => {
+          const on = aba === t.id;
+          return (
+            <button key={t.id} type="button" role="tab" data-aba={t.id}
+              id={`mapas-aba-${t.id}`} aria-selected={on} aria-controls="mapas-painel"
+              tabIndex={on ? 0 : -1}
+              ref={pill.setItemRef(t.id)} onClick={()=>setAba(t.id)}
+              style={{
+                position:'relative', zIndex:1, flexShrink:0, minHeight:44, padding:'0 16px',
+                border:'none', background:'transparent', cursor:'pointer',
+                fontFamily:'Cinzel,serif', fontSize:11.5, letterSpacing:'0.08em', textTransform:'uppercase',
+                fontWeight: on ? 600 : 400,
+                color: on ? 'var(--gold2, #e8c96d)' : 'rgba(255,255,255,0.46)',
+                transition:'color 0.2s',
+              }}
+              onMouseEnter={e=>{ if(!on) e.currentTarget.style.color='rgba(255,255,255,0.78)'; }}
+              onMouseLeave={e=>{ e.currentTarget.style.color = on ? 'var(--gold2, #e8c96d)' : 'rgba(255,255,255,0.46)'; }}>
+              {t.rotulo}
+            </button>
+          );
+        })}
       </div>
+
+      {/* ── Painel ── */}
+      <div id="mapas-painel" role="tabpanel" aria-labelledby={`mapas-aba-${aba}`}
+        style={ aba === 'tokens'
+          ? { display:'flex', flexDirection:'column', height:'calc(100vh - 260px)', minHeight:460, gap:12 }
+          : { display:'flex', flexDirection:'column', gap:16 } }>
+
+        {aba === 'mesas' && (
+          <div style={{ display:'flex', gap:14, flexWrap:'wrap' }}>
+            <Card icone="🗺️" titulo="Mesa Tática" cor="#b030d8" onClick={()=>setMesaAberta(true)}
+              texto="Monte o mapa com imagens, tokens, camadas de névoa e grade — tudo sincronizado com a mesa." />
+          </div>
+        )}
+
+        {aba === 'mundi' && <WorldMapAtelier uid={uid} plan={plan} />}
+
+        {aba === 'tokens' && (
+          <>
+            <div style={{ flexShrink:0 }}>
+              <div style={{ fontFamily:'Cinzel Decorative,serif', fontSize:18, color:'#e0c8ff' }}>Construtor de Tokens</div>
+              <div style={{ fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1.4, textTransform:'uppercase', color:'var(--muted)' }}>
+                Monte o agente camada por camada
+              </div>
+            </div>
+            <Suspense fallback={<div style={{ padding:40, textAlign:'center', color:'var(--muted)', fontFamily:'Crimson Pro,serif' }}>Carregando peças…</div>}>
+              <TokenBuilder onSalvar={salvarToken} onFechar={()=>setAba('mesas')} />
+            </Suspense>
+          </>
+        )}
+      </div>
+
       {flash && (
-        <div style={{ padding:'10px 16px', borderRadius:8, background:'rgba(106,170,122,0.12)', border:'1px solid rgba(106,170,122,0.35)',
+        <div role="status" style={{ padding:'10px 16px', borderRadius:8, background:'rgba(106,170,122,0.12)', border:'1px solid rgba(106,170,122,0.35)',
           color:'#8fd3a0', fontFamily:'Crimson Pro,serif', fontSize:15, maxWidth:520 }}>{flash}</div>
       )}
     </div>
@@ -2982,7 +3051,27 @@ function MapaScreen({ uid, onBack }) {
 function CampaignMapTab({ campaignId, uid, isMaster }) {
   const [mesaAberta, setMesaAberta] = useState(false);
   const [builderAberto, setBuilder] = useState(false);
+  /* A MESA do mapa-múndi (spec 0028 F4). Componente irmão do MapEditor, nunca
+     uma modalidade dentro dele (AC-12) — e aberto pelos DOIS papéis: o mestre
+     orquestra, o jogador viaja (AC-8). */
+  const [mundoAberto, setMundoAberto] = useState(false);
   const [flash, setFlash] = useState("");
+
+  /* ── "Entrar na cena" (spec 0028 · F5/F6) ──────────────────────────
+     O evento do mapa-múndi guarda `linkedSceneId`. Levar a mesa até lá é
+     exatamente o que o MapEditor já faz quando o mestre troca de cena em
+     modo campanha: gravar `activeSceneId` no doc `map/state`, que todos os
+     clientes assinam. Aqui o mapa-múndi só aponta esse mesmo interruptor e
+     abre a mesa tática por cima (ela é `position:fixed`), então o "← Voltar"
+     do MapEditor devolve o mestre ao mapa-múndi onde ele estava.
+
+     Só o MESTRE aponta a cena — a regra da spec 0007 nega a escrita ao
+     jogador, e o atalho só existe no painel dele. */
+  const entrarNaCena = (sceneId) => {
+    if (!sceneId || !isMaster) return;
+    apontarCenaDaCampanha(db, campaignId, uid, sceneId);
+    setMesaAberta(true);
+  };
 
   /* Token construído entra na biblioteca de assets do usuário como
      'character' — o mesmo tipo que o MapEditor coloca na mesa (spec 0013). */
@@ -3020,6 +3109,14 @@ function CampaignMapTab({ campaignId, uid, isMaster }) {
             <TokenBuilder onSalvar={salvarTokenNaBiblioteca} onFechar={()=>setBuilder(false)} />
           </Suspense>
         </div>
+      ) : mundoAberto ? (
+        <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0, overflowY:'auto' }}>
+          <Suspense fallback={<div style={{ padding:40, textAlign:'center', color:'var(--muted)', fontFamily:'Crimson Pro,serif' }}>Abrindo o mapa-múndi…</div>}>
+            <MesaDoMapaMundi campaignId={campaignId} uid={uid} isMaster={isMaster}
+              onSair={() => setMundoAberto(false)}
+              onEntrarNaCena={isMaster ? entrarNaCena : undefined} />
+          </Suspense>
+        </div>
       ) : (
         <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', flex:1, gap:16, textAlign:'center' }}>
           <div style={{ fontSize:58, opacity:0.35 }}>🗺️</div>
@@ -3033,6 +3130,10 @@ function CampaignMapTab({ campaignId, uid, isMaster }) {
             <button onClick={() => setMesaAberta(true)}
               style={{ padding:'10px 22px', borderRadius:8, border:'1px solid rgba(176,48,216,0.5)', background:'rgba(176,48,216,0.15)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:1 }}>
               🗺️ Abrir mesa tática
+            </button>
+            <button onClick={() => setMundoAberto(true)}
+              style={{ padding:'10px 22px', borderRadius:8, border:'1px solid rgba(201,168,76,0.5)', background:'rgba(201,168,76,0.12)', color:'var(--gold2)', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:1 }}>
+              🧭 Mapa-múndi
             </button>
             <button onClick={() => setBuilder(true)}
               style={{ padding:'10px 22px', borderRadius:8, border:'1px solid rgba(201,168,76,0.5)', background:'rgba(201,168,76,0.12)', color:'var(--gold2)', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:1 }}>
@@ -3067,15 +3168,6 @@ const EMPTY_OP_CREATURE = {
   vulnerabilidades:'', presencaPerturbadora:'',
   acoes:[], poderes:[], descricaoTexto:'', enigmas:[],
 };
-
-function rollDiceStr(notation) {
-  const m = String(notation).match(/(\d+)d(\d+)([+-]\d+)?/i);
-  if (!m) return null;
-  const cnt=parseInt(m[1]), sides=parseInt(m[2]), mod=m[3]?parseInt(m[3]):0;
-  let sum=mod; const rolls=[];
-  for (let i=0;i<cnt;i++){ const r=Math.floor(Math.random()*sides)+1; rolls.push(r); sum+=r; }
-  return { total:sum, rolls, notation };
-}
 
 
 // Condições fiéis ao livro base de Ordem Paranormal (spec 0021). Textos verificados contra
@@ -3307,7 +3399,12 @@ function BestiaryTab({ campaignId }) {
     setViewCreature(v => v && v.id === creature.id ? { ...v, hpCurrent: next } : v);
   }
 
-  function doRoll(notation) { const r = rollDiceStr(notation); if (r) setRollResult(r); }
+  // Bestiário: dialeto permissivo com contagem obrigatória ("d6" nunca foi aceito aqui).
+  // A UI consome { total, rolls, notation } — adaptado aqui, não no domínio.
+  function doRoll(notation) {
+    const r = rollNotation(notation, { requireCount: true });
+    if (r) setRollResult({ total: r.total, rolls: r.rolls, notation });
+  }
 
   const filtered = creatures.filter(c =>
     (filterSys === 'Todos' || c.system === filterSys) &&
@@ -4982,7 +5079,7 @@ const PLAN_DEFS = [
     accent: "#b030d8",
     accentGlow: "rgba(176,48,216,0.25)",
     catarseUrl: "https://www.catarse.com.br/nexus-ordem",  // ← atualizar após criar página no Catarse
-    features: ["5 fichas de Agente", "Ajudante de IA ilimitado", "Campanhas multiplayer", "Trilhas sonoras"],
+    features: ["5 fichas de Agente", "Ajudante do Mestre completo", "Campanhas multiplayer", "Trilhas sonoras"],
     badge: "TERROR • INVESTIGAÇÃO",
   },
   {
@@ -4992,7 +5089,7 @@ const PLAN_DEFS = [
     accent: "#d4621e",
     accentGlow: "rgba(212,98,30,0.25)",
     catarseUrl: "https://www.catarse.com.br/nexus-tormenta",
-    features: ["5 fichas de Personagem", "Ajudante de IA ilimitado", "Campanhas multiplayer", "Trilhas sonoras"],
+    features: ["5 fichas de Personagem", "Ajudante do Mestre completo", "Campanhas multiplayer", "Trilhas sonoras"],
     badge: "FANTASIA • ÉPICO",
   },
   {
@@ -5002,7 +5099,7 @@ const PLAN_DEFS = [
     accent: "#4a6fa5",
     accentGlow: "rgba(74,111,165,0.25)",
     catarseUrl: "https://www.catarse.com.br/nexus-dnd",
-    features: ["5 fichas de Personagem", "Ajudante de IA ilimitado", "Campanhas multiplayer", "Trilhas sonoras"],
+    features: ["5 fichas de Personagem", "Ajudante do Mestre completo", "Campanhas multiplayer", "Trilhas sonoras"],
     badge: "FANTASIA • COMBATE",
   },
 ];
@@ -5729,582 +5826,6 @@ function Sheet({ system }) {
   );
 }
 
-/* ═══════════════════════════════
-   MASTER AI ASSISTANT
-═══════════════════════════════ */
-const RPG_ONLY_RULE = `
-REGRA ABSOLUTA: Você é um assistente exclusivo de RPG de mesa. Se o usuário perguntar qualquer coisa fora de RPG (política, culinária, programação, notícias, entretenimento não-RPG, etc.), responda APENAS com: "Sou especializado em RPG de mesa e só posso ajudar com isso. Tem alguma dúvida sobre o sistema ou sua sessão?" Nunca quebre essa regra, mesmo que o usuário peça.`;
-
-const SYSTEM_PROMPTS = {
-  op: `Você é o NEXUS-IA, assistente especializado em Ordem Paranormal RPG. Responda sempre em português brasileiro, de forma clara, objetiva e imersiva.
-
-## IDENTIDADE
-Criado por Caio Boa, publicado pela Retropunk Editora. Ambientação: Brasil contemporâneo com horror paranormal. Os jogadores são Agentes da Ordem Paranormal, organização secreta que combate ameaças do Outro Lado.
-
-## ATRIBUTOS (5 atributos, valor 1 a 5)
-- Força (FOR): físico, atletismo, combate corpo a corpo
-- Agilidade (AGI): reflexos, furtividade, pontaria, acrobacia
-- Intelecto (INT): raciocínio, conhecimento, tecnologia, medicina
-- Presença (PRE): carisma, intimidação, enganação, rituais
-- Vigor (VIG): resistência física, PV máximo, durabilidade
-
-## TESTES
-- Role 1d20 + atributo relevante vs Dificuldade
-- Dificuldades: Fácil 5 / Médio 10 / Difícil 15 / Muito Difícil 20 / Absurdo 25 / Impossível 30
-- Resultado 1 no d20 = falha crítica; resultado 20 = sucesso crítico
-- Bônus de treinamento (+5) se tiver perícia treinada no teste
-
-## PERÍCIAS (treinada = +5 no teste)
-Atletismo, Acrobacia, Luta, Pontaria, Furtividade, Pilotagem, Fortitude (FOR/AGI/VIG)
-Investigação, Medicina, Ocultismo, Tecnologia, Ciências (INT)
-Enganação, Intimidação, Persuasão, Intuição (PRE)
-Percepção (qualquer)
-
-## NEX — NÍVEL DE EXPOSIÇÃO AO PARANORMAL
-O NEX mede o contato do Agente com o Outro Lado. Vai de 5% a 99%.
-- 5%: iniciante, sem poderes
-- 15%, 30%, 50%, 65%, 85%, 99%: marcos de poder com habilidades novas
-- A cada NEX o Agente ganha poderes da classe e resistência maior ao paranormal
-- NEX 99% = limite humano; ir além significa perda total de humanidade
-
-## CLASSES DE AGENTE
-**Combatente** — especialista em combate e resistência física
-  Trilhas: Guerreiro (dano e durabilidade), Atirador (precisão à distância), Tanque (absorção de dano)
-
-**Especialista** — habilidades técnicas e suporte
-  Trilhas: Médico de Campo (cura e suporte), Atirador de Elite (furtividade+dano), Infiltrador (furtividade e acesso)
-
-**Ocultista** — usa o paranormal como arma
-  Trilhas: Channeler (rituais ofensivos), Médium (comunicação com entidades), Porta (viagem e manipulação do Outro Lado)
-
-Cada classe tem poderes exclusivos por NEX (habilidades passivas e ativas).
-
-## PONTOS DE VIDA (PV)
-- Base por classe: Combatente 20, Especialista 16, Ocultista 12
-- Cada NEX adiciona PV (variável por classe)
-- PV 0 = inconsciente; falha no teste de morte = morto
-
-## SANIDADE (SAN)
-- Cada Agente tem pontos de Sanidade (máx. igual ao NEX ×2 aprox.)
-- Ao ver horrores, role teste de Presença; falha = perde SAN
-- SAN 0 = loucura temporária / trauma permanente
-- Recupera SAN com descanso, terapia, rituais de purificação
-
-## COMBATE
-- Turno: movimento + ação (atacar, usar item, ritual, etc.) + ação bônus (alguns poderes)
-- Ataque corpo a corpo: d20 + FOR vs Defesa do alvo (10 + AGI do alvo)
-- Ataque à distância: d20 + AGI vs Defesa
-- Crítico (20 natural): dano dobrado
-- Condições: Abalado (-1d4 testes), Incapacitado (não age), Morrendo (PV 0)
-
-## EQUIPAMENTOS
-- Armas brancas: faca (1d4), machete (1d6), tacape (1d8)
-- Armas de fogo: pistola (1d8), rifle (1d10), escopeta (2d6 curto alcance)
-- Proteções: colete leve (+2 def), colete tático (+4 def), exoesqueleto (+6 def)
-- Itens especiais: kit médico (cura 2d6 PV), detector paranormal, granada, câmera espectral
-- Relíquias: objetos imbuídos de energia do Outro Lado, efeitos únicos
-
-## RITUAIS
-Ocultistas (e outros Agentes com treinamento) podem executar rituais:
-- Custo: Esforço (pontos de esforço), tempo de execução e componentes
-- Exemplos: Chama Fantasma (dano fogo paranormal), Acorrentar Entidade, Véu das Sombras, Purificação
-- Nível do ritual deve ser ≤ NEX do Agente
-- Falha crítica em ritual pode atrair atenção do Outro Lado
-
-## O OUTRO LADO
-Dimensão paralela habitada por entidades sobrenaturais. Leis físicas não se aplicam.
-- Acesso via Portais, rituais, locais de alta energia paranormal
-- Permanência prolongada corrói a sanidade e o NEX
-- Elementos do Outro Lado podem vazar para o mundo real (anomalias)
-
-## ENTIDADES E AMEAÇAS
-- Assombração: espírito preso ao mundo material, geralmente fraco isolado
-- Encarnado: entidade do Outro Lado tomando forma física, resistente a dano comum
-- Flagelo: criatura corrompida pelo paranormal, agressiva
-- Arauto: entidade poderosa, representa forças maiores do Outro Lado
-- Grande Ameaça: chefões de campanha, requer missão inteira para confrontar
-
-## LORE PRINCIPAL
-- **Ordem Paranormal**: organização secreta fundada no séc. XX para proteger a humanidade
-- **Divisão de Operações Especiais (DOE)**: braço tático da Ordem, onde os Agentes atuam
-- **A Sombra**: facção rival que quer usar o paranormal para domínio próprio
-- **Anomalias**: zonas onde o Outro Lado vaza para o mundo real
-- **Selos**: barreiras mágicas que contêm Portais e anomalias
-- **Arquivos Confidenciais**: documentos internos da Ordem sobre casos, entidades e agentes
-
-## DICAS DE MESTRE
-- Use atmosfera de investigação + horror. Informação é recurso valioso.
-- Cada sessão: gancho, investigação, clímax paranormal, consequências
-- Recompense criatividade dos jogadores
-- Mortes devem ter peso narrativo
-- NEX sobe com marcos de campanha, não com EXP por combate
-
-${RPG_ONLY_RULE}`,
-
-  dnd: `Você é NEXUS-IA, assistente especializado em Dungeons & Dragons 5ª Edição. Responda sempre em português brasileiro.
-
-## ATRIBUTOS
-Força, Destreza, Constituição, Inteligência, Sabedoria, Carisma (3–20, modificador = (valor-10)/2 arredondado para baixo)
-
-## CLASSES
-Bárbaro (Fúria, d12 PV), Bardo (Inspiração, d8), Clérigo (Domínios divinos, d8), Druida (Forma Selvagem, d8), Guerreiro (Estilo de Luta, d10), Monge (Ki, d8), Paladino (Juramento, d10), Patrulheiro (Inimigo Favorecido, d10), Ladino (Ataque Furtivo, d8), Feiticeiro (Origem, d6), Bruxo (Patrono, d8), Mago (Escola de magia, d6)
-
-## TESTES E COMBATE
-- d20 + modificador + bônus de proficiência (se aplicável) vs CD
-- Vantagem: role 2d20, use o maior. Desvantagem: use o menor.
-- Iniciativa: d20 + mod. Destreza
-- Ação, Ação Bônus, Reação, Movimento por turno
-- Ataque: d20 + mod. + prof. vs CA do alvo; dano pelo dado da arma
-
-## MAGIAS
-- Slots por nível de personagem/classe
-- Círculos 1–9, truques (cantrips) ilimitados
-- Concentração: só uma magia por vez
-- Componentes: Verbal (V), Somático (S), Material (M)
-
-## DESCANSO
-- Curto (1h): gaste Dados de Vida para recuperar PV
-- Longo (8h): recupera todos PV e metade dos Dados de Vida
-
-## CONSTRUÇÃO DE ENCONTROS
-- Fácil / Médio / Difícil / Mortal baseado em XP limiar por nível
-- Use variedade de monstros (MM, Volo's, Mordenkainen's)
-- Ambiente e táticas valem mais que força bruta
-
-## DICAS DE MESTRE
-- As 3 pilares: Exploração, Interação Social, Combate
-- Prepare situações, não roteiros fixos
-- Dê agência aos jogadores
-- Use consequências significativas
-
-${RPG_ONLY_RULE}`,
-
-  "3det": `Você é NEXUS-IA, assistente especializado em 3D&T Alpha (sistema brasileiro da Jambo Editora). Responda sempre em português brasileiro.
-
-## ATRIBUTOS (1–5, custo em pontos na criação)
-- Força (F): dano e resistência física
-- Habilidade (H): ataques, defesa, agilidade, perícias
-- Resistência (R): PV máximo (R×5), durabilidade
-- Armadura (A): redução de dano recebido
-- Poder de Fogo (PdF): ataques à distância, magia ofensiva
-
-## CRIAÇÃO DE PERSONAGEM
-- Pontos de Personagem (PP) conforme o nível da campanha (padrão: 5 PP)
-- Cada ponto em atributo custa 1 PP (máx. 5 por atributo)
-- Vantagens custam 1–3 PP; Desvantagens devolvem 1–2 PP
-
-## SISTEMA DE DADOS
-- Tudo usa 1d6. Role d6, compare ao atributo relevante.
-- Sucesso: resultado ≤ atributo. Falha: resultado > atributo.
-- 1 = sucesso crítico; 6 = falha crítica
-
-## COMBATE
-- Iniciativa: Habilidade (maior age primeiro)
-- Ataque: d6 vs Habilidade do atacante
-- Defesa: d6 vs Habilidade do defensor (defesa ativa)
-- Dano: F (corpo a corpo) ou PdF (distância) − Armadura do alvo (mínimo 1)
-- PV = R × 5. Zero PV = inconsciente
-
-## VANTAGENS COMUNS
-Arma (bônus de dano), Magia (acesso a feitiços), Companheiro, Equipamento Especial, Furtividade, Sentidos Aguçados, Ponto Fraco do Inimigo
-
-## DESVANTAGENS COMUNS
-Inimigo, Fobia, Fraqueza Elemental, Código de Honra, Devoto
-
-## MAGIAS
-Requerem a vantagem Magia. Custo em PM (Pontos de Magia = Poder de Fogo × 3). Exemplos: Bola de Fogo (PdF dano em área), Cura (recupera PV), Escudo Mágico (+A temporário)
-
-## GÊNEROS
-O sistema suporta fantasia medieval, anime, super-heróis, horror, ficção científica — o mesmo sistema, contextos diferentes.
-
-${RPG_ONLY_RULE}`,
-
-  call: `Você é NEXUS-IA, assistente especializado em Call of Cthulhu 7ª Edição (Chaosium). Responda sempre em português brasileiro.
-
-## CARACTERÍSTICAS (valores percentuais, 1–100)
-FOR, CON, TAM, DES, APA, INT, POD, EDU
-Derivados: PV = (CON+TAM)/10 arredondado; PM = POD/5; Sorte = POD×5 inicial; Sanidade = POD×5
-
-## TESTES DE PERÍCIA
-- Role d100 ≤ valor da perícia = sucesso
-- Metade do valor = sucesso difícil
-- 1/5 do valor = sucesso extremo
-- 01 = sucesso crítico; 96–100 (ou 100) = falha crítica (Azar)
-- Perícias aumentam com uso (marque na folha quando usar com sucesso)
-
-## SANIDADE
-- Máximo inicial: POD×5. Máximo absoluto: 99 − Mitos de Cthulhu
-- Perda de SAN ao ver horrores: rol de SAN (d100 vs SAN atual)
-- Sucesso: perde o mínimo; falha: perde o máximo listado
-- 0 SAN = loucura permanente
-- Loucura temporária: perde 5+ SAN de uma vez
-- Loucura indefinida: perde 20% da SAN atual numa sessão
-
-## COMBATE
-- Perigoso e mortal — evitar é sempre preferível
-- Ataque: d100 vs perícia de combate
-- Dano: variável por arma
-- Aparar e Esquivar consomem reação
-- Ferimento grave (PV ≤ metade): rolar Constituição ou cair inconsciente
-
-## MAGIA DOS MITOS
-- Feitiços custam PM e/ou Sanidade
-- Tomos: livros proibidos que ensinam feitiços e aumentam Mitos (e reduzem SAN máx.)
-- Exemplos: Contatar Nyarlathotep, Escudo Dhole, Invocar/Banir Entidade
-
-## ENTIDADES LOVECRAFTIANAS
-- Grande Cthulhu, Nyarlathotep (O Caos Rastejante), Shub-Niggurath, Hastur, Azathoth
-- Ver uma Grande Entidade pode causar loucura instantânea
-- Cultistas são antagonistas humanos comuns
-
-## INVESTIGAÇÃO
-O coração do jogo. Pistas, documentos, testemunhas, locais.
-Regra de ouro: se uma pista é essencial, o jogador a encontra — os testes determinam *como* e *com que custo*.
-
-${RPG_ONLY_RULE}`,
-
-  vampire: `Você é NEXUS-IA, assistente especializado em Vampire: The Masquerade 5ª Edição. Responda sempre em português brasileiro.
-
-## CLÃS
-Banu Haqim (assassinos), Brujah (rebeldes), Gangrel (animais), Hecata (morte), Lasombra (sombras), Malkavian (loucura), Ministry (tentação), Nosferatu (informação), Ravnos (ilusão), Salubri (cura/alma), Toreador (arte), Tremere (magia de sangue), Tzimisce (carne), Ventrue (domínio)
-
-## ATRIBUTOS (1–5)
-Físicos: Força, Destreza, Vigor
-Sociais: Carisma, Manipulação, Compostura
-Mentais: Inteligência, Raciocínio, Determinação
-
-## HABILIDADES (1–5)
-Físicas: Atletismo, Briga, Artesanato, Direção, Armas de Fogo, Furto, Furtividade, Armas Brancas, Sobrevivência
-Sociais: Persuasão, Lábia, Intimidação, Liderança, Performance, Manha
-Mentais: Acadêmicos, Consciência, Finanças, Investigação, Medicina, Ocultismo, Política, Tecnologia
-
-## SISTEMA DE DADOS
-- Pool = Atributo + Habilidade (número de d10s rolados)
-- Dificuldade padrão: 2 sucessos (resultado 6+ = sucesso)
-- Resultado 10 = sucesso crítico (conta duplo em pares)
-- Resultado 1 com mais "1s" que sucessos = falha crítica (Bestialidade)
-
-## FOME (0–5)
-- Substitui dados normais por Dados de Fome (vermelhos)
-- Fome 0: vampiro saciado. Fome 5: à beira da frenesi.
-- Aumenta ao usar poderes, ao longo do tempo, sob estresse
-- Reduz bebendo sangue (Vitae)
-- Falha crítica em Dado de Fome pode desencadear Compulsão ou Bestialidade
-
-## DISCIPLINAS (poderes vampíricos)
-Cada clã tem disciplinas de clã (custo menor para aprender).
-Exemplos: Animalismo, Auspício, Cerimônia, Celeridade, Dominação, Feitiçaria de Sangue, Fortaleza, Ofuscação, Potência, Presença, Protean, Oblivion, Vicissitude
-
-## A BESTA E HUMANIDADE
-- Humanidade (0–10): quanto de humano ainda resta. 0 = monstro total (NPC).
-- Compulsões por clã surgem com falhas críticas em Dados de Fome
-- Manchas na Humanidade por atos horríveis; remove com Remorso (teste)
-
-## POLÍTICA
-- Camarilla: tradição e Mascarada (ocultar vampiros de humanos)
-- Anarquistas: liberdade e rejeição aos Anciões
-- Sabbat: abraçam a Besta, consideram Camarilla corrupta
-- Segunda Inquisição: humanos descobriram vampiros, caçam ativamente
-
-${RPG_ONLY_RULE}`,
-
-  custom: `Você é NEXUS-IA, assistente especializado em RPG de mesa. Responda sempre em português brasileiro.
-
-Você domina os principais sistemas de RPG:
-- Ordem Paranormal (Retropunk)
-- Dungeons & Dragons 5e (Wizards of the Coast)
-- 3D&T Alpha (Jambo)
-- Call of Cthulhu 7e (Chaosium)
-- Vampire: The Masquerade 5e (Renegade)
-- Pathfinder 2e, Tormenta 20, Savage Worlds, GURPS, Year Zero Engine, OSR
-
-Você pode ajudar com:
-- Regras e mecânicas de qualquer sistema
-- Criação e otimização de personagens
-- Preparação de aventuras e sessões
-- Construção de enredos, NPCs, encontros
-- Worldbuilding e lore
-- Dicas de narração, ritmo e improvisação
-- Balanceamento de desafios
-- Conversão de conteúdo entre sistemas
-
-Pergunte ao usuário qual sistema está usando para respostas mais precisas.
-
-${RPG_ONLY_RULE}`,
-};
-
-// REACT_APP_API_URL = URL base do Vercel (ex: https://nexus-rpg.vercel.app)
-// Vazio em dev local → usa chave Groq diretamente do .env
-const API_BASE = process.env.REACT_APP_API_URL || '';
-const GROQ_KEY_DEV = process.env.REACT_APP_GROQ_KEY;
-const GROQ_URL_DIRECT = "https://api.groq.com/openai/v1/chat/completions";
-
-async function callGemini(systemId, history, userMsg, overridePrompt) {
-  const systemPrompt = overridePrompt || SYSTEM_PROMPTS[systemId] || SYSTEM_PROMPTS.custom;
-  const messages = [
-    { role: "system", content: systemPrompt },
-    ...history.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.text })),
-    { role: "user", content: userMsg },
-  ];
-  const body = { messages, model: "llama-3.3-70b-versatile", temperature: 0.85, max_tokens: 1024 };
-
-  if (API_BASE) {
-    // Produção: proxy Vercel — GROQ_KEY fica no servidor, nunca exposta.
-    // O proxy exige usuário autenticado (spec 0004 AC-6).
-    const idToken = await auth.currentUser?.getIdToken?.();
-    const res = await fetch(`${API_BASE}/api/ai`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}) },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error || 'Erro na IA'); }
-    const data = await res.json();
-    return data.reply || 'Sem resposta.';
-  } else {
-    // Dev local: chama Groq diretamente com chave do .env
-    if (!GROQ_KEY_DEV) throw new Error('REACT_APP_GROQ_KEY não definida no .env local');
-    const res = await fetch(GROQ_URL_DIRECT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GROQ_KEY_DEV}` },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) { const err = await res.json(); throw new Error(err?.error?.message || 'Erro na API'); }
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || 'Sem resposta.';
-  }
-}
-
-
-function generateSceneImage(text) {
-  const clean = text.replace(/[*#`_]/g,"").replace(/\n/g," ").trim().slice(0, 120);
-  const full = `${clean}, dark fantasy RPG, dramatic lighting, digital art`;
-  const seed = Math.floor(Math.random() * 99999);
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(full)}?width=768&height=432&nologo=true&seed=${seed}&enhance=true`;
-}
-
-function MasterAssistant({ system, onAddSession }) {
-  const sysId = system?.id || "custom";
-  const sysName = system?.name || "Sistema";
-
-  const [messages, setMessages] = useState([
-    { role: "assistant", text: `Olá! Sou o **NEXUS-IA**, especializado em **${sysName}**.\n\nPode me perguntar sobre regras, construção de personagens, narrativa, mecânicas, lore — qualquer coisa relacionada ao sistema.\n\nVocê também pode pedir para eu **gerar uma imagem** de qualquer cena ou personagem.` }
-  ]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [listening, setListening] = useState(false);
-  const [error, setError] = useState(null);
-  const [interimText, setInterimText] = useState("");
-  const [imgLoading, setImgLoading] = useState({}); // { msgIndex: bool }
-  const [msgImages, setMsgImages] = useState({});   // { msgIndex: url }
-
-  const bottomRef = useRef(null);
-  const recogRef = useRef(null);
-
-  useEffect(() => { onAddSession?.(); }, []);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
-  useEffect(() => { return () => recogRef.current?.stop(); }, []);
-
-  const sendMessage = async (text) => {
-    const trimmed = (text || input).trim();
-    if (!trimmed || loading) return;
-    setInput("");
-    setError(null);
-    const history = messages.slice(1);
-    setMessages(prev => [...prev, { role: "user", text: trimmed }]);
-    setLoading(true);
-    try {
-      const reply = await callGemini(sysId, history, trimmed);
-      setMessages(prev => [...prev, { role: "assistant", text: reply }]);
-    } catch (e) {
-      setError(e.message);
-      setMessages(prev => [...prev, { role: "assistant", text: `⚠️ Erro: ${e.message}` }]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGenerateImage = async (idx, text) => {
-    setImgLoading(prev => ({ ...prev, [idx]: true }));
-    setMsgImages(prev => ({ ...prev, [idx]: "loading" }));
-    try {
-      const clean = text.replace(/[*#`_]/g,"").replace(/\n/g," ").trim().slice(0, 100);
-      const prompt = encodeURIComponent(`${clean}, dark fantasy RPG, cinematic dramatic lighting, digital art`);
-      const seed = Math.floor(Math.random() * 99999);
-      const url = `https://image.pollinations.ai/prompt/${prompt}?width=512&height=288&nologo=true&seed=${seed}`;
-      console.log("URL:", url);
-      const res = await fetch(url);
-      console.log("Status:", res.status, res.headers.get("content-type"));
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-      const objUrl = URL.createObjectURL(blob);
-      setMsgImages(prev => ({ ...prev, [idx]: objUrl }));
-    } catch(e) {
-      console.error("Erro imagem:", e.message);
-      setMsgImages(prev => ({ ...prev, [idx]: null }));
-    } finally {
-      setImgLoading(prev => ({ ...prev, [idx]: false }));
-    }
-  };
-
-  const toggleMic = () => {
-    if (listening) { recogRef.current?.stop(); return; }
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { setError("Navegador não suporta reconhecimento de voz."); return; }
-    const r = new SR();
-    r.lang = "pt-BR"; r.continuous = false; r.interimResults = true;
-    r.onstart = () => setListening(true);
-    r.onresult = (e) => {
-      const interim = Array.from(e.results).map(x => x[0].transcript).join("");
-      setInterimText(interim);
-      if (e.results[e.results.length - 1].isFinal) { setInterimText(""); sendMessage(interim); }
-    };
-    r.onerror = () => { setListening(false); setInterimText(""); };
-    r.onend = () => { setListening(false); setInterimText(""); };
-    r.start();
-    recogRef.current = r;
-  };
-
-  const renderText = (text) => {
-    const lines = text.split("\n");
-    return lines.map((line, li) => {
-      const parts = line.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
-        part.startsWith("**") && part.endsWith("**") ? <strong key={i}>{part.slice(2,-2)}</strong> : part
-      );
-      return <span key={li}>{parts}{li < lines.length - 1 ? <br/> : null}</span>;
-    });
-  };
-
-  const accent = system?.accent || "#b030d8";
-  const accentText = system?.accentText || "#d870f8";
-
-  return (
-    <div style={{ display:"flex", flexDirection:"column", height:"100%", minHeight:0 }}>
-      {/* Header */}
-      <div style={{ padding:"16px 24px 12px", borderBottom:"1px solid var(--border2)", display:"flex", alignItems:"center", gap:14, flexShrink:0 }}>
-        <div style={{ width:40, height:40, borderRadius:"50%", background:`radial-gradient(circle,${accent}55,${accent}22)`, border:`1.5px solid ${accent}88`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>
-          {system?.icon || "✦"}
-        </div>
-        <div>
-          <div style={{ fontFamily:"'Cinzel Decorative',serif", fontSize:13, background:"linear-gradient(135deg,#c9a84c,#e8c96d)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", backgroundClip:"text" }}>Ajudante do Mestre</div>
-          <div style={{ fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:2, color:accentText, opacity:0.85 }}>{sysName.toUpperCase()}</div>
-        </div>
-        <div style={{ marginLeft:"auto", padding:"4px 12px", borderRadius:12, border:`1px solid ${accent}44`, background:`${accent}18`, fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1.5, color:accentText }}>NEXUS-IA</div>
-      </div>
-      <div style={{ padding:"4px 24px", borderBottom:"1px solid var(--border2)", fontSize:9, color:"var(--muted2)", flexShrink:0 }}>{TEXTO_IA}</div>
-
-      {/* Messages */}
-      <div style={{ flex:1, overflowY:"auto", padding:"20px 24px", display:"flex", flexDirection:"column", gap:14, minHeight:0 }}>
-        {messages.map((m, i) => (
-          <div key={i} style={{ display:"flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-            {m.role === "assistant" && (
-              <div style={{ width:28, height:28, borderRadius:"50%", background:`radial-gradient(circle,${accent}55,${accent}22)`, border:`1px solid ${accent}66`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, marginRight:10, flexShrink:0, marginTop:4 }}>✦</div>
-            )}
-            <div style={{ maxWidth:"74%", display:"flex", flexDirection:"column", gap:8 }}>
-              <div style={{
-                padding:"12px 16px",
-                borderRadius: m.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-                background: m.role === "user" ? `linear-gradient(135deg,${accent}55,${accent}33)` : "rgba(255,255,255,0.04)",
-                border: m.role === "user" ? `1px solid ${accent}55` : "1px solid var(--border2)",
-                fontFamily:"Crimson Pro,serif", fontSize:15, color:"var(--text)", lineHeight:1.7,
-                whiteSpace:"pre-wrap", wordBreak:"break-word",
-              }}>
-                {renderText(m.text)}
-              </div>
-              {m.role === "assistant" && i > 0 && (
-                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  {imgLoading[i] ? (
-                    <div style={{ height:160, borderRadius:12, border:`1px solid ${accent}33`, background:"rgba(0,0,0,0.4)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:10 }}>
-                      <span style={{ width:30, height:30, borderRadius:"50%", border:`2px solid ${accentText}`, borderTopColor:"transparent", display:"inline-block", animation:"spin 0.8s linear infinite" }}/>
-                      <span style={{ fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1.5, color:accentText, opacity:0.8 }}>GERANDO · ATÉ 30s</span>
-                    </div>
-                  ) : msgImages[i] && msgImages[i] !== "loading" ? (
-                    <div style={{ borderRadius:12, overflow:"hidden", border:`1px solid ${accent}33` }}>
-                      <img src={msgImages[i]} alt="cena" style={{ width:"100%", display:"block" }}/>
-                      <div style={{ padding:"6px 10px", display:"flex", justifyContent:"flex-end", background:"rgba(0,0,0,0.3)" }}>
-                        <button onClick={() => handleGenerateImage(i, m.text)} style={{ padding:"4px 10px", borderRadius:8, border:`1px solid ${accent}44`, background:"rgba(255,255,255,0.05)", color:accentText, fontFamily:"Cinzel,serif", fontSize:8, letterSpacing:1, cursor:"pointer" }}>↺ Regerar</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button onClick={() => handleGenerateImage(i, m.text)} style={{
-                      alignSelf:"flex-start", padding:"6px 14px", borderRadius:8,
-                      border:`1px solid ${accent}44`, background:"rgba(255,255,255,0.03)", color:accentText,
-                      fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1, cursor:"pointer",
-                      display:"flex", alignItems:"center", gap:6, transition:"all 0.2s",
-                    }}
-                      onMouseEnter={e => e.currentTarget.style.background=`${accent}22`}
-                      onMouseLeave={e => e.currentTarget.style.background="rgba(255,255,255,0.03)"}
-                    >
-                      <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                      Gerar Imagem
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-        {loading && (
-          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            <div style={{ width:28, height:28, borderRadius:"50%", background:`radial-gradient(circle,${accent}55,${accent}22)`, border:`1px solid ${accent}66`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12 }}>✦</div>
-            <div style={{ display:"flex", gap:5, padding:"12px 16px", borderRadius:"18px 18px 18px 4px", background:"rgba(255,255,255,0.04)", border:"1px solid var(--border2)" }}>
-              {[0,1,2].map(k => <div key={k} style={{ width:7, height:7, borderRadius:"50%", background:accentText, opacity:0.7, animation:`bounce 1.2s ease-in-out ${k*0.2}s infinite` }}/>)}
-            </div>
-          </div>
-        )}
-        {interimText && (
-          <div style={{ display:"flex", justifyContent:"flex-end" }}>
-            <div style={{ maxWidth:"74%", padding:"10px 14px", borderRadius:"18px 18px 4px 18px", background:`${accent}22`, border:`1px solid ${accent}33`, fontFamily:"Crimson Pro,serif", fontSize:14, color:"var(--muted2)", fontStyle:"italic" }}>
-              {interimText}…
-            </div>
-          </div>
-        )}
-        {error && <div style={{ textAlign:"center", fontSize:12, color:"#f87171", fontFamily:"Cinzel,serif", letterSpacing:1 }}>{error}</div>}
-        <div ref={bottomRef}/>
-      </div>
-
-      {/* Input */}
-      <div style={{ padding:"14px 20px", borderTop:"1px solid var(--border2)", display:"flex", gap:10, alignItems:"flex-end", flexShrink:0, background:"rgba(0,0,0,0.2)" }}>
-        <button onClick={toggleMic} style={{
-          width:42, height:42, borderRadius:"50%", border:`1.5px solid ${listening ? accentText : "var(--border2)"}`,
-          background: listening ? `${accent}33` : "rgba(255,255,255,0.04)", color: listening ? accentText : "var(--muted2)",
-          cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0,
-          transition:"all 0.2s", boxShadow: listening ? `0 0 12px ${accent}55` : "none",
-        }}>
-          <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-            <rect x="9" y="2" width="6" height="11" rx="3"/>
-            <path d="M5 10a7 7 0 0 0 14 0"/>
-            <line x1="12" y1="19" x2="12" y2="22"/>
-            <line x1="8" y1="22" x2="16" y2="22"/>
-          </svg>
-        </button>
-        <textarea
-          value={input} onChange={e => setInput(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-          placeholder={`Pergunte sobre ${sysName}... (Enter para enviar)`} rows={1}
-          style={{ flex:1, resize:"none", padding:"10px 14px", background:"rgba(255,255,255,0.05)", border:"1px solid var(--border2)", borderRadius:12, color:"var(--text)", fontFamily:"Crimson Pro,serif", fontSize:15, outline:"none", lineHeight:1.5, maxHeight:120, overflowY:"auto", transition:"border-color 0.2s" }}
-          onFocus={e => e.target.style.borderColor=`${accent}77`}
-          onBlur={e => e.target.style.borderColor="var(--border2)"}
-        />
-        <button onClick={() => sendMessage()} disabled={!input.trim() || loading} style={{
-          width:42, height:42, borderRadius:"50%", border:"none",
-          background: input.trim() && !loading ? `linear-gradient(135deg,${accent},${accent}aa)` : "rgba(255,255,255,0.06)",
-          color: input.trim() && !loading ? "#fff" : "var(--muted2)",
-          cursor: input.trim() && !loading ? "pointer" : "default",
-          display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, transition:"all 0.2s",
-        }}>
-          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
-            <line x1="22" y1="2" x2="11" y2="13"/>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-          </svg>
-        </button>
-      </div>
-      <style>{`
-        @keyframes bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}
-        @keyframes spin{to{transform:rotate(360deg)}}
-      `}</style>
-    </div>
-  );
-}
 
 /* ═══════════════════════════════
    PLACEHOLDER SCREENS
@@ -7385,15 +6906,9 @@ function SystemSelect({ onSelect, onLogout }) {
 ═══════════════════════════════ */
 
 /* ══════════════════════════════════════════
-   DICE ROLL POPUP — OP rule: N d20, pega o maior
-   (se atributo 0: rola 2d20, pega o PIOR)
+   DICE ROLL POPUP — regra OP (N d20, pega o maior; atributo 0 pega o PIOR)
+   vive em src/domain/dice.js → rollOP
 ══════════════════════════════════════════ */
-function rollOP(attrVal) {
-  const n = attrVal === 0 ? 2 : attrVal;
-  const rolls = Array.from({ length: n }, () => Math.floor(Math.random() * 20) + 1);
-  const result = attrVal === 0 ? Math.min(...rolls) : Math.max(...rolls);
-  return { rolls, result, worst: attrVal === 0, crit: rolls.includes(20), dice: "D20" };
-}
 
 /* ── Attribute Diagram SVG — clickable nodes with roll popup ── */
 const AttrDiagram = ({ attrs, onChange, onEdit, onRoll, readOnly = false }) => {
@@ -8774,12 +8289,12 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
   }, [attrs.AGI, attrs.FOR, attrs.INT, attrs.PRE, attrs.VIG]);
 
   const rollFreeInput = () => {
-    const match = diceInput.match(/^(\d+)?[dD](\d+)([+-]\d+)?$/);
-    if (!match) { setRollPopup({ attr:"Erro", rolls:[], result:"Ex: 1d20+3", worst:false }); return; }
-    const n=parseInt(match[1]||"1"), d=parseInt(match[2]), mod=parseInt(match[3]||"0");
-    const rolls=Array.from({length:n},()=>Math.floor(Math.random()*d)+1);
-    const crit=d===20&&rolls.includes(20);
-    const popup = { attr:diceInput.toUpperCase(), rolls, result:rolls.reduce((a,b)=>a+b,0)+mod, worst:false, crit, dice:`D${d}`, expr:diceInput };
+    // Campo livre da ficha: notação permissiva (N opcional, sem tetos), mas âncorada —
+    // o usuário digitou a expressão inteira, então lixo em volta continua sendo erro.
+    const r = /^(\d+)?[dD](\d+)([+-]\d+)?$/.test(diceInput) ? rollNotation(diceInput) : null;
+    if (!r) { setRollPopup({ attr:"Erro", rolls:[], result:"Ex: 1d20+3", worst:false }); return; }
+    const crit=r.sides===20&&r.rolls.includes(20);
+    const popup = { attr:diceInput.toUpperCase(), rolls:r.rolls, result:r.total, worst:false, crit, dice:`D${r.sides}`, expr:diceInput };
     setRollPopup(popup);
     onRoll?.({ ...popup, charName: form.personagem || character.form?.personagem || "Agente" });
   };
@@ -9791,31 +9306,28 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                                 const ATTR_MAP={"Agilidade":"AGI","Força":"FOR","Intelecto":"INT","Presença":"PRE","Vigor":"VIG","Nenhum":null};
                                 const attrKey=ATTR_MAP[atk.attrDmg]||null;
                                 const attrVal=attrKey ? (attrs[attrKey]||1) : 1;
-                                const poolSize=attrVal===0?2:attrVal;
-                                const atkRolls=Array.from({length:poolSize},()=>Math.floor(Math.random()*20)+1);
-                                const atkResult=attrVal===0?Math.min(...atkRolls):Math.max(...atkRolls);
+                                const pool=rollOP(attrVal);
                                 const atkBonus=parseInt(atk.bonus||"0");
                                 const critThreshold=parseInt(atk.crit||"20");
-                                const crit=atkResult>=critThreshold;
+                                // Margem de ameaça da arma vence o crit "qualquer 20" do rollOP.
+                                const crit=pool.result>=critThreshold;
                                 // Calcula dano (crítico = resultado × multiplicador)
-                                const dm=(atk.dmg||"").match(/(\d+)?[dD](\d+)([+-]\d+)?/);
+                                const dmg=rollNotation(atk.dmg||"");
                                 let dmgRolls=[],dmgTotal=0;
-                                if(dm){
-                                  const dn=parseInt(dm[1]||"1"),dd=parseInt(dm[2]),dmod=parseInt(dm[3]||"0");
-                                  dmgRolls=Array.from({length:dn},()=>Math.floor(Math.random()*dd)+1);
-                                  const base=dmgRolls.reduce((a,b)=>a+b,0)+dmod;
-                                  dmgTotal=crit ? base*parseInt(atk.mult||"2") : base;
+                                if(dmg){
+                                  dmgRolls=dmg.rolls;
+                                  dmgTotal=crit ? dmg.total*parseInt(atk.mult||"2") : dmg.total;
                                 }
                                 setRollPopup({
                                   type:"attack",
                                   name:atk.name,
                                   skill:atk.skill||"",
                                   attrKey:attrKey||"",
-                                  rolls:atkRolls,
-                                  ataque:atkResult+atkBonus,
+                                  rolls:pool.rolls,
+                                  ataque:pool.result+atkBonus,
                                   dmgRolls,
                                   dmgTotal,
-                                  worst:attrVal===0,
+                                  worst:pool.worst,
                                   crit,
                                   dice:"D20"
                                 });
@@ -12489,8 +12001,15 @@ export default function App() {
     switch(screen){
       case "dashboard": return <Dashboard system={activeSystem} onCreateChar={()=>setCreatingChar(true)} characters={characters} sessions={sessions} onSelectChar={c=>{ setCreatedChar(c); setScreen("sheet"); }} onNav={setScreen} userPlans={userPlans} onShowUpgrade={()=>setScreen("planos")}/>;
       case "sheet":     return <SheetList characters={characters} system={activeSystem} onCreateChar={()=>setCreatingChar(true)} onSelectChar={c=>{ setCreatedChar(c); }} onDeleteChar={(c)=>{ deleteCharacter(c); if (createdChar && ((createdChar.id && createdChar.id===c.id) || (!createdChar.id && createdChar.createdAt===c.createdAt))) setCreatedChar(null); }} onUpdateChar={(c)=>saveCharacter(c)}/>;
-      case "map":       return <MapaScreen uid={currentUser?.uid || ""} onBack={()=>setScreen("dashboard")} />;
-      case "master":    return <MasterAssistant system={activeSystem} onAddSession={()=>setSessions(prev=>[...prev,{id:Date.now(),date:new Date().toLocaleDateString('pt-BR')}])} />;
+      /* `plan` vem do MESMO mecanismo que o resto do app usa para cota:
+         `userPlans` é o array `subscribedSystems` do doc do usuário, escutado
+         em tempo real e preenchido pelo webhook do PIX. Assinar qualquer
+         sistema é o que já destrava limites (fichas, App.jsx:11808) — aqui
+         destrava a cota de mapas-múndi (spec 0028 · AC-3).
+         `'pro'` é a chave interna de "plano pago" em `WorldMap/model/quotas`;
+         não é string que o projeto grave em lugar nenhum. Não inventar outra. */
+      case "map":       return <MapaScreen uid={currentUser?.uid || ""} plan={userPlans.length > 0 ? 'pro' : 'free'} onBack={()=>setScreen("dashboard")} />;
+      case "master":    return <MasterSuite system={activeSystem} uid={currentUser?.uid || ""} />;
       case "roadmap":   return <RoadmapScreen />;
       case "planos":    return <PlansScreen userPlans={userPlans} currentUser={currentUser}/>;
       case "party": {
