@@ -68,6 +68,10 @@ const Secao = ({ titulo, children, acao }) => (
  * @param {(patch:object)=>void} props.onAjustarGrupo relógio e suprimentos.
  * @param {boolean} [props.ocupado]
  * @param {string} [props.falha]
+ * @param {boolean} [props.pausada] a viagem está parada (F6).
+ * @param {(v:boolean)=>void} [props.onPausar] pausa/retoma **à mão**.
+ * @param {boolean} [props.temEncontro] há pendência esperando decisão.
+ * @param {()=>void} [props.onAbrirEncontro] reabre o diálogo da decisão.
  */
 export default function ConsoleDoMestre({
   noAtual = null,
@@ -82,6 +86,10 @@ export default function ConsoleDoMestre({
   onAjustarGrupo,
   ocupado = false,
   falha = "",
+  pausada = false,
+  onPausar,
+  temEncontro = false,
+  onAbrirEncontro,
 }) {
   const [marcados, setMarcados] = useState(() => new Set());
   const [degrau, setDegrau] = useState("discovered");
@@ -155,7 +163,7 @@ export default function ConsoleDoMestre({
                   type="button"
                   className="wmm-acao"
                   data-testid={`wmm-mestre-destino-${d.noId}`}
-                  disabled={ocupado}
+                  disabled={ocupado || pausada}
                   onClick={() => onViajar && onViajar(d)}
                   aria-label={`Levar o grupo até ${nomeNaMesa(d.no)}, ${formatarHoras(d.horas)}`}
                   style={{
@@ -169,6 +177,45 @@ export default function ConsoleDoMestre({
             ))}
           </ul>
         )}
+      </Secao>
+
+      {/* ══ 1.5 · A VIAGEM: PARAR E SEGUIR  (F6 · AC-8) ══════════════
+          A pausa manual não é enfeite: é o que impede a EXISTÊNCIA da
+          pausa de denunciar o encontro. Se ela só aparecesse quando o dado
+          pedisse encontro, o grupo aprenderia a lê-la em duas sessões —
+          e o segredo teria vazado pela forma, não pelo conteúdo. */}
+      <Secao titulo="A viagem">
+        <div style={{ display: "flex", gap: SP.x2, flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            type="button"
+            className="wmm-acao"
+            data-testid="wmm-pausar-viagem"
+            disabled={ocupado}
+            aria-pressed={pausada}
+            onClick={() => onPausar && onPausar(!pausada)}
+            style={{ ...btnStyle(pausada ? "ghost" : "quiet", "sm"), minHeight: HIT.mobile }}
+          >
+            {pausada ? "Retomar a viagem" : "Parar a viagem"}
+          </button>
+
+          {temEncontro ? (
+            <button
+              type="button"
+              className="wmm-acao"
+              data-testid="wmm-reabrir-encontro"
+              disabled={ocupado}
+              onClick={() => onAbrirEncontro && onAbrirEncontro()}
+              style={{ ...btnStyle("primary", "sm"), minHeight: HIT.mobile }}
+            >
+              Resolver o encontro
+            </button>
+          ) : null}
+        </div>
+        <p style={{ ...T.meta, margin: 0 }}>
+          {pausada
+            ? "O grupo vê que a viagem parou — e nada além disso."
+            : "Parar a viagem trava os destinos para o grupo, sem dizer por quê."}
+        </p>
       </Secao>
 
       {/* ══ 2 · REVELAR AGORA — a gaveta do oculto ══════════════════ */}

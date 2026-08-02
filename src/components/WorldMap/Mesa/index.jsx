@@ -69,6 +69,10 @@ import {
   projecaoDoJogador, revelarManualmente, RAIO_DE_REVELACAO_PADRAO,
 } from "../model/revelacao";
 import { avancarRelogio, consumirSuprimentos, nevoaDaViagem, trechoPercorrido } from "../model/viagem";
+import {
+  chanceDeEncontro, decidirEncontro, montarPendencia, periodoDe, sortearEncontro, sorteioDeD100,
+} from "../model/encontros";
+import { acampar, descansoRecuperado, podeAcampar } from "../model/acampamento";
 import { MUNDO_DE_RESERVA } from "../Editor/editorUi";
 import { COR_DA_VISAO_DE_JOGADOR } from "../Editor/ControlesDaNevoa";
 import { mensagemDeErro, SP, R, T, LINE, FS, FF, FW, btnStyle, DANGER_TEXT_AA } from "../Atelier/ui";
@@ -78,11 +82,20 @@ import PainelDoGrupo from "./PainelDoGrupo";
 import ConsoleDoMestre from "./ConsoleDoMestre";
 import FilaDeEventos from "./FilaDeEventos";
 import EventosDoGrupo from "./EventosDoGrupo";
+import PainelDeEncontro from "./PainelDeEncontro";
+import Acampamento from "./Acampamento";
 import useViagem from "./useViagem";
 import {
   ID_DA_PROCURA, PEDIDO_DE_PROCURA, TITULO_DA_PROCURA,
   anuncioDoEvento, contextoDoPasso, flagsComAsNovas,
 } from "./eventosUi";
+import {
+  MARCA_DO_PERIGO, TEXTO_DA_PAUSA,
+  anuncioDaDecisao, assinaturaDaPendencia, contextoDaPendencia,
+  flagsComPausa, formatarChance, formatarRolagem, idDoEncontro, nomesSugeridos,
+  perigoDaRegiao, sugestaoDeEncontro, temPendencia, textoDoEncontro, tituloDoEncontro,
+  viagemPausada,
+} from "./encontrosUi";
 import {
   consumoPorDia, estadoDoRevelado, estoqueOculto, grafoDoRevelado, moldeDaInstancia,
   nomeNaMesa, raioDaEstrada, relogioDe, resumoDaRevelacao,
@@ -259,6 +272,9 @@ export default function MesaDoMapaMundi({
   const [selecionadoId, setSelecionadoId] = useState(null);
   const [recemRevelados, setRecemRevelados] = useState([]);
   const [procurando, setProcurando] = useState(false);
+  /* F6: o diálogo da decisão do mestre e o que o último acampamento fez. */
+  const [encontroAberto, setEncontroAberto] = useState(false);
+  const [resultadoDoAcampamento, setResultadoDoAcampamento] = useState(null);
   /* A frase da procura NUNCA é escrita aqui: chega pronta das constantes de
      `model/descoberta.js`. Ver o cabeçalho de `EventosDoGrupo.jsx` (AC-9). */
   const [resultadoDaProcura, setResultadoDaProcura] = useState("");
@@ -299,6 +315,216 @@ export default function MesaDoMapaMundi({
   }, [estado]);
 
   useEffect(() => { vistos.current = null; }, [instanciaId]);
+
+  /* ════════════════════════════════════════════════════════════════════
+   *  F6 · A PAUSA E A PENDÊNCIA  (AC-8 · briefing §9)
+   *  ------------------------------------------------------------------
+   *  A pausa mora em `party.flags` — documento que o grupo LÊ, e que não
+   *  guarda motivo nenhum. A pendência mora em `gm/estado` — documento que
+   *  o grupo NÃO lê (as rules negam, e `useGmDaMesa` nem abre o listener
+   *  para quem não é o mestre). São dois documentos porque são dois
+   *  públicos, e é essa separação — não um filtro de render — que faz o
+   *  jogador não descobrir que houve um encontro.
+   * ══════════════════════════════════════════════════════════════════ */
+  const pausada = viagemPausada(party);
+  const pendencia = podeVerMolde && temPendencia(gm) ? gm.pendingEncounter : null;
+
+  /* O diálogo abre sozinho quando a pendência chega, e NÃO volta sozinho
+     depois de o mestre dizer "decidir depois" — a assinatura é o que
+     distingue "pendência nova" de "o mesmo snapshot outra vez". */
+  const adiada = useRef("");
+  useEffect(() => { adiada.current = ""; }, [instanciaId]);
+  const assinatura = assinaturaDaPendencia(pendencia);
+  useEffect(() => {
+    if (!assinatura) { setEncontroAberto(false); return; }
+    if (adiada.current === assinatura) return;
+    setEncontroAberto(true);
+  }, [assinatura]);
+
+  /** Liga/desliga a pausa no documento do grupo. Nunca grava o porquê. */
+  const marcarPausa = useCallback(async (valor) => {
+    const c = contexto.current;
+    const flags = flagsComPausa(c.party?.flags, valor);
+    if (!flags) return;
+    try {
+      await atualizarParty(c.campaignId, c.instanciaId, { flags });
+    } catch (err) {
+      console.error("[mesa do mapa] a pausa não foi gravada:", err);
+      if (vivo.current) setFalha(mensagemDeErro(err));
+    }
+  }, []);
+
+  /**
+   * O sorteio da estrada — **primeiro degrau** do briefing §9.
+   *
+   * Roda só no cliente do mestre, porque é ele quem tem o molde (e portanto o
+   * `dangerLevel` da trilha) e é ele quem pode escrever em `gm/`. O resultado
+   * NÃO vira nada visível: vira pendência, e a viagem para.
+   *
+   * A rolagem passa por `sorteioDeD100`, que é a ponte para `rollDice` de
+   * `src/domain/dice.js` — o motor único do projeto (AC-9). `Math.random` entra
+   * por parâmetro, e é o que os testes fixam.
+   */
+  const rolarEncontroDaEstrada = useCallback(async (v, relogioDaPartida, horas) => {
+    const c = contexto.current;
+    if (!c.podeVerMolde || !c.molde) return;
+    /* Uma decisão de cada vez: sobrescrever uma pendência que o mestre ainda
+       não leu apagaria conteúdo que ele nunca chegou a ver. */
+    if (c.gm?.pendingEncounter) return;
+
+    const trilha = listaDe(c.molde.trilhas).find((t) => t?.id === v.trilhaId);
+    const periodo = periodoDe(relogioDaPartida);
+    const sorteado = sortearEncontro(
+      { dangerLevel: trilha?.dangerLevel, periodo, horas },
+      sorteioDeD100(Math.random),
+    );
+    if (!sorteado.houve) return;
+
+    const nova = montarPendencia({
+      origem: "viagem",
+      trilhaId: v.trilhaId,
+      noId: v.paraId,
+      periodo,
+      chance: sorteado.chance,
+      rolagem: sorteado.rolagem,
+      sugestao: sugestaoDeEncontro(c.eventos, jaDisparados.current, Math.random()),
+    });
+
+    /* A ORDEM IMPORTA. A pendência vai PRIMEIRO, a pausa depois: se a rede cair
+       no meio, o pior caso é uma pendência sem pausa (o mestre a resolve e
+       ninguém percebe), nunca uma pausa sem pendência (a mesa travada sem nada
+       que a destrave). */
+    await atualizarGm(c.campaignId, c.instanciaId, { pendingEncounter: nova });
+    const flags = flagsComPausa(c.party?.flags, true);
+    if (flags) await atualizarParty(c.campaignId, c.instanciaId, { flags });
+  }, []);
+
+  /**
+   * **O mestre decidiu** — terceiro degrau, e a única porta para o jogador.
+   *
+   * `decidirEncontro` é quem sabe o que publicar; aqui só se obedece:
+   *  · aceitar → publica a projeção da sugestão (três chaves, nada mais);
+   *  · trocar  → publica o que o mestre escreveu, com id derivado do relógio;
+   *  · ignorar → `publicar` é `null`, e **nada é escrito**. Não há documento
+   *    vazio, não há marca de "houve encontro aqui", não há nada. Retomar a
+   *    viagem é a única coisa que o grupo percebe — e é a mesma coisa que ele
+   *    percebe quando o mestre simplesmente pausou e despausou.
+   */
+  const decidirOEncontro = useCallback(async (decisao, substituto) => {
+    const c = contexto.current;
+    const atual = c.gm?.pendingEncounter;
+    if (!atual) return;
+    setFalha("");
+
+    /* O substituto nasce sem id — quem o dá é o relógio de jogo, nunca um
+       contador (ver `idDoEncontro`). */
+    const alvo = decisao === "trocar" && substituto
+      ? { ...substituto, id: idDoEncontro(relogioDe(c.party)) }
+      : substituto;
+
+    const r = decidirEncontro(atual, decisao, alvo);
+    if (r.pendencia) return;                       // decisão desconhecida: nada feito
+
+    try {
+      setOcupado(true);
+
+      if (r.publicar) {
+        await publicarRevelacao(
+          c.campaignId, c.instanciaId, { eventos: [r.publicar] }, { existentes: c.revelado },
+        );
+      }
+
+      /* Aceitar CONSOME a sugestão: ela é um evento do molde, e deixá-la solta
+         faria o mesmo encontro sair de novo no próximo sorteio. Ignorar não
+         consome nada — o mestre disse "agora não", não "nunca". */
+      const patchDoGm = { pendingEncounter: null };
+      if (decisao === "aceitar" && r.publicar?.id) {
+        jaDisparados.current.add(r.publicar.id);
+        patchDoGm.triggeredEventIds = [...jaDisparados.current];
+      }
+      await atualizarGm(c.campaignId, c.instanciaId, patchDoGm);
+
+      const flags = flagsComPausa(c.party?.flags, false);
+      if (flags) await atualizarParty(c.campaignId, c.instanciaId, { flags });
+
+      if (vivo.current) setEncontroAberto(false);
+      anunciar(anuncioDaDecisao(decisao, r.publicar || atual.sugestao));
+    } catch (err) {
+      console.error("[mesa do mapa] a decisão do encontro não foi gravada:", err);
+      if (vivo.current) setFalha(mensagemDeErro(err));
+    } finally {
+      if (vivo.current) setOcupado(false);
+    }
+  }, [anunciar]);
+
+  /**
+   * Acampar (F6). O relógio anda, a comida cai e a emboscada — se houver —
+   * segue **exatamente o mesmo caminho de duas etapas** do encontro da estrada:
+   * `acampar` já devolve pendência, nunca documento de jogador.
+   */
+  const acamparAgora = useCallback(async (horas) => {
+    const c = contexto.current;
+    if (!c.podeVerMolde) return;
+    setFalha("");
+
+    const periodo = periodoDe(relogioDe(c.party));
+    const r = acampar({
+      party: c.party,
+      horas,
+      consumoPorDia: consumoPorDia(c.party),
+      sorteio: sorteioDeD100(Math.random),
+      chanceDeEmboscada: chanceDeEncontro({ dangerLevel: perigoDaRegiao(c.party), periodo, horas }),
+      sugestao: sugestaoDeEncontro(c.eventos, jaDisparados.current, Math.random()),
+    });
+
+    try {
+      setOcupado(true);
+      const patch = { inGameDatetime: r.relogio };
+      /* Mesa que não conta comida continua sem contar: `acampar` devolve
+         `restante: 0` para um estoque ausente, e gravar esse zero inventaria
+         uma despensa vazia onde não havia despensa nenhuma. */
+      if (Number.isFinite(c.party?.supplies)) patch.supplies = r.suprimentos.restante;
+      if (r.emboscada) {
+        const flags = flagsComPausa(c.party?.flags, true);
+        if (flags) patch.flags = flags;
+      }
+      await atualizarParty(c.campaignId, c.instanciaId, patch);
+      if (r.emboscada) {
+        await atualizarGm(c.campaignId, c.instanciaId, { pendingEncounter: r.emboscada });
+      }
+
+      if (vivo.current) {
+        setResultadoDoAcampamento({
+          suprimentos: r.suprimentos,
+          descanso: descansoRecuperado({ horas }),
+        });
+      }
+      /* O anúncio fala do TEMPO, nunca da emboscada — ele é lido em voz alta
+         numa mesa presencial, e "vocês acamparam" é tudo que cabe aí. */
+      anunciar(`O grupo acampou por ${horas} horas.`);
+    } catch (err) {
+      console.error("[mesa do mapa] o acampamento não foi gravado:", err);
+      if (vivo.current) setFalha(mensagemDeErro(err));
+    } finally {
+      if (vivo.current) setOcupado(false);
+    }
+  }, [anunciar]);
+
+  /** O perigo da região, guardado nas bandeiras do grupo (só o mestre grava). */
+  const ajustarPerigo = useCallback(async (valor) => {
+    const c = contexto.current;
+    const base = c.party?.flags && typeof c.party.flags === "object" && !Array.isArray(c.party.flags)
+      ? c.party.flags
+      : {};
+    const n = Math.max(0, Math.min(5, Math.round(valor)));
+    if (base[MARCA_DO_PERIGO] === n) return;
+    try {
+      await atualizarParty(c.campaignId, c.instanciaId, { flags: { ...base, [MARCA_DO_PERIGO]: n } });
+    } catch (err) {
+      console.error("[mesa do mapa] o perigo da região não foi gravado:", err);
+      if (vivo.current) setFalha(mensagemDeErro(err));
+    }
+  }, []);
 
   /* ════════════════════════════════════════════════════════════════════
    *  OS EVENTOS  (F5 · AC-1, AC-8)
@@ -550,6 +776,10 @@ export default function MesaDoMapaMundi({
 
       /* Relógio e comida — o custo da estrada (AC-10 guarda os dois). */
       const horas = Number.isFinite(v.horas) ? v.horas : 0;
+      /* O período é o da PARTIDA, não o da chegada: o encontro acontece na
+         estrada, e a estrada começou antes de o relógio andar. É a mesma
+         escolha que `acampar` faz com a hora em que a fogueira foi acesa. */
+      const relogioDaPartida = relogioDe(c.party);
       if (horas > 0) {
         const patch = { inGameDatetime: avancarRelogio(relogioDe(c.party), horas) };
         if (Number.isFinite(c.party?.supplies)) {
@@ -573,13 +803,19 @@ export default function MesaDoMapaMundi({
         trilhaId: v.trilhaId,
         posicao: parou ? { x: parou.x, y: parou.y } : v.posicao,
       }, r.estado);
+
+      /* ── O ENCONTRO DA ESTRADA (F6 · AC-8) ────────────────────────
+         Por último, e só no cliente do MESTRE: o sorteio sai daqui e
+         para em `gm.pendingEncounter`. O jogador não recebe nada — nem
+         a notícia de que houve sorteio. */
+      await rolarEncontroDaEstrada(v, relogioDaPartida, horas);
     } catch (err) {
       console.error("[mesa do mapa] a chegada não pôde ser publicada:", err);
       if (vivo.current) setFalha(mensagemDeErro(err));
     } finally {
       if (vivo.current) setOcupado(false);
     }
-  }, [anunciar, grafoVisivel, mexerNaNevoa, raioDeChegada, avaliarNoPasso]);
+  }, [anunciar, grafoVisivel, mexerNaNevoa, raioDeChegada, avaliarNoPasso, rolarEncontroDaEstrada]);
 
   const viagemCtl = useViagem({
     aoAndar,
@@ -634,6 +870,9 @@ export default function MesaDoMapaMundi({
 
   const viajar = useCallback((destino) => {
     if (!destino?.noId || viajando || !noDoGrupo) return;
+    /* Viagem parada é viagem parada, para os dois papéis. A recusa usa a MESMA
+       frase que o grupo já lê no painel — nada aqui explica o motivo. */
+    if (pausada) { setAviso(TEXTO_DA_PAUSA); anunciar(TEXTO_DA_PAUSA); return; }
     setAviso("");
     const r = podeViajarPara(estado, grafoDeNavegacao, noDoGrupo, destino.noId);
     if (!r.ok) { setAviso(r.motivo); anunciar(r.motivo); return; }
@@ -650,7 +889,7 @@ export default function MesaDoMapaMundi({
     /* O movimento é gravado NA PARTIDA: assim o outro cliente anima junto, em
        vez de o grupo teleportar quando a viagem daqui termina. */
     gravarMovimento(destino.noId, { x: alvo?.x, y: alvo?.y });
-  }, [viajando, noDoGrupo, estado, grafoDeNavegacao, comecar, party?.speedModifier, anunciar, gravarMovimento]);
+  }, [viajando, pausada, noDoGrupo, estado, grafoDeNavegacao, comecar, party?.speedModifier, anunciar, gravarMovimento]);
 
   /* ── Mover à força: o mestre conduz a mesa ─────────────────────────── */
   const moverPara = useCallback((noId) => {
@@ -773,6 +1012,10 @@ export default function MesaDoMapaMundi({
    * ══════════════════════════════════════════════════════════════════ */
 
   const noAtualDesenhado = listaDe(grafoVisivel?.nos).find((n) => n?.id === noDoGrupo) || null;
+  /* O nó do MOLDE — `podeAcampar` lê `type`, e a projeção do jogador pode nem
+     ter o nó ainda. Só o mestre monta este painel, então usar o molde aqui não
+     é vazamento: é a fonte que ele já tem. */
+  const noDoMoldeAtual = listaDe(molde?.nos).find((n) => n?.id === noDoGrupo) || noAtualDesenhado;
   const semMapa = !carregandoInstancias && instancias.length === 0;
 
   return (
@@ -905,6 +1148,23 @@ export default function MesaDoMapaMundi({
                 onAjustarGrupo={ajustarGrupo}
                 ocupado={ocupado || viajando}
                 falha={falha}
+                pausada={pausada}
+                onPausar={marcarPausa}
+                temEncontro={!!pendencia}
+                onAbrirEncontro={() => setEncontroAberto(true)}
+              />
+            ) : null}
+
+            {podeVerMolde ? (
+              <Acampamento
+                party={party}
+                consumoPorDia={consumoPorDia(party)}
+                permissao={podeAcampar({ noAtual: noDoMoldeAtual, viajando })}
+                perigo={perigoDaRegiao(party)}
+                onPerigo={ajustarPerigo}
+                onAcampar={acamparAgora}
+                resultado={resultadoDoAcampamento}
+                ocupado={ocupado || viajando}
               />
             ) : null}
 
@@ -928,6 +1188,7 @@ export default function MesaDoMapaMundi({
               viajando={viajando}
               podeMover
               aviso={aviso}
+              pausada={pausada}
             />
 
             {/* O mural é do GRUPO: ele lê `revealed/`, nunca o molde. O mestre
@@ -955,6 +1216,34 @@ export default function MesaDoMapaMundi({
           </div>
         </div>
       )}
+
+      {/* ── A DECISÃO DO MESTRE (F6 · AC-8) ──────────────────────────
+          Montado só quando HÁ pendência — e a pendência só existe no
+          cliente do mestre, porque o documento onde ela mora não é lido
+          por mais ninguém. Não há aqui nenhum `if (isMaster)` protegendo
+          segredo: o segredo é protegido pelas rules, e este `if` só evita
+          desenhar um diálogo vazio. */}
+      {pendencia && encontroAberto ? (
+        <PainelDeEncontro
+          titulo={pendencia.sugestao
+            ? tituloDoEncontro(pendencia.sugestao)
+            : "Nada preparado para este momento"}
+          texto={pendencia.sugestao
+            ? textoDoEncontro(pendencia.sugestao)
+            : "Sua gaveta \"Na sua mão\" está vazia. Escreva o que acontece, ou ignore."}
+          semSugestao={!pendencia.sugestao}
+          chance={formatarChance(pendencia.chance)}
+          rolagem={formatarRolagem(pendencia.rolagem)}
+          contexto={contextoDaPendencia(pendencia, {
+            nomeDoLugar: nomeNaMesa(listaDe(molde?.nos).find((n) => n?.id === pendencia.noId)),
+          })}
+          alternativas={nomesSugeridos(eventos, jaDisparados.current, pendencia.sugestao?.id)}
+          onDecidir={decidirOEncontro}
+          onAdiar={() => { adiada.current = assinatura; setEncontroAberto(false); }}
+          ocupado={ocupado}
+          falha={falha}
+        />
+      ) : null}
     </div>
   );
 }

@@ -25,6 +25,10 @@ import MapEditor from './components/MapEditor';
 import MasterSuite from './components/MasterSuite';
 import WorldMapAtelier from './components/WorldMap/Atelier';
 import { saveAsset } from './components/MapEditor/assets/assetLib';
+/* O "Entrar na cena" do mapa-múndi (spec 0028 F5/F6) reusa o MESMO canal que o
+   MapEditor já usa para trocar de cena em modo campanha: o doc `map/state`. Não
+   é navegação nova — é a que existe, chamada de outro lugar. */
+import { setActiveScene as apontarCenaDaCampanha } from './components/MapEditor/sync/campaignSync2';
 import LicencaOP from "./components/LicencaOP";
 import { getActiveAvatar } from "./domain/character";
 import { rollDice, rollNotation, rollOP } from "./domain/dice";
@@ -3053,6 +3057,22 @@ function CampaignMapTab({ campaignId, uid, isMaster }) {
   const [mundoAberto, setMundoAberto] = useState(false);
   const [flash, setFlash] = useState("");
 
+  /* ── "Entrar na cena" (spec 0028 · F5/F6) ──────────────────────────
+     O evento do mapa-múndi guarda `linkedSceneId`. Levar a mesa até lá é
+     exatamente o que o MapEditor já faz quando o mestre troca de cena em
+     modo campanha: gravar `activeSceneId` no doc `map/state`, que todos os
+     clientes assinam. Aqui o mapa-múndi só aponta esse mesmo interruptor e
+     abre a mesa tática por cima (ela é `position:fixed`), então o "← Voltar"
+     do MapEditor devolve o mestre ao mapa-múndi onde ele estava.
+
+     Só o MESTRE aponta a cena — a regra da spec 0007 nega a escrita ao
+     jogador, e o atalho só existe no painel dele. */
+  const entrarNaCena = (sceneId) => {
+    if (!sceneId || !isMaster) return;
+    apontarCenaDaCampanha(db, campaignId, uid, sceneId);
+    setMesaAberta(true);
+  };
+
   /* Token construído entra na biblioteca de assets do usuário como
      'character' — o mesmo tipo que o MapEditor coloca na mesa (spec 0013). */
   const salvarTokenNaBiblioteca = async ({ nome, dataUrl }) => {
@@ -3093,7 +3113,8 @@ function CampaignMapTab({ campaignId, uid, isMaster }) {
         <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0, overflowY:'auto' }}>
           <Suspense fallback={<div style={{ padding:40, textAlign:'center', color:'var(--muted)', fontFamily:'Crimson Pro,serif' }}>Abrindo o mapa-múndi…</div>}>
             <MesaDoMapaMundi campaignId={campaignId} uid={uid} isMaster={isMaster}
-              onSair={() => setMundoAberto(false)} />
+              onSair={() => setMundoAberto(false)}
+              onEntrarNaCena={isMaster ? entrarNaCena : undefined} />
           </Suspense>
         </div>
       ) : (

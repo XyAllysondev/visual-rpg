@@ -181,11 +181,11 @@ eventos escondidos disparam. O mestre orquestra; os jogadores veem e participam.
 | F0 | Descoberta | ✅ |
 | F1 | Ateliê: sub-abas + CRUD do molde + upload do fundo + cotas | ✅ |
 | F2 | Render do grafo + editor de nós e trilhas + mapa padrão | ✅ |
-| **F3** | Névoa bitmap + pincel + toggle de visão + deriva + dispensar o padrão | **em andamento** |
-| F4 | Levar para a mesa + máquina de estados + viagem + revelação | a fazer |
-| F5 | Eventos, gatilhos, testes de descoberta | a fazer |
-| F6 | Tempo, suprimentos, encontros, acampamento | a fazer |
-| F7 | Tempo real com deltas + as 5 animações + polimento | a fazer |
+| F3 | Névoa bitmap + pincel + toggle de visão + deriva + dispensar o padrão | ✅ |
+| F4 | Levar para a mesa + máquina de estados + viagem + revelação | ✅ |
+| F5 | Eventos, gatilhos, testes de descoberta (+ `domain/dice.js` extraído) | ✅ |
+| F6 | Tempo, suprimentos, encontros, acampamento | ✅ |
+| **F7** | Tempo real com deltas + as 5 animações + polimento | **próxima** |
 
 ## Verificação
 

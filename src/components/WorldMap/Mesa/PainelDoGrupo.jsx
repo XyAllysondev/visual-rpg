@@ -21,6 +21,7 @@ import { formatarHoras } from "../Editor/editorUi";
 import {
   formatarRelogio, formatarSuprimentos, nomeNaMesa, periodoDoDia,
 } from "./mesaUi";
+import { TEXTO_DA_PAUSA, TITULO_DA_PAUSA } from "./encontrosUi";
 import { FF, FS, FW, HIT, LINE, R, SP, T, btnStyle } from "../Atelier/ui";
 
 const Dado = ({ rotulo, valor, dica }) => (
@@ -47,6 +48,8 @@ const Dado = ({ rotulo, valor, dica }) => (
  * @param {boolean} [props.viajando]
  * @param {boolean} [props.podeMover] o papel de quem olha pode mover o grupo.
  * @param {string} [props.aviso] a recusa mais recente, em PT-BR.
+ * @param {boolean} [props.pausada] a viagem está parada (`party.flags`).
+ *   **O motivo nunca chega aqui** — ver o cabeçalho de `encontrosUi.js`.
  */
 export default function PainelDoGrupo({
   party = null,
@@ -56,6 +59,7 @@ export default function PainelDoGrupo({
   viajando = false,
   podeMover = true,
   aviso = "",
+  pausada = false,
 }) {
   const relogio = party?.inGameDatetime;
   const suprimentos = party?.supplies;
@@ -82,6 +86,35 @@ export default function PainelDoGrupo({
         />
       </div>
 
+      {/* ── A PAUSA (F6 · AC-8) ──────────────────────────────────────
+          Este bloco é IDÊNTICO em toda pausa: a que nasceu de um encontro,
+          a do acampamento e a que o mestre deu com a própria mão. Ele lê um
+          booleano de `party.flags` e não existe motivo nenhum gravado para
+          ele ler. Se um dia alguém acrescentar "porque" aqui, o AC-8 cai. */}
+      {pausada ? (
+        <div
+          data-testid="wmm-viagem-pausada"
+          role="status"
+          aria-live="polite"
+          style={{
+            display: "flex", alignItems: "center", gap: SP.x3,
+            padding: SP.x3, borderRadius: R.ctl,
+            background: "rgba(255,255,255,0.045)",
+            border: `1px solid ${LINE.raise}`,
+          }}
+        >
+          <span aria-hidden="true" style={{ fontSize: 18, opacity: 0.75 }}>⏸</span>
+          <span style={{ minWidth: 0 }}>
+            <span style={{ display: "block", ...T.section, fontSize: FS.micro }}>
+              {TITULO_DA_PAUSA}
+            </span>
+            <span style={{ display: "block", ...T.meta, color: "var(--text)" }}>
+              {TEXTO_DA_PAUSA}
+            </span>
+          </span>
+        </div>
+      ) : null}
+
       {/* ── Para onde dá para ir (AC-8) ─────────────────────────────── */}
       <div style={{ display: "flex", flexDirection: "column", gap: SP.x2 }}>
         <div style={T.section}>Daqui dá para ir</div>
@@ -98,7 +131,7 @@ export default function PainelDoGrupo({
                   type="button"
                   className="wmm-acao"
                   data-testid={`wmm-destino-${d.noId}`}
-                  disabled={viajando || !podeMover}
+                  disabled={viajando || !podeMover || pausada}
                   onClick={() => onViajar && onViajar(d)}
                   aria-label={`Viajar para ${nomeNaMesa(d.no)}, ${formatarHoras(d.horas)}`}
                   style={{

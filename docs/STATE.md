@@ -29,6 +29,45 @@ alwaysApply: true
 > - **Próximo passo:** F2 (editor de grafo — nós e trilhas). Quando o Andre subir para Blaze, ver a
 >   lista de 5 itens em ADR-0009 §"O que muda quando o Andre subir para o Blaze".
 
+> **2026-08-02: SPEC 0028 — MAPA-MÚNDI, F2 a F6 ENTREGUES E NO AR.** Gate: **63 suítes / 1550
+> testes**, build Compiled, `MapEditor/` intocado em toda fase (git diff vazio — AC-12).
+> - **F2** editor de grafo + MAPA PADRÃO (12 nós / 16 trilhas, ambientado na mesma *Coroa de
+>   Cinzas* do mundo demo da Forja; carta VETORIAL de 23 KB embutida, sem peso no Firestore).
+>   Render híbrido: canvas pinta fundo e trilhas, DOM carrega os nós virtualizados.
+>   **ARMADILHA:** o padrão foi criado na F2 mas NÃO era oferecido na lista — só virou visível na
+>   F3. Eu afirmei ao Andre que já aparecia; estava errado.
+> - **F3** névoa em bitmap (1 bit/px, downscale 4x, RLE+varint). MEDIDO: névoa típica de sessão
+>   **2,3 KB**, mapa vazio **21 B** — 390× abaixo do teto de 900 KB. O Storage bloqueado não faz
+>   falta. Mais o padrão dispensável/restaurável (marca em `users/{uid}`, FORA da coleção de
+>   mapas: doc de config ali contaria na cota e o mestre free perderia a vaga dele).
+> - **F4** a mesa: viagem animada pela curva em velocidade constante, névoa abrindo ao longo do
+>   trecho percorrido, console de "Revelar agora". Rules: o teto de **20 access calls por lote**
+>   (o bug que esvaziou o mundo demo da Forja) foi resolvido pondo o uid do mestre NO ID da
+>   instância — a regra faz split de string, zero `get()`.
+> - **F5** eventos com os 6 gatilhos + procura por passagens secretas. Extraído
+>   `src/domain/dice.js`: havia **SEIS** cópias de rolagem inline no App.jsx (uma a mais que o
+>   levantamento achou). Diferenças reais preservadas (dialeto com/sem contagem, 3 regras de
+>   crítico, tetos que só uma tinha).
+> - **F6** encontros e acampamento, sempre em DUAS etapas: sorteio no cliente do mestre →
+>   `gm.pendingEncounter` (que o jogador nem lê) → decisão → só então publica.
+>
+> **O PADRÃO DE SEGREDO QUE SE REPETIU EM TODA FASE** (vale para quem continuar): segredo não
+> vaza pelo dado, vaza pela DIFERENÇA. Por isso: a recusa de viagem é a mesma frase para "não há
+> trilha", "é secreta" e "está oculta"; a falha da procura é idêntica à de um lugar vazio; o botão
+> "Procurar aqui" aparece em TODO nó (se só surgisse onde há segredo, ele seria a resposta); a
+> pausa do encontro é neutra ("a mesa está com o mestre"), e desligar APAGA a flag em vez de
+> gravar `false`. Vários desses foram verificados por MUTAÇÃO — quebrar o código de propósito e
+> conferir que o teste cai.
+>
+> **PENDÊNCIAS CONHECIDAS:** (1) acampar em trânsito é letra morta — exige estado de viagem
+> persistido (F7); (2) `pendingEncounter` não tem tempo real — duas abas do mestre podem se
+> sobrescrever; (3) bônus de rolagem é digitado pelo mestre: a ficha do personagem não chega ao
+> mapa-múndi; (4) o pedido de procura do JOGADOR só avisa a mesa — validar no cliente dele exigiria
+> ler o segredo (alternativa descartada no design §3).
+>
+> **AINDA VALE:** Storage segue bloqueado (Spark); o Andre decidiu subir para Blaze só ao
+> finalizar o projeto. Fundo em base64, ADR-0009.
+
 > **2026-08-01: SPEC 0028 — MAPA-MÚNDI (exploração + névoa), FASE 1 ENTREGUE.** Briefing do Andre
 > pedindo mapa-múndi estilo Pathfinder: WotR, com visão de mestre e de jogador.
 > - **F0 (descoberta)** achou 5 contradições com o briefing. A maior: **não existe servidor** — sem
