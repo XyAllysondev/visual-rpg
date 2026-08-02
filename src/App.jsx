@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
 import { ThemeStyles } from "./themes/ThemeProvider";
 import { SYSTEM_THEMES, getCardAccent } from "./themes";
@@ -18,7 +18,8 @@ import {
   setPersistence, browserLocalPersistence, browserSessionPersistence,
   onAuthStateChanged,
 } from "firebase/auth";
-import { doc, setDoc, getDoc, updateDoc, deleteField, collection, addDoc, query, orderBy, limit, onSnapshot, getDocs, serverTimestamp, arrayUnion, arrayRemove, where, deleteDoc, startAfter, writeBatch, Timestamp } from "firebase/firestore";
+/* O SDK do Firestore NÃO é importado aqui (spec 0029 AC-1). Todo acesso a dados passa
+   pelos repositórios de `src/infrastructure/firestore/`, importados logo abaixo. */
 import { roadmapData } from './roadmapData';
 import { useLocale } from "./i18n/useLocale";
 import MapEditor from './components/MapEditor';
@@ -30,7 +31,14 @@ import { saveAsset } from './components/MapEditor/assets/assetLib';
    é navegação nova — é a que existe, chamada de outro lugar. */
 import { setActiveScene as apontarCenaDaCampanha } from './components/MapEditor/sync/campaignSync2';
 import LicencaOP from "./components/LicencaOP";
-import { getActiveAvatar } from "./domain/character";
+import { getActiveAvatar, characterKey } from "./domain/character";
+import * as usersRepo from "./infrastructure/firestore/usersRepo";
+import * as publicSheetsRepo from "./infrastructure/firestore/publicSheetsRepo";
+import * as campaignsRepo from "./infrastructure/firestore/campaignsRepo";
+import * as messagesRepo from "./infrastructure/firestore/messagesRepo";
+import * as sharedSheetsRepo from "./infrastructure/firestore/sharedSheetsRepo";
+import * as bestiaryRepo from "./infrastructure/firestore/bestiaryRepo";
+import { clampHp } from "./domain/creature";
 import { rollDice, rollNotation, rollOP } from "./domain/dice";
 import REGRAS_OFICIAIS from "./data/ordemParanormal/regras-oficiais.json";
 import RITUAIS_LIB from "./data/ordemParanormal/rituais-oficiais.json";
@@ -47,57 +55,6 @@ const DungeonsAndDragonsSheet = lazy(() => import("./components/systems/Dungeons
 const MesaDoMapaMundi = lazy(() => import("./components/WorldMap/Mesa"));
 
 const googleProvider = new GoogleAuthProvider();
-
-/* ── Firestore helpers (fail-silent so app still works if Firestore not enabled) ── */
-const fsSetMusicLink = async (uid, svc, data) => {
-  try { await setDoc(doc(db, "users", uid), { musicLinks: { [svc]: data } }, { merge: true }); } catch (e) { console.error("[fsSetMusicLink] falhou:", e); }
-};
-const fsDeleteMusicLink = async (uid, svc) => {
-  try { await updateDoc(doc(db, "users", uid), { [`musicLinks.${svc}`]: deleteField() }); } catch (e) { console.error("[fsDeleteMusicLink] falhou:", e); }
-};
-const fsGetMusicLinks = async (uid) => {
-  try { const snap = await getDoc(doc(db, "users", uid)); return snap.exists() ? (snap.data().musicLinks || {}) : {}; } catch (e) { console.error("[fsGetMusicLinks] falhou:", e); return {}; }
-};
-
-/* ── Firestore: fichas (fail-silent) ── */
-
-const fsSavePublicSheet = async (charId, data, ownerUid) => {
-  try {
-    const payload = { ...data, public: true, _updatedAt: Date.now() };
-    if (ownerUid) payload.ownerUid = ownerUid;
-    await setDoc(doc(db, "publicSheets", String(charId)), payload);
-  } catch (e) { console.error("[fsSavePublicSheet] falhou:", e); }
-};
-const fsRemovePublicSheet = async (charId) => {
-  try { await deleteDoc(doc(db, "publicSheets", String(charId))); } catch (e) { console.error("[fsRemovePublicSheet] falhou:", e); }
-};
-const fsSavePendingEdit = async (charId, proposedData, editorName) => {
-  try {
-    const id = String(Date.now());
-    await setDoc(doc(db, "publicSheets", String(charId), "pendingEdits", id), {
-      id, proposedData, editorName: editorName || "Anônimo",
-      timestamp: Date.now(), status: "pending",
-    });
-  } catch (e) { console.error("[fsSavePendingEdit] falhou:", e); }
-};
-const fsGetPendingEdits = async (charId) => {
-  try {
-    const snap = await getDocs(collection(db, "publicSheets", String(charId), "pendingEdits"));
-    return snap.docs.map(d => d.data()).filter(e => e.status === "pending").sort((a,b) => b.timestamp - a.timestamp);
-  } catch (e) { console.error("[fsGetPendingEdits] falhou:", e); return []; }
-};
-const fsResolvePendingEdit = async (charId, editId, status) => {
-  try { await setDoc(doc(db, "publicSheets", String(charId), "pendingEdits", String(editId)), { status }, { merge: true }); } catch (e) { console.error("[fsResolvePendingEdit] falhou:", e); }
-};
-
-/* ── Firestore: plano do usuário (fail-silent) ── */
-const fsGetUserPlan = async (uid) => {
-  if (!uid) return 'free';
-  try {
-    const snap = await getDoc(doc(db, "users", uid));
-    return snap.exists() ? (snap.data().plan || 'free') : 'free';
-  } catch (e) { console.error("[fsGetUserPlan] falhou:", e); return 'free'; }
-};
 
 // REACT_APP_API_URL = URL base do backend na Vercel (ex: https://api.playnexusrpg.com).
 // Vazio em dev local → as chamadas caem em caminho relativo do próprio host.
@@ -277,55 +234,14 @@ function CoverPreviewModal({ image: initialImage, onConfirm, onClose }) {
 }
 
 
-const fsSendMessage = async (campaignId, uid, userName, userPhoto, content, type, rollData) => {
-  try {
-    await addDoc(collection(db,"campaigns",campaignId,"messages"), {
-      userId:uid, userName, userPhoto:userPhoto||null,
-      content, type:type||"text", timestamp:serverTimestamp(),
-      ...(rollData ? {rollData} : {}),
-    });
-  } catch(e) { console.error(e); }
-};
+/* Envio de mensagem: assinatura de conveniência sobre o `messagesRepo`. Existe só para
+   não reescrever os 8 pontos de chamada que já passavam os campos posicionalmente. */
+const fsSendMessage = (campaignId, uid, userName, userPhoto, content, type, rollData) =>
+  messagesRepo.send(campaignId, { userId: uid, userName, userPhoto, content, type, rollData });
 
-const MSG_TTL_MS = 24 * 60 * 60 * 1000;
-const getMsgCutoff = () => Timestamp.fromMillis(Date.now() - MSG_TTL_MS);
-
-const fsCleanOldMessages = async (campaignId) => {
-  try {
-    const q = query(
-      collection(db, "campaigns", campaignId, "messages"),
-      where("timestamp", "<", getMsgCutoff())
-    );
-    const snap = await getDocs(q);
-    if (snap.empty) return;
-    const batch = writeBatch(db);
-    snap.docs.forEach(d => batch.delete(d.ref));
-    await batch.commit();
-  } catch (e) { console.error(e); }
-};
-
-const fsSetTyping = async (campaignId, uid, userName, isTyping) => {
-  try {
-    await setDoc(doc(db,"campaigns",campaignId,"typing",uid), {
-      userName, isTyping, updatedAt:serverTimestamp(),
-    });
-  } catch(_) {}
-};
-
-const fsShareSheet = async (campaignId, uid, userName, character, isLive) => {
-  try {
-    const ref = doc(collection(db,"campaigns",campaignId,"sharedSheets"));
-    await setDoc(ref, {
-      characterId: String(character.id || character.createdAt || Date.now()),
-      ownerId:uid, ownerName:userName,
-      characterName: character.form?.personagem || "Sem nome",
-      characterData: character, isLive,
-      sharedAt: serverTimestamp(),
-      permissions: { canView:"members" },
-    });
-    return ref.id;
-  } catch(e) { console.error(e); return null; }
-};
+/* Compartilhar ficha na mesa: conveniência posicional sobre o `sharedSheetsRepo`. */
+const fsShareSheet = (campaignId, uid, userName, character, isLive) =>
+  sharedSheetsRepo.share(campaignId, { uid, userName, character, isLive });
 
 /* ─── FONTS & GLOBAL CSS ─── */
 const G = () => (
@@ -426,6 +342,115 @@ const G = () => (
     input:focus,textarea:focus{border-color:rgba(201,168,76,0.5)}
     input::placeholder{color:var(--muted)}
 
+    /* ══════════════════════════════════════════════════════════════════
+       NX LAYOUT — gramática editorial única para as telas de conteúdo.
+
+       Por que existe: cada tela desenhava o próprio cabeçalho, os próprios
+       cards e os próprios espaçamentos inline. O resultado era o sintoma
+       clássico de tela montada peça por peça — a mesma informação em três
+       lugares, cards dentro de cards, e um número diferente de pixels de
+       respiro em cada seção. Aqui a régua é uma só:
+
+         · UMA faixa de cabeçalho por tela (sobrancelha + título + ação)
+         · separador = filete de 1px, NÃO uma caixa
+         · profundidade se ganha com espaço em branco, não com borda+sombra
+         · o acento é pontuação, não tinta de fundo
+       ══════════════════════════════════════════════════════════════════ */
+    .nx-page{display:flex;flex-direction:column;gap:26px;width:100%;max-width:1180px;margin:0 auto}
+
+    /* Cabeçalho de tela — some a "caixa herói"; o filete abaixo é o que separa */
+    .nx-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
+      flex-wrap:wrap;padding-bottom:16px;border-bottom:1px solid var(--border)}
+    .nx-head-txt{min-width:0;flex:1}
+    .nx-eyebrow{font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;
+      text-transform:uppercase;color:var(--muted);line-height:1}
+    /* Peso 500, não 700: título de página é hierarquia, não grito.
+       Sem background-clip/gradiente — texto com degradê é a impressão
+       digital mais reconhecível de layout cuspido por IA. */
+    .nx-h1{font-family:'Cinzel',serif;font-weight:500;color:var(--text);
+      font-size:clamp(21px,2.1vw,27px);line-height:1.16;letter-spacing:0.015em;margin-top:8px}
+    .nx-sub{font-size:14.5px;color:var(--muted);line-height:1.5;margin-top:7px;max-width:60ch}
+    .nx-head-actions{display:flex;align-items:center;gap:14px;flex-shrink:0;padding-bottom:3px}
+
+    /* Faixa de números — blocos separados por filete vertical, sem caixa nenhuma */
+    .nx-stats{display:grid;grid-template-columns:repeat(var(--nx-cols,3),minmax(0,1fr));
+      border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+    .nx-stat{display:flex;flex-direction:column;gap:7px;padding:16px 20px;text-align:left;
+      background:none;border:none;border-left:1px solid var(--border);cursor:pointer;
+      transition:background 0.18s ease}
+    .nx-stat:first-child{border-left:none;padding-left:2px}
+    .nx-stat:hover{background:rgba(255,255,255,0.022)}
+    .nx-stat:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}
+    .nx-stat-num{font-family:'IBM Plex Mono','Share Tech Mono',monospace;font-size:27px;
+      font-weight:400;color:var(--text);line-height:1;font-variant-numeric:tabular-nums}
+    .nx-stat-cap{font-family:'Cinzel',serif;font-size:9.5px;letter-spacing:0.16em;
+      text-transform:uppercase;color:var(--muted);line-height:1}
+
+    /* Corpo 2/1 — conteúdo à esquerda, trilho de contexto à direita.
+       É o que impede a tela de terminar no meio e deixar 300px de vazio. */
+    .nx-split{display:grid;grid-template-columns:minmax(0,1.85fr) minmax(0,1fr);
+      gap:34px;align-items:start}
+
+    /* Título de seção — mesmo filete do cabeçalho, um nível abaixo */
+    .nx-sec{display:flex;align-items:baseline;justify-content:space-between;gap:14px;
+      padding-bottom:9px;border-bottom:1px solid var(--border);margin-bottom:2px}
+    .nx-sec-t{font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.16em;
+      text-transform:uppercase;color:var(--muted)}
+    .nx-sec-a{font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.1em;
+      text-transform:uppercase;color:var(--muted);background:none;border:none;
+      cursor:pointer;transition:color 0.18s}
+    .nx-sec-a:hover{color:var(--gold)}
+
+    /* Lista — linhas separadas por filete. Sem card por item: 8 cards
+       empilhados viram 8 retângulos competindo; 8 linhas viram uma tabela. */
+    .nx-list{display:flex;flex-direction:column}
+    .nx-row{display:flex;align-items:center;gap:14px;width:100%;text-align:left;
+      padding:13px 8px;background:none;border:none;border-bottom:1px solid var(--border);
+      cursor:pointer;transition:background 0.18s ease,padding-left 0.18s ease;position:relative}
+    .nx-row:hover{background:rgba(255,255,255,0.03);padding-left:13px}
+    .nx-row:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}
+    .nx-row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;
+      background:var(--gold);opacity:0;transition:opacity 0.18s}
+    .nx-row:hover::before{opacity:0.85}
+    .nx-row-t{font-family:'Cinzel',serif;font-size:15px;color:var(--text);line-height:1.25;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .nx-row-m{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.3;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+    /* Trilho lateral — painéis de contexto, sem caixa */
+    .nx-rail{display:flex;flex-direction:column;gap:24px}
+    .nx-note{display:flex;flex-direction:column;gap:5px;padding:11px 0;
+      border-bottom:1px solid var(--border);font-size:13px;color:var(--muted2);line-height:1.45}
+    .nx-note-k{font-family:'IBM Plex Mono','Share Tech Mono',monospace;font-size:10.5px;
+      letter-spacing:0.06em;color:var(--muted)}
+
+    /* Vazio — um bloco de texto alinhado à esquerda com a lista, não um
+       pôster centralizado com ícone gigante e dois botões concorrentes */
+    /* o filete acompanha a coluna inteira (é o mesmo separador da lista que
+       viria aqui); só o TEXTO é medido em 52ch para não virar linha larga */
+    .nx-empty{padding:30px 8px 34px;border-bottom:1px solid var(--border)}
+    .nx-empty-t{font-family:'Cinzel',serif;font-size:15px;color:var(--text);margin-bottom:8px}
+    .nx-empty-d{font-size:14px;color:var(--muted);line-height:1.55;margin-bottom:18px;max-width:52ch}
+
+    /* Botão secundário de texto — o par calmo do .btn-gold. Existe para que
+       a tela tenha UM botão preenchido; o resto é texto com filete. */
+    .nx-btn{font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.12em;
+      text-transform:uppercase;padding:11px 18px;border-radius:4px;cursor:pointer;
+      background:none;border:1px solid var(--border2);color:var(--muted2);
+      transition:color 0.2s,border-color 0.2s}
+    .nx-btn:hover{color:var(--text);border-color:var(--gold)}
+
+    @media(max-width:900px){
+      .nx-split{grid-template-columns:1fr;gap:26px}
+    }
+    @media(max-width:640px){
+      .nx-stats{grid-template-columns:1fr}
+      .nx-stat{border-left:none;border-top:1px solid var(--border);padding-left:2px}
+      .nx-stat:first-child{border-top:none}
+      .nx-head{align-items:flex-start}
+      .nx-head-actions{width:100%}
+    }
+
     /* ── MOBILE BOTTOM NAV ── */
     .sidebar-desktop{display:flex}
     .bottomnav{display:none}
@@ -447,6 +472,22 @@ const G = () => (
       .sidebar-desktop{display:none !important}
       /* hero da campanha: no mobile os botões overlay viram só ícone */
       .camp-hero-btn-label{display:none}
+      /* ── HERO COMPACTO SEMPRE, NO CELULAR ──────────────────────────
+         458 px é tudo o que sobra de app em 390×844. Uma capa de 200 px
+         come 38% disso. Aqui ela é sempre a faixa de 56 px, em qualquer
+         aba — e a linha única é também o que resolve a colisão medida
+         entre "← VOLTAR" e o nome da campanha em 350 px de largura. */
+      .camp-hero{height:56px !important;display:flex !important;align-items:center;gap:8px;padding:0 10px !important}
+      .camp-hero-img{opacity:0.4 !important}
+      .camp-hero-topo{position:static !important;flex-shrink:0}
+      .camp-hero-base{position:static !important;flex:1 !important;min-width:0;align-items:center !important}
+      .camp-hero-titulo{font-size:15px !important}
+      .camp-hero-chips{display:none !important}
+      /* O "display:flex" inline do AppFooter vencia esta classe e o rodapé
+         continuava no celular, colado na barra inferior. 55 px de volta.
+         NÃO use crase aqui: este bloco é um template literal, e a crase
+         fecha a string — foi o que quebrou o build (spec 0029, gate da Task 2). */
+      .nexus-footer{display:none !important}
       .bottomnav{
         display:flex;position:fixed;bottom:0;left:0;right:0;z-index:200;
         background:rgba(26,26,35,0.94);border-top:1px solid var(--border);
@@ -1253,10 +1294,11 @@ function Sidebar({ active, onNav, collapsed, setCollapsed, system, onChangeSyste
         {!collapsed && (
           <>
             <div>
+              {/* Sem background-clip: o degradê no texto do wordmark rendia uma
+                  borda serrilhada no anti-aliasing e é o clichê visual nº 1 de
+                  interface gerada por IA. Ouro chapado lê melhor em 14px. */}
               <div style={{fontFamily:"'Cinzel Decorative',serif", fontSize:14, fontWeight:700,
-                background:"linear-gradient(135deg,#c9a84c,#e8c96d)",
-                WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", backgroundClip:"text",
-                letterSpacing:2}}>⚔ NEXUS</div>
+                color:"var(--gold)", letterSpacing:2}}>NEXUS</div>
               <div style={{fontFamily:"Cinzel,serif", fontSize:7, letterSpacing:2, color:"var(--muted)", textTransform:"uppercase"}}>RPG System</div>
             </div>
             <svg title="Recolher barra" width={16} height={16} viewBox="0 0 24 24" fill="none"
@@ -1275,42 +1317,24 @@ function Sidebar({ active, onNav, collapsed, setCollapsed, system, onChangeSyste
         )}
       </div>
 
-      {/* Active system pill */}
-      {system && !collapsed && (
-        <div style={{
-          margin:"12px 12px 4px",
-          padding:"8px 12px",
-          background:`${system.accent}12`,
-          border:`1px solid ${system.accent}35`,
-          borderRadius:6,
-          display:"flex", alignItems:"center", gap:8,
-        }}>
-          <span style={{display:"flex",alignItems:"center",flexShrink:0}}>{system.svgIcon ? system.svgIcon(false) : system.icon}</span>
-          <div style={{flex:1, minWidth:0}}>
-            <div style={{fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:"0.06em", color:system.accent, textTransform:"uppercase", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{system.name}</div>
-          </div>
-          <button onClick={onChangeSystem} title="Trocar sistema" style={{
-            background:"none", border:"none", cursor:"pointer",
-            color:"var(--muted)", fontSize:13, padding:"0 2px",
-            transition:"color 0.2s",
-          }} onMouseEnter={e=>e.target.style.color=system.accent}
-             onMouseLeave={e=>e.target.style.color="var(--muted)"}>⇄</button>
-        </div>
-      )}
-      {system && collapsed && (
-        <div style={{display:"flex", justifyContent:"center", padding:"8px 0 4px"}} title={system.name}>
-          <span style={{display:"flex",alignItems:"center"}}>
-            {system.id==="op" ? <OPEnergyIcon size={22}/> : system.id==="dnd" ? <DnDDemonIcon size={22}/> : <span style={{fontSize:16}}>{system.icon}</span>}
-          </span>
-        </div>
-      )}
+      {/* O card do sistema ativo saiu daqui (spec 0029).
+          O nome "Ordem Paranormal" aparecia TRÊS vezes na mesma tela: neste
+          card (truncado em "ORDEM PARANO…", porque 220px de barra não cabem),
+          na aba da topbar e no herói do painel. Agora existe num lugar só — a
+          migalha da topbar, que também é o botão de trocar. Menos ruído e o
+          nome deixa de ser cortado. */}
 
       {/* Nav */}
       <nav ref={navRef} style={{flex:1, padding:"8px 8px", display:"flex", flexDirection:"column", gap:1, position:"relative"}}>
         {/* Sliding active-indicator pill (AC-4) — glides behind the buttons */}
-        <SlidingTabPill pill={pill} radius={8}
-          background={system?.accent ? `${system.accent}18` : "var(--purple-dim)"}
-          boxShadow={`inset 0 0 0 1px ${system?.accent ? system.accent + "40" : "var(--purple-glow)"}`} />
+        {/* A pílula continua deslizando (AC-4, spec 0017) — mas em vez de um
+            retângulo preenchido + contorno, ela agora é só um filete de 2px na
+            borda esquerda mais um véu quase imperceptível. Um bloco colorido
+            atrás do item ativo brigava com o ícone e com o texto; o filete
+            marca a posição sem virar um segundo plano de fundo. */}
+        <SlidingTabPill pill={pill} radius={4}
+          background="rgba(255,255,255,0.035)"
+          boxShadow={`inset 2px 0 0 0 ${system?.accent || "var(--gold)"}`} />
         {navItems.map(item => {
           const isActive = active === item.id;
           return (
@@ -1324,7 +1348,10 @@ function Sidebar({ active, onNav, collapsed, setCollapsed, system, onChangeSyste
                 border:"none", borderRadius:8,
                 cursor:"pointer", position:"relative", zIndex:1,
                 fontFamily:"Cinzel,serif", fontSize:11, letterSpacing:"0.05em",
-                color: isActive ? (system?.accent || "var(--purple2)") : "var(--muted2)",
+                /* Ativo = texto mais claro. A COR de acento fica só no filete
+                   da pílula; texto colorido + fundo colorido + ícone brilhando
+                   eram três sinais para dizer a mesma coisa. */
+                color: isActive ? "var(--text)" : "var(--muted2)",
                 fontWeight: isActive ? 600 : 400,
                 transition:"color 0.18s, font-weight 0.18s",
                 boxShadow:"none",
@@ -1334,9 +1361,10 @@ function Sidebar({ active, onNav, collapsed, setCollapsed, system, onChangeSyste
               <span style={{
                 display:"flex", alignItems:"center", justifyContent:"center",
                 minWidth:20, flexShrink:0,
-                color: isActive ? (system?.accent || "var(--purple2)") : "var(--muted2)",
-                filter: isActive ? `drop-shadow(0 0 5px ${system?.accent || "var(--purple-glow)"})` : "none",
-                transition:"all 0.18s",
+                color: isActive ? (system?.accent || "var(--gold)") : "var(--muted2)",
+                /* sem drop-shadow: ícone com halo é brilho de UI de IA, e em
+                   11px o glow só borra o traço do ícone */
+                transition:"color 0.18s",
               }}>{item.svg}</span>
               {!collapsed && <span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t("nav."+item.id)}</span>}
             </button>
@@ -1815,47 +1843,55 @@ function CampaignList({ uid, userName, campaigns, loading, onOpenCampaign, onCre
   );
 
   return (
-    <div className="fade" style={{display:"flex",flexDirection:"column",gap:24}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",flexWrap:"wrap",gap:12}}>
-        <div>
-          <div style={{fontFamily:"Cinzel,serif",fontSize:11,letterSpacing:"0.08em",color:"var(--muted)",textTransform:"uppercase",marginBottom:6}}>Modo Multijogador</div>
-          <h1 style={{fontFamily:"'Cinzel Decorative',serif",fontSize:22,fontWeight:700,display:"flex",alignItems:"baseline",gap:8}}>
-            <span style={{background:"linear-gradient(135deg,#b030d8,#c8a8f0)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Campanhas:</span>
-            <span style={{fontFamily:"'Cinzel Decorative',serif",fontSize:22,fontWeight:700,color:"#fff",WebkitTextFillColor:"#fff"}}>
-              {masterActive.length}/3
-            </span>
-          </h1>
+    <div className="fade nx-page">
+      {/* Mesmo cabeçalho do painel. Antes o título era "Campanhas: 0/3" com
+          "Campanhas:" em degradê roxo e o "0/3" em branco puro — dois estilos
+          numa frase de duas palavras, e a cota colada no título. A cota vira
+          um número na faixa abaixo, onde números moram. */}
+      <div className="nx-head">
+        <div className="nx-head-txt">
+          <div className="nx-eyebrow">Modo multijogador</div>
+          <h1 className="nx-h1">Campanhas</h1>
+          <p className="nx-sub">Mesas com chat, fichas compartilhadas, rolagens e mapas ao vivo.</p>
         </div>
-        <div style={{display:"flex",gap:10}}>
-          <button onClick={onJoinCampaign} className="btn-ghost" style={{padding:"9px 18px",fontSize:10}}>◎ Entrar com Código</button>
-          <button onClick={onCreateCampaign} className="btn-gold" style={{padding:"9px 18px",fontSize:11}}>+ Nova Campanha</button>
+        <div className="nx-head-actions">
+          <button onClick={onJoinCampaign} className="nx-btn">Entrar com código</button>
+          <button onClick={onCreateCampaign} className="btn-gold">+ Nova campanha</button>
+        </div>
+      </div>
+
+      <div className="nx-stats" style={{"--nx-cols":3}}>
+        <div className="nx-stat" style={{cursor:"default"}}>
+          <span className="nx-stat-num">{masterActive.length}<span style={{color:"var(--muted)",fontSize:17}}>/3</span></span>
+          <span className="nx-stat-cap">Como mestre</span>
+        </div>
+        <div className="nx-stat" style={{cursor:"default"}}>
+          <span className="nx-stat-num">{active.length - masterActive.length}</span>
+          <span className="nx-stat-cap">Como jogador</span>
+        </div>
+        <div className="nx-stat" style={{cursor:"default"}}>
+          <span className="nx-stat-num">{archived.length}</span>
+          <span className="nx-stat-cap">Arquivadas</span>
         </div>
       </div>
 
       {active.length===0&&archived.length===0 && (
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:320,gap:20,textAlign:"center",
-          background:"radial-gradient(ellipse at center,rgba(176,48,216,0.07) 0%,var(--card) 70%)",
-          border:"1px dashed rgba(176,48,216,0.22)",borderRadius:12,padding:"40px 20px"}}>
-          <div style={{fontSize:56,animation:"float 4s ease-in-out infinite",opacity:0.55}}>◎</div>
-          <div>
-            <div style={{fontFamily:"'Cinzel Decorative',serif",fontSize:18,color:"var(--text)",marginBottom:10}}>Nenhuma Campanha</div>
-            <div style={{fontFamily:"'Crimson Pro',serif",fontSize:16,color:"var(--muted2)",maxWidth:340,lineHeight:1.7,fontStyle:"italic"}}>
-              Crie uma campanha para ser o Mestre ou entre em uma com o código de convite.
-            </div>
-          </div>
-          <div style={{display:"flex",gap:12,flexWrap:"wrap",justifyContent:"center"}}>
-            <button onClick={onCreateCampaign} className="btn-gold">+ Criar Campanha</button>
-            <button onClick={onJoinCampaign} className="btn-ghost">◎ Entrar com Código</button>
-          </div>
+        /* O vazio tinha um ◎ de 56px flutuando em loop, um degradê radial roxo,
+           borda tracejada e OS MESMOS DOIS BOTÕES que já estão no cabeçalho —
+           quatro botões para duas ações. Agora é texto alinhado à esquerda. */
+        <div className="nx-empty">
+          <div className="nx-empty-t">Nenhuma campanha</div>
+          <p className="nx-empty-d">
+            Crie uma campanha para mestrar a sua mesa, ou use o código de convite
+            que o mestre te passou para entrar em uma existente.
+          </p>
         </div>
       )}
 
       {active.length>0 && (
-        <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <div style={{fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:"0.1em",color:"var(--muted)",textTransform:"uppercase",paddingBottom:6,borderBottom:"1px solid var(--border)"}}>
-            Campanhas Ativas — {active.length}
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))",gap:14}}>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div className="nx-sec"><span className="nx-sec-t">Ativas — {active.length}</span></div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))",gap:16}}>
             {active.map(camp=>(
               <CampaignCard key={camp.id} campaign={camp} uid={uid} onClick={()=>onOpenCampaign(camp)}/>
             ))}
@@ -1864,11 +1900,9 @@ function CampaignList({ uid, userName, campaigns, loading, onOpenCampaign, onCre
       )}
 
       {archived.length>0 && (
-        <div style={{display:"flex",flexDirection:"column",gap:12,opacity:0.55}}>
-          <div style={{fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:"0.1em",color:"var(--muted)",textTransform:"uppercase",paddingBottom:6,borderBottom:"1px solid var(--border)"}}>
-            Arquivadas — {archived.length}
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))",gap:14}}>
+        <div style={{display:"flex",flexDirection:"column",gap:14,opacity:0.55}}>
+          <div className="nx-sec"><span className="nx-sec-t">Arquivadas — {archived.length}</span></div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))",gap:16}}>
             {archived.map(camp=>(
               <CampaignCard key={camp.id} campaign={camp} uid={uid} onClick={()=>onOpenCampaign(camp)}/>
             ))}
@@ -1984,10 +2018,7 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
     if (!window.confirm("Apagar todas as mensagens do chat? Esta ação não pode ser desfeita.")) return;
     setClearing(true);
     try {
-      const snap = await getDocs(collection(db, "campaigns", campaignId, "messages"));
-      const b = writeBatch(db);
-      snap.docs.forEach(d => b.delete(d.ref));
-      await b.commit();
+      await messagesRepo.clearAll(campaignId);
     } catch(e) { console.error(e); }
     setClearing(false);
   };
@@ -1995,26 +2026,18 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
   useEffect(() => {
     setLoading(true);
     setChatError("");
-    fsCleanOldMessages(campaignId);
-    const q = query(
-      collection(db,"campaigns",campaignId,"messages"),
-      where("timestamp",">=",getMsgCutoff()),
-      orderBy("timestamp","desc"),
-      limit(LIMIT)
-    );
-    const unsub = onSnapshot(q, snap => {
-      const cutoff = Date.now() - MSG_TTL_MS;
-      const msgs = snap.docs
-        .map(d=>({id:d.id,...d.data()}))
-        .filter(d => (d.timestamp?.toMillis?.() ?? Date.now()) >= cutoff)
-        .reverse();
-      setMessages(msgs);
-      if (snap.docs.length>0) setLastDoc(snap.docs[snap.docs.length-1]);
-      setHasMore(snap.docs.length===LIMIT);
+    messagesRepo.deleteExpired(campaignId);
+    const unsub = messagesRepo.watchRecent(campaignId, LIMIT, ({ messages: page, cursor, hasMore: more }) => {
+      // A query já corta pelo TTL, mas o filtro em memória fica: mensagem gravada com
+      // `serverTimestamp()` chega ao cliente que a enviou com `timestamp` ainda nulo
+      // (escrita otimista), e sem este `?? Date.now()` ela sumiria por um instante.
+      const cutoff = messagesRepo.ttlCutoffMillis();
+      setMessages(page.filter(d => (d.timestamp?.toMillis?.() ?? Date.now()) >= cutoff));
+      if (cursor) setLastDoc(cursor);
+      setHasMore(more);
       setLoading(false);
       setTimeout(()=>messagesEndRef.current?.scrollIntoView({behavior:"smooth"}),60);
-    }, err => {
-      console.error("Chat messages error:", err);
+    }, () => {
       setLoading(false);
       setChatError("Não foi possível carregar o chat. Verifique as regras do Firestore (firebase deploy --only firestore:rules).");
     });
@@ -2022,21 +2045,18 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
   }, [campaignId]);
 
   useEffect(() => {
-    const q = query(collection(db,"campaigns",campaignId,"typing"));
-    const unsub = onSnapshot(q, snap => {
+    const unsub = messagesRepo.watchTyping(campaignId, list => {
       const now = Date.now();
-      setTypingUsers(snap.docs
-        .map(d=>({id:d.id,...d.data()}))
-        .filter(u=>u.id!==uid&&u.isTyping&&(now-(u.updatedAt?.toMillis?.()??0))<5000));
+      setTypingUsers(list.filter(u=>u.id!==uid&&u.isTyping&&(now-(u.updatedAt?.toMillis?.()??0))<5000));
     });
-    return () => { unsub(); fsSetTyping(campaignId,uid,userName,false); };
+    return () => { unsub(); messagesRepo.setTyping(campaignId,uid,userName,false); };
   }, [campaignId,uid,userName]);
 
   const handleInput = (e) => {
     setInput(e.target.value);
-    fsSetTyping(campaignId,uid,userName,true);
+    messagesRepo.setTyping(campaignId,uid,userName,true);
     clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(()=>fsSetTyping(campaignId,uid,userName,false),3000);
+    typingTimeoutRef.current = setTimeout(()=>messagesRepo.setTyping(campaignId,uid,userName,false),3000);
   };
 
   const sendMessage = async () => {
@@ -2044,7 +2064,7 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
     if (!text) return;
     setInput("");
     clearTimeout(typingTimeoutRef.current);
-    fsSetTyping(campaignId,uid,userName,false);
+    messagesRepo.setTyping(campaignId,uid,userName,false);
     if (text.startsWith("/roll ")||text.startsWith("/r ")||/^\/\d+d\d+([+-]\d+)?$/i.test(text)) {
       const expr = (text.startsWith("/roll ")||text.startsWith("/r "))
         ? text.replace(/^\/(roll|r)\s+/,"")
@@ -2064,12 +2084,12 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
 
   const loadMore = async () => {
     if (!lastDoc||!hasMore) return;
-    const q = query(collection(db,"campaigns",campaignId,"messages"),where("timestamp",">=",getMsgCutoff()),orderBy("timestamp","desc"),startAfter(lastDoc),limit(LIMIT));
-    const snap = await getDocs(q);
-    const older = snap.docs.map(d=>({id:d.id,...d.data()})).reverse();
+    // `lastDoc` é um cursor OPACO devolvido pelo repositório (spec 0029 AC-3) — a tela
+    // não sabe (nem precisa saber) que por baixo é um snapshot do Firestore.
+    const { messages: older, cursor } = await messagesRepo.loadOlder(campaignId, lastDoc, LIMIT);
     setMessages(prev=>[...older,...prev]);
-    if (snap.docs.length>0) setLastDoc(snap.docs[snap.docs.length-1]);
-    setHasMore(snap.docs.length===LIMIT);
+    if (cursor) setLastDoc(cursor);
+    setHasMore(older.length===LIMIT);
   };
 
   const grouped = messages.map((msg,i)=>{
@@ -2271,9 +2291,7 @@ function SharedSheetsPanel({ campaignId, uid, userName, isMaster, characters }) 
   const SHEET_LIMIT = 15;
 
   useEffect(()=>{
-    const q = query(collection(db,"campaigns",campaignId,"sharedSheets"));
-    const unsub = onSnapshot(q,snap=>{
-      const docs = snap.docs.map(d=>({id:d.id,...d.data()}));
+    const unsub = sharedSheetsRepo.watchByCampaign(campaignId, docs=>{
       setSharedSheets(docs);
       sharedSheetsRef.current = docs;
       setLoading(false);
@@ -2290,10 +2308,7 @@ function SharedSheetsPanel({ campaignId, uid, userName, isMaster, characters }) 
     myLiveSheets.forEach(sheet => {
       const char = characters.find(c => String(c.id || c.createdAt) === sheet.characterId);
       if (!char) return;
-      updateDoc(doc(db,"campaigns",campaignId,"sharedSheets",sheet.id), {
-        characterData: char,
-        characterName: char.form?.personagem || "Sem nome",
-      }).catch(console.error);
+      sharedSheetsRepo.updateCharacterData({ campaignId, sheetId: sheet.id }, char);
     });
   },[characters, loading]);
 
@@ -2309,7 +2324,7 @@ function SharedSheetsPanel({ campaignId, uid, userName, isMaster, characters }) 
   };
 
   const handleRemove = async (sheetId) => {
-    try { await deleteDoc(doc(db,"campaigns",campaignId,"sharedSheets",sheetId)); } catch(e){console.error(e);}
+    await sharedSheetsRepo.remove(campaignId, sheetId);
   };
 
   // Visibility: hide private sheets from non-owner non-master members
@@ -2328,10 +2343,11 @@ function SharedSheetsPanel({ campaignId, uid, userName, isMaster, characters }) 
   // Save edits made by master/member to the sharedSheets document
   const handleSheetUpdate = async (sheet, updated) => {
     try {
-      await updateDoc(doc(db,"campaigns",campaignId,"sharedSheets",sheet.id), {
-        characterData: updated,
-        characterName: updated.form?.personagem || sheet.characterName,
-      });
+      // `fallbackName` preserva a diferença herdada: aqui o nome cai para o que a ficha
+      // JÁ tinha na mesa, não para "Sem nome" como no live-sync (spec 0029 AC-7).
+      await sharedSheetsRepo.updateCharacterData(
+        { campaignId, sheetId: sheet.id }, updated, { fallbackName: sheet.characterName }
+      );
     } catch(e) { console.error(e); }
   };
 
@@ -2473,12 +2489,15 @@ function MembersPanel({ campaign, uid, isMaster }) {
   };
 
   const toggleAdmin = async (memberId, isAdminNow) => {
-    const op = isAdminNow ? arrayRemove(memberId) : arrayUnion(memberId);
-    await updateDoc(doc(db,"campaigns",campaign.id),{ admins: op }).catch((e)=>console.error("[campanha] alternar admin falhou:", e));
+    await campaignsRepo.setAdmin(campaign.id, memberId, !isAdminNow)
+      .catch((e)=>console.error("[campanha] alternar admin falhou:", e));
   };
 
   return (
-    <div style={{overflowY:"auto",padding:"16px 4px",display:"flex",flexDirection:"column",gap:12}}>
+    /* Teto de leitura. Cada linha de membro tinha 1650 px para um nome de 200:
+       os botões "Admin/Remover" ficavam a 1400 px do nome a que pertencem, e o
+       olho não fechava a associação. Isso não é espaço, é dispersão. */
+    <div style={{overflowY:"auto",minHeight:0,padding:"16px 4px 28px",maxWidth:880,width:"100%",display:"flex",flexDirection:"column",gap:12}}>
       {isMaster && (
         <div style={{padding:"14px 16px",background:"var(--card)",border:"1px solid rgba(176,48,216,0.3)",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
           <div>
@@ -2522,7 +2541,7 @@ function MembersPanel({ campaign, uid, isMaster }) {
             )}
             {/* Botão Remover — só mestre pode remover players (nunca o mestre) */}
             {isMaster && !isMasterMember && (
-              <button onClick={async()=>{if(window.confirm(`Remover ${name} da campanha?`)){await updateDoc(doc(db,"campaigns",campaign.id),{members:arrayRemove(memberId),admins:arrayRemove(memberId)});}}}
+              <button onClick={async()=>{if(window.confirm(`Remover ${name} da campanha?`)){await campaignsRepo.removeMember(campaign.id, memberId);}}}
                 style={{padding:"5px 10px",borderRadius:4,background:"rgba(139,32,32,0.1)",border:"1px solid rgba(139,32,32,0.25)",cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:8,letterSpacing:1,color:"#e07070",textTransform:"uppercase",transition:"all 0.2s"}}
                 onMouseEnter={e=>{e.currentTarget.style.background="rgba(139,32,32,0.22)"}}
                 onMouseLeave={e=>{e.currentTarget.style.background="rgba(139,32,32,0.1)"}}>
@@ -2531,7 +2550,7 @@ function MembersPanel({ campaign, uid, isMaster }) {
             )}
             {/* Botão Sair — apenas para players não-mestre (o mestre NUNCA pode ser expulso, só sai) */}
             {isSelf && !isMasterMember && (
-              <button onClick={async()=>{if(window.confirm("Sair desta campanha?")){await updateDoc(doc(db,"campaigns",campaign.id),{members:arrayRemove(uid),admins:arrayRemove(uid)});}}}
+              <button onClick={async()=>{if(window.confirm("Sair desta campanha?")){await campaignsRepo.removeMember(campaign.id, uid);}}}
                 style={{padding:"5px 10px",borderRadius:4,background:"rgba(139,32,32,0.1)",border:"1px solid rgba(139,32,32,0.25)",cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:8,letterSpacing:1,color:"#e07070",textTransform:"uppercase",transition:"all 0.2s"}}
                 onMouseEnter={e=>{e.currentTarget.style.background="rgba(139,32,32,0.22)"}}
                 onMouseLeave={e=>{e.currentTarget.style.background="rgba(139,32,32,0.1)"}}>
@@ -2569,7 +2588,7 @@ function MasterSettings({ campaign, onBack, isMaster=true }) {
   const handleSave = async () => {
     if (!name.trim()) return;
     setSaving(true);
-    try { await updateDoc(doc(db,"campaigns",campaign.id),{name:name.trim(),system:system.trim(),description:desc.trim(),maxPlayers,coverImage:coverImage||null}); showMsg("Salvo com sucesso!"); }
+    try { await campaignsRepo.update(campaign.id,{name:name.trim(),system:system.trim(),description:desc.trim(),maxPlayers,coverImage:coverImage||null}); showMsg("Salvo com sucesso!"); }
     catch(e) { showMsg("Erro ao salvar."); }
     setSaving(false);
   };
@@ -2577,20 +2596,22 @@ function MasterSettings({ campaign, onBack, isMaster=true }) {
   const handleRegenCode = async () => {
     if (!window.confirm("Regenerar o código invalida o código atual. Continuar?")) return;
     const code = generateInviteCode();
-    try { await updateDoc(doc(db,"campaigns",campaign.id),{inviteCode:code}); showMsg(`Novo código: ${code}`); }
+    try { await campaignsRepo.update(campaign.id,{inviteCode:code}); showMsg(`Novo código: ${code}`); }
     catch(e) { showMsg("Erro."); }
   };
 
   const handleArchive = async () => {
     if (!window.confirm(campaign.isActive?"Arquivar a campanha?":"Reativar a campanha?")) return;
-    try { await updateDoc(doc(db,"campaigns",campaign.id),{isActive:!campaign.isActive}); onBack(); }
+    try { await campaignsRepo.update(campaign.id,{isActive:!campaign.isActive}); onBack(); }
     catch(e) { console.error("[campanha] falha ao arquivar:", e); showMsg("Erro ao arquivar a campanha. Tente de novo."); }
   };
 
   return (
     <>
     {coverPreview && <CoverPreviewModal image={coverPreview} onConfirm={(img)=>{setCoverImage(img);setCoverPreview(null);}} onClose={()=>setCoverPreview(null)}/>}
-    <div style={{overflowY:"auto",padding:"16px 4px",display:"flex",flexDirection:"column",gap:20}}>
+    {/* O campo "Nome" tinha 1652 px para um texto de 16 caracteres. Um formulário
+        de 1652 px não é espaçoso — é ilegível. 880 é a coluna de leitura. */}
+    <div style={{overflowY:"auto",minHeight:0,padding:"16px 4px 28px",maxWidth:880,width:"100%",display:"flex",flexDirection:"column",gap:20}}>
       <div style={{fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:"0.1em",color:"var(--muted)",textTransform:"uppercase",paddingBottom:6,borderBottom:"1px solid var(--border)"}}>
         Configurações da Campanha
       </div>
@@ -2721,20 +2742,13 @@ function RollFeed({ campaignId, uid }) {
   const [filter, setFilter] = useState("all");
 
   useEffect(()=>{
-    fsCleanOldMessages(campaignId);
-    const q = query(
-      collection(db,"campaigns",campaignId,"messages"),
-      where("type","==","roll"),
-      limit(80)
-    );
-    const unsub = onSnapshot(q, snap=>{
-      const cutoff = Date.now() - MSG_TTL_MS;
-      const data = snap.docs
-        .map(d=>({id:d.id,...d.data()}))
+    messagesRepo.deleteExpired(campaignId);
+    const unsub = messagesRepo.watchRolls(campaignId, 80, list=>{
+      const cutoff = messagesRepo.ttlCutoffMillis();
+      setRolls(list
         .filter(d=>(d.timestamp?.seconds??0)*1000 > cutoff)
-        .sort((a,b)=>(b.timestamp?.seconds??0)-(a.timestamp?.seconds??0));
-      setRolls(data);
-    }, ()=>{});
+        .sort((a,b)=>(b.timestamp?.seconds??0)-(a.timestamp?.seconds??0)));
+    });
     return unsub;
   },[campaignId]);
 
@@ -2860,15 +2874,13 @@ function CampaignRollDrawer({ campaign, onClose }) {
 
   useEffect(() => {
     if (!campaign?.id) return;
-    const q = query(collection(db,"campaigns",campaign.id,"messages"), where("type","==","roll"), limit(80));
-    const unsub = onSnapshot(q, snap => {
-      const cutoff = Date.now() - MSG_TTL_MS;
-      const data = snap.docs.map(d => ({ id:d.id, ...d.data() }))
+    const unsub = messagesRepo.watchRolls(campaign.id, 80, list => {
+      const cutoff = messagesRepo.ttlCutoffMillis();
+      setRolls(list
         .filter(d => (d.timestamp?.seconds ?? 0) * 1000 > cutoff)
         .sort((a,b) => (b.timestamp?.seconds ?? 0) - (a.timestamp?.seconds ?? 0))
-        .slice(0, 50);
-      setRolls(data);
-    }, () => {});
+        .slice(0, 50));
+    });
     return unsub;
   }, [campaign?.id]);
 
@@ -3090,7 +3102,7 @@ function CampaignMapTab({ campaignId, uid, isMaster }) {
   };
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', flex:1, overflow:'hidden' }}>
+    <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0, overflow:'hidden' }}>
       {builderAberto ? (
         <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0, gap:10 }}>
           <div style={{ display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
@@ -3110,7 +3122,13 @@ function CampaignMapTab({ campaignId, uid, isMaster }) {
           </Suspense>
         </div>
       ) : mundoAberto ? (
-        <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0, overflowY:'auto' }}>
+        /* O scroll NÃO mora aqui. Este é o pai comum do mapa e do painel do
+           mestre: com `overflowY:auto` rolar o console levava o palco para
+           fora da tela (`palco.top: -285`). Quem rola é a coluna direita da
+           `.wmm-layout` — ver `Mesa/index.jsx` (`.wmm-coluna`).
+           Comentário JS puro, sem chaves: aqui é posição de EXPRESSÃO do
+           ternário, e a forma com chaves seria lida como objeto literal. */
+        <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0, overflow:'hidden' }}>
           <Suspense fallback={<div style={{ padding:40, textAlign:'center', color:'var(--muted)', fontFamily:'Crimson Pro,serif' }}>Abrindo o mapa-múndi…</div>}>
             <MesaDoMapaMundi campaignId={campaignId} uid={uid} isMaster={isMaster}
               onSair={() => setMundoAberto(false)}
@@ -3118,27 +3136,41 @@ function CampaignMapTab({ campaignId, uid, isMaster }) {
           </Suspense>
         </div>
       ) : (
-        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', flex:1, gap:16, textAlign:'center' }}>
+        /* Três destinos, três cartões. O título dizia "Mesa tática" — o nome de
+           UM dos três — e só esse um tinha explicação; os outros dois eram
+           botões nus. Centralizado vertical, a tela ainda empurrava tudo para
+           o meio de uma caixa alta; agora começa no alto e respira. */
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-start', flex:1, minHeight:0, overflowY:'auto', gap:16, textAlign:'center', paddingTop:48, paddingBottom:24 }}>
           <div style={{ fontSize:58, opacity:0.35 }}>🗺️</div>
-          <div style={{ fontFamily:'Cinzel Decorative,serif', fontSize:17, color:'var(--gold)', opacity:0.7 }}>Mesa tática</div>
-          <div style={{ fontFamily:"var(--font-body,'Crimson Pro',serif)", fontSize:14, color:'var(--muted)', maxWidth:380, lineHeight:1.8 }}>
+          <div style={{ fontFamily:'Cinzel Decorative,serif', fontSize:17, color:'var(--gold)', opacity:0.7 }}>Mapas da campanha</div>
+          <div style={{ fontFamily:"var(--font-body,'Crimson Pro',serif)", fontSize:14, color:'var(--muted)', maxWidth:420, lineHeight:1.8 }}>
             {isMaster
-              ? 'Monte o mapa com imagens, tokens, camadas e névoa — os jogadores acompanham cada mudança ao vivo.'
+              ? 'Escolha por onde começar — os jogadores acompanham cada mudança ao vivo.'
               : 'O mapa da sessão abre aqui em tempo real, conforme o Mestre edita.'}
           </div>
-          <div style={{ display:'flex', gap:8, flexWrap:'wrap', justifyContent:'center', marginTop:8 }}>
-            <button onClick={() => setMesaAberta(true)}
-              style={{ padding:'10px 22px', borderRadius:8, border:'1px solid rgba(176,48,216,0.5)', background:'rgba(176,48,216,0.15)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:1 }}>
-              🗺️ Abrir mesa tática
-            </button>
-            <button onClick={() => setMundoAberto(true)}
-              style={{ padding:'10px 22px', borderRadius:8, border:'1px solid rgba(201,168,76,0.5)', background:'rgba(201,168,76,0.12)', color:'var(--gold2)', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:1 }}>
-              🧭 Mapa-múndi
-            </button>
-            <button onClick={() => setBuilder(true)}
-              style={{ padding:'10px 22px', borderRadius:8, border:'1px solid rgba(201,168,76,0.5)', background:'rgba(201,168,76,0.12)', color:'var(--gold2)', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:1 }}>
-              🎭 Construtor de Tokens
-            </button>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))', gap:12, maxWidth:760, width:'100%', marginTop:8 }}>
+            {[
+              { id:'mesa',  onClick:()=>setMesaAberta(true),  emoji:'🗺️', titulo:'Mesa tática',
+                linha:'Imagens, tokens, camadas e névoa, ao vivo para a mesa.',
+                cor:'rgba(176,48,216,0.5)', texto:'#e0c8ff' },
+              { id:'mundi', onClick:()=>setMundoAberto(true), emoji:'🧭', titulo:'Mapa-múndi',
+                linha:'A viagem entre lugares, com relógio, suprimentos e névoa.',
+                cor:'rgba(201,168,76,0.5)', texto:'var(--gold2)' },
+              { id:'token', onClick:()=>setBuilder(true),     emoji:'🎭', titulo:'Construtor de Tokens',
+                linha:'Monte um agente camada por camada e salve na biblioteca.',
+                cor:'rgba(201,168,76,0.5)', texto:'var(--gold2)' },
+            ].map(d => (
+              <button key={d.id} onClick={d.onClick} className="camp-mapa-card"
+                style={{ padding:'18px 16px', borderRadius:10, border:'1px solid var(--border2)',
+                  background:'rgba(255,255,255,0.03)', minHeight:132, textAlign:'left', cursor:'pointer',
+                  display:'flex', flexDirection:'column', gap:8, transition:'border-color .18s ease, background .18s ease' }}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor=d.cor;e.currentTarget.style.background='rgba(255,255,255,0.055)';}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border2)';e.currentTarget.style.background='rgba(255,255,255,0.03)';}}>
+                <span style={{ fontSize:20, lineHeight:1 }} aria-hidden="true">{d.emoji}</span>
+                <span style={{ fontFamily:'Cinzel,serif', fontSize:14, letterSpacing:0.6, color:d.texto }}>{d.titulo}</span>
+                <span style={{ fontFamily:"var(--font-body,'Crimson Pro',serif)", fontSize:13, lineHeight:1.5, color:'var(--muted)' }}>{d.linha}</span>
+              </button>
+            ))}
           </div>
           {flash && (
             <div style={{ marginTop:6, padding:'8px 14px', borderRadius:8, background:'rgba(106,170,122,0.12)', border:'1px solid rgba(106,170,122,0.35)',
@@ -3324,11 +3356,7 @@ function BestiaryTab({ campaignId }) {
   const isOP = sys => sys === 'Ordem Paranormal';
 
   useEffect(() => {
-    const ref = collection(db, 'campaigns', campaignId, 'bestiary');
-    const q   = query(ref, orderBy('createdAt', 'desc'));
-    const unsub = onSnapshot(q, snap => {
-      setCreatures(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+    const unsub = bestiaryRepo.watchByCampaign(campaignId, setCreatures);
     return () => unsub();
   }, [campaignId]);
 
@@ -3374,28 +3402,26 @@ function BestiaryTab({ campaignId }) {
   async function saveCreature() {
     if (!form.name.trim()) return;
     setSaving(true);
-    try {
-      const data = { ...form, name: form.name.trim() };
-      if (modal === 'new') {
-        await addDoc(collection(db, 'campaigns', campaignId, 'bestiary'), { ...data, createdAt: serverTimestamp() });
-      } else {
-        await updateDoc(doc(db, 'campaigns', campaignId, 'bestiary', modal.id), data);
-      }
-      setModal(null);
-    } catch(_) {}
+    const data = { ...form, name: form.name.trim() };
+    // O repo é `silent` e nunca rejeita, então o booleano é o que decide fechar o modal.
+    // Sem ele, uma falha de escrita fecharia o formulário e o mestre perderia o que digitou
+    // — o legado mantinha o modal aberto porque o `setModal(null)` vivia dentro do `try`.
+    const ok = modal === 'new'
+      ? await bestiaryRepo.create(campaignId, data)
+      : await bestiaryRepo.update(campaignId, modal.id, data);
+    if (ok) setModal(null);
     setSaving(false);
   }
 
   async function deleteCreature(id) {
     if (!window.confirm('Remover esta criatura do bestiário?')) return;
-    await deleteDoc(doc(db, 'campaigns', campaignId, 'bestiary', id)).catch((e)=>console.error("[bestiário] remover criatura falhou:", e));
+    await bestiaryRepo.remove(campaignId, id);
   }
 
   async function updateHP(creature, delta) {
-    const max = parseInt(creature.hpMax)||0;
-    const cur = parseInt(creature.hpCurrent != null ? creature.hpCurrent : creature.hpMax)||max;
-    const next = Math.max(0, Math.min(max, cur + delta));
-    await updateDoc(doc(db, 'campaigns', campaignId, 'bestiary', creature.id), { hpCurrent: next }).catch((e)=>console.error("[bestiário] atualizar PV falhou:", e));
+    // O teto/piso de PV é regra de domínio (`clampHp`), não do banco.
+    const next = clampHp(creature, delta);
+    await bestiaryRepo.setHp(campaignId, creature.id, next);
     setViewCreature(v => v && v.id === creature.id ? { ...v, hpCurrent: next } : v);
   }
 
@@ -4325,9 +4351,7 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
   const prevSheetsRef = useRef({});
 
   useEffect(() => {
-    const qy = query(collection(db, "campaigns", campaign.id, "sharedSheets"));
-    return onSnapshot(qy, snap => {
-      const newSheets = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    return sharedSheetsRepo.watchByCampaign(campaign.id, newSheets => {
       const changed = new Set();
       newSheets.forEach(s => {
         const cd = s.characterData || {};
@@ -4348,17 +4372,12 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
         }), 1500);
       }
       setSheets(newSheets);
-    }, () => {});
+    });
   }, [campaign.id]);
 
   const applyElement = async (sheetId, el) => {
     try {
-      await updateDoc(doc(db, "campaigns", campaign.id, "sharedSheets", sheetId), {
-        "characterData.elementoAfinidade": el,
-        "characterData.elementoGmOverride": el === "medo",
-        "characterData.elementoConcedidoPor": el === "medo" ? uid : null,
-        "characterData.elementoEscolhidoEm": Date.now(),
-      });
+      await sharedSheetsRepo.applyElement(campaign.id, sheetId, { elemento: el, uid });
       if (el === "medo") {
         const s = sheets.find(x => x.id === sheetId);
         const nm = s?.characterData?.form?.personagem || s?.userName || "Agente";
@@ -4386,16 +4405,11 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
     if (!text && !narrImage) return;
     const payload = { text, image: narrImage || null, ts: Date.now(), by: userName };
     try {
-      if (testMode) {
-        await updateDoc(doc(db, "campaigns", campaign.id), { narracaoTest: { ...payload, test: true } });
-      } else if (narrTarget === "all") {
-        await updateDoc(doc(db, "campaigns", campaign.id), { narracao: payload });
-      } else {
-        const updates = {};
-        narrTargetIds.forEach(pid => { updates[`narracaoPrivada.${pid}`] = payload; });
-        if (Object.keys(updates).length > 0) await updateDoc(doc(db, "campaigns", campaign.id), updates);
-      }
-    } catch(e) { console.error(e); }
+      await campaignsRepo.setNarracao(campaign.id, payload, {
+        testMode,
+        targetIds: (!testMode && narrTarget !== "all") ? narrTargetIds : undefined,
+      });
+    } catch(e) { console.error("[narração] envio falhou:", e); }
     setNarr(""); setNarrImage(""); setNarrSent(true); setTimeout(() => setNarrSent(false), 2500);
   };
 
@@ -4416,7 +4430,9 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
   const liveSheets = sheets.filter(s => s.isLive);
 
   return (
-    <div className="fade" style={{ overflowY: "auto", paddingRight: 4, display: "flex", flexDirection: "column", gap: 16 }}>
+    /* Os dois cartões paravam em 821 px cada e deixavam 519 px de preto embaixo.
+       Com teto de 1280 eles distribuem a largura em vez de sobrar dela. */
+    <div className="fade" style={{ overflowY: "auto", minHeight: 0, paddingRight: 4, paddingBottom: 28, maxWidth: 1280, width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
 
       {/* ── MESA AO VIVO ── */}
       {liveSheets.length > 0 && (
@@ -4831,6 +4847,14 @@ function NarracaoOverlay({ campaign, uid, isMaster }) {
   );
 }
 
+/* ── O HERO DE DUAS ALTURAS ────────────────────────────────────────────
+   A capa é ambientação: ela diz "esta campanha é este lugar". Nas abas em que
+   o mestre TRABALHA (Mapas, Mestre, Bestiário, Gerenciar) ela não entrega uma
+   única informação que o título de 15 px não entregue — e cobra 200 px de tela
+   por isso, em todo viewport. Nessas abas ela encolhe para uma faixa de 64 px
+   (56 no celular) e vira textura; nas outras continua alta. */
+const ABAS_DE_TRABALHO = new Set(["map", "mestre", "bestiary", "settings"]);
+
 function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack }) {
   const [activeTab, setActiveTab] = useState("chat");
   const [showInvite, setShowInvite] = useState(false);
@@ -4843,16 +4867,80 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
   // pill deslizante nas abas — mesmo padrão do Sidebar/ficha OP (spec 0022 AC-5)
   const tabsPill = useSlidingPill(activeTab);
 
+  /* ── A ALTURA ÚTIL, MEDIDA ────────────────────────────────────────────
+     O `calc(100vh - 136px)` que morava aqui era um número inventado: sobrepunha
+     11 px do rodapé em 1920×1080 e enfiava 8 px por baixo da barra inferior em
+     390×844. Só que passar para `flex:1` puro também não resolve — a coluna do
+     shell é `minHeight:100vh`, nunca `height`, então NENHUM ancestral tem altura
+     definida e o `flex:1` cai de volta no conteúdo (o palco crescia até 2456 px).
+     Então medimos: onde esta caixa começa, e o que ainda precisa caber embaixo
+     dela (padding do `main`, barra de música, nav do celular, rodapé). É a mesma
+     conta do 136, com a diferença de ser verdade em qualquer viewport e refeita
+     quando qualquer uma das peças muda de tamanho. */
+  const raizRef = useRef(null);
+  const [alturaUtil, setAlturaUtil] = useState(null);
+  useLayoutEffect(() => {
+    const el = raizRef.current;
+    if (!el || typeof window === "undefined") return undefined;
+    const medir = () => {
+      const topo = el.getBoundingClientRect().top;
+      const main = el.closest("main");
+      let abaixo = 0;
+      if (main) {
+        abaixo += parseFloat(getComputedStyle(main).paddingBottom) || 0;
+        let irmao = main.nextElementSibling;
+        while (irmao) {
+          const r = irmao.getBoundingClientRect();
+          if (getComputedStyle(irmao).position !== "fixed") abaixo += r.height;
+          irmao = irmao.nextElementSibling;
+        }
+      }
+      const util = Math.round(window.innerHeight - topo - abaixo);
+      setAlturaUtil(Number.isFinite(util) && util > 320 ? util : null);
+    };
+    medir();
+    window.addEventListener("resize", medir);
+    let ro;
+    if (typeof ResizeObserver === "function" && el.closest("main")?.parentElement) {
+      ro = new ResizeObserver(medir);
+      ro.observe(el.closest("main").parentElement);
+    }
+    return () => { window.removeEventListener("resize", medir); if (ro) ro.disconnect(); };
+  }, []);
+
+  /* ── A faixa de abas transborda? ──────────────────────────────────────
+     Em 390 px ela tem 906 px de conteúdo em 350 de janela: 5 das 8 abas
+     ficam fora, sem seta, sem sombra, sem indicador. A esmaecida da borda
+     só faz sentido quando há mesmo algo escondido — daí a medida. */
+  const [temMaisAbas, setTemMaisAbas] = useState(false);
+  useEffect(() => {
+    const el = tabsPill.containerRef.current;
+    if (!el) return undefined;
+    const medir = () => setTemMaisAbas(el.scrollWidth > el.clientWidth + 4);
+    medir();
+    if (typeof ResizeObserver !== "function") return undefined;
+    const ro = new ResizeObserver(medir);
+    ro.observe(el);
+    return () => ro.disconnect();
+    // `isMaster`/`isAdmin` mudam a QUANTIDADE de abas — e por isso o transbordo.
+  }, [tabsPill.containerRef, isMaster, isAdmin]);
+
+  /* Trocar de aba pelo teclado (ou por código) não pode deixar a aba ativa
+     fora da vista — o realce correria para um lugar que ninguém vê. */
+  useEffect(() => {
+    const el = tabsPill.containerRef.current?.querySelector('[data-ativa="1"]');
+    if (!el?.scrollIntoView) return;
+    const parado = typeof window !== "undefined" && window.matchMedia
+      ? window.matchMedia("(prefers-reduced-motion:reduce)").matches : true;
+    el.scrollIntoView({ inline:"center", block:"nearest", behavior: parado ? "auto" : "smooth" });
+  }, [activeTab, tabsPill.containerRef]);
+
   /* ── Live-sync: always push character changes to sharedSheets regardless of active tab ── */
   const liveSheetsRef = useRef([]);
   useEffect(() => {
-    const q = query(collection(db, "campaigns", campaign.id, "sharedSheets"));
-    const unsub = onSnapshot(q, snap => {
-      liveSheetsRef.current = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .filter(s => s.ownerId === uid && s.isLive);
+    return sharedSheetsRepo.watchByCampaign(campaign.id, list => {
+      liveSheetsRef.current = list.filter(s => s.ownerId === uid && s.isLive);
     });
-    return unsub;
   }, [campaign.id, uid]);
 
   useEffect(() => {
@@ -4860,10 +4948,7 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
     liveSheetsRef.current.forEach(sheet => {
       const char = characters.find(c => String(c.id || c.createdAt) === sheet.characterId);
       if (!char) return;
-      updateDoc(doc(db, "campaigns", campaign.id, "sharedSheets", sheet.id), {
-        characterData: char,
-        characterName: char.form?.personagem || "Sem nome",
-      }).catch(console.error);
+      sharedSheetsRepo.updateCharacterData({ campaignId: campaign.id, sheetId: sheet.id }, char);
     });
   }, [characters]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -4878,7 +4963,7 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
   };
 
   const confirmCoverUpload = async (img) => {
-    try { await updateDoc(doc(db, "campaigns", campaign.id), { coverImage: img }); } catch(_) {}
+    try { await campaignsRepo.update(campaign.id, { coverImage: img }); } catch(e) { console.error("[campanha] salvar capa falhou:", e); }
     setCoverPreview(null);
   };
 
@@ -4900,6 +4985,9 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
   const SvgMap      = ()=><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>;
   const SvgBestiary = ()=><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2c-1.5 0-2.8.6-3.7 1.6C7 4.8 6 4.5 5 5c-.5.3-.8.8-.8 1.4 0 .4.1.8.4 1.1C3.6 8.3 3 9.6 3 11c0 1.2.4 2.3 1 3.2-.6.5-1 1.2-1 2 0 .6.2 1.1.5 1.6C3.9 18.7 5 19.5 6.3 20c1 .4 2.4.7 3.7.8V22h4v-1.2c1.3-.1 2.7-.4 3.7-.8 1.3-.5 2.4-1.3 2.8-2.2.3-.5.5-1 .5-1.6 0-.8-.4-1.5-1-2 .6-.9 1-2 1-3.2 0-1.4-.6-2.7-1.6-3.5.3-.3.4-.7.4-1.1 0-.6-.3-1.1-.8-1.4-1-.5-2-.2-3.3-.4C14.8 2.6 13.5 2 12 2z"/><path d="M9 11c0 .6-.4 1-1 1s-1-.4-1-1 .4-1 1-1 1 .4 1 1z" fill="currentColor" stroke="none"/><path d="M17 11c0 .6-.4 1-1 1s-1-.4-1-1 .4-1 1-1 1 .4 1 1z" fill="currentColor" stroke="none"/><path d="M9.5 15.5s.8 1 2.5 1 2.5-1 2.5-1"/><path d="M7 8.5c.5-.8 1.5-1 2.5-.5"/><path d="M17 8.5c-.5-.8-1.5-1-2.5-.5"/></svg>;
 
+  const heroCompacto = ABAS_DE_TRABALHO.has(activeTab);
+  const alturaHero   = heroCompacto ? 64 : (campaign.coverImage ? 168 : 96);
+
   const tabs = [
     { id:"chat",     label:"Chat",      svg:<SvgChat/> },
     { id:"sheets",   label:"Agentes",   svg:<SvgSparkle/> },
@@ -4915,21 +5003,36 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
     <>
     {coverPreview && <CoverPreviewModal image={coverPreview} onConfirm={confirmCoverUpload} onClose={()=>setCoverPreview(null)}/>}
     <NarracaoOverlay campaign={campaign} uid={uid} isMaster={isMaster}/>
-    <div className="fade" style={{display:"flex",flexDirection:"column",height:"calc(100vh - 136px)",minHeight:400,gap:0}}>
+    {/* A altura vem do FLUXO, não de aritmética: o `main` já é uma coluna flex
+        com altura definida (viewport − topbar − rodapé − barra de música). O
+        antigo `calc(100vh - 136px)` era um número chutado — sobrepunha 11 px do
+        rodapé no desktop e enfiava 8 px por baixo da barra inferior no celular. */}
+    <div ref={raizRef} className="fade camp-root" style={{display:"flex",flexDirection:"column",flex:1,minHeight:0,gap:0,
+      height:alturaUtil ?? undefined, maxHeight:alturaUtil ?? undefined}}>
 
       {/* ── Banner de capa (hero) ──
           As ações moram AQUI, como overlays discretos — a barra de botões que
           duplicava abas (Adicionar Agentes → aba Agentes, Editar Campanha →
           aba Gerenciar) foi removida: navegação só pelas abas, ações só no hero. */}
       <input ref={coverInputRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>e.target.files?.[0]&&handleCoverUpload(e.target.files[0])}/>
-      <div style={{position:"relative",width:"100%",height:campaign.coverImage?200:110,borderRadius:12,overflow:"hidden",flexShrink:0,
+      {/* Compacto, o hero deixa de ser duas faixas sobrepostas e vira UMA linha
+          flex: as duas linhas absolutas passam a `position:static` e se ordenam
+          — voltar/capa/ajustar, depois título, depois convidar. É o que resolve
+          a colisão medida entre "← VOLTAR" e o nome da campanha em 390 px. */}
+      <div className="camp-hero" data-compacto={heroCompacto?1:0}
+        style={{position:"relative",width:"100%",height:alturaHero,borderRadius:12,overflow:"hidden",flexShrink:0,
+        display:heroCompacto?"flex":"block",alignItems:"center",gap:8,padding:heroCompacto?"0 12px":0,
+        transition:"height .22s cubic-bezier(.22,1,.36,1)",
         border:"1px solid rgba(176,48,216,0.18)",
         background:campaign.coverImage?"transparent":"radial-gradient(120% 160% at 20% 0%,rgba(176,48,216,0.22),rgba(176,48,216,0.03) 60%),linear-gradient(180deg,rgba(20,14,26,0.9),rgba(10,8,14,0.95))"}}>
-        {campaign.coverImage && <img src={campaign.coverImage} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>}
-        <div style={{position:"absolute",inset:0,background:"linear-gradient(to bottom,rgba(0,0,0,0.28) 0%,rgba(0,0,0,0.10) 34%,rgba(0,0,0,0.78) 100%)"}}/>
+        {campaign.coverImage && <img className="camp-hero-img" src={campaign.coverImage} alt=""
+          style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",display:"block",
+            opacity:heroCompacto?0.4:1,transition:"opacity .22s ease"}}/>}
+        <div style={{position:"absolute",inset:0,background:"linear-gradient(to bottom,rgba(0,0,0,0.28) 0%,rgba(0,0,0,0.10) 34%,rgba(0,0,0,0.78) 100%)",pointerEvents:"none"}}/>
 
         {/* topo: voltar (esq) + ações do mestre (dir) */}
-        <div style={{position:"absolute",top:10,left:12,right:12,display:"flex",alignItems:"center",gap:8,zIndex:2}}>
+        <div className="camp-hero-topo" style={{position:heroCompacto?"static":"absolute",order:0,flexShrink:0,
+          top:10,left:12,right:12,display:"flex",alignItems:"center",gap:8,zIndex:2}}>
           <button onClick={onBack} title="Voltar às campanhas" style={{
             display:"flex",alignItems:"center",gap:6,
             background:"rgba(0,0,0,0.5)",border:"1px solid rgba(255,255,255,0.16)",borderRadius:8,cursor:"pointer",
@@ -4966,13 +5069,14 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
         </div>
 
         {/* base: título + meta (esq) e CTA convidar (dir) */}
-        <div style={{position:"absolute",bottom:14,left:16,right:16,display:"flex",alignItems:"flex-end",gap:12,zIndex:2}}>
+        <div className="camp-hero-base" style={{position:heroCompacto?"static":"absolute",order:1,flex:heroCompacto?1:undefined,minWidth:0,
+          bottom:14,left:16,right:16,display:"flex",alignItems:heroCompacto?"center":"flex-end",gap:12,zIndex:2}}>
           <div style={{flex:1,minWidth:0}}>
-            <div style={{fontFamily:"'Cinzel Decorative',serif",fontSize:"clamp(19px,2.6vw,26px)",color:"#fff",lineHeight:1.15,
+            <div className="camp-hero-titulo" style={{fontFamily:"'Cinzel Decorative',serif",fontSize:heroCompacto?15:"clamp(19px,2.6vw,26px)",color:"#fff",lineHeight:1.15,
               textShadow:"0 2px 10px rgba(0,0,0,0.7)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
               {campaign.name}
             </div>
-            <div style={{display:"flex",alignItems:"center",gap:6,marginTop:6,flexWrap:"wrap"}}>
+            <div className="camp-hero-chips" style={{display:heroCompacto?"none":"flex",alignItems:"center",gap:6,marginTop:6,flexWrap:"wrap"}}>
               {campaign.system&&(
                 <span style={{fontFamily:"Cinzel,serif",fontSize:8.5,letterSpacing:1.2,color:"rgba(255,222,120,0.95)",textTransform:"uppercase",
                   padding:"3px 9px",background:"rgba(0,0,0,0.45)",border:"1px solid rgba(255,220,100,0.28)",borderRadius:20,backdropFilter:"blur(4px)"}}>
@@ -4991,7 +5095,10 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
               )}
             </div>
           </div>
-          <button onClick={()=>setShowInvite(v=>!v)} title="Mostrar o código de convite"
+          {/* Compacto, os chips somem — o contador de jogadores, que era o único
+              deles com informação viva, continua legível aqui no `title`. */}
+          <button onClick={()=>setShowInvite(v=>!v)}
+            title={`Mostrar o código de convite · ${campaign.members?.length||1}/${campaign.maxPlayers||6} jogadores`}
             style={{display:"flex",alignItems:"center",gap:7,flexShrink:0,
               background:showInvite?"rgba(176,48,216,0.5)":"linear-gradient(135deg,rgba(176,48,216,0.55),rgba(120,30,180,0.55))",
               border:"1px solid rgba(200,140,255,0.5)",borderRadius:9,cursor:"pointer",
@@ -5031,20 +5138,31 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
 
       {/* ── Tabs (pill deslizante — um único realce corre até a aba ativa) ── */}
       <div ref={tabsPill.containerRef} style={{display:"flex",gap:2,borderBottom:"1px solid var(--border)",flexShrink:0,marginTop:12,position:"relative",
-        overflowX:"auto",scrollbarWidth:"none",WebkitOverflowScrolling:"touch"}}>
+        overflowX:"auto",scrollbarWidth:"none",WebkitOverflowScrolling:"touch",scrollSnapType:"x proximity",
+        /* 5 de 8 abas ficavam fora da tela em 390 px sem nenhum sinal de que
+           havia mais. A esmaecida na borda direita é esse sinal — e só existe
+           quando de fato há aba escondida (`temMaisAbas`). */
+        ...(temMaisAbas ? {
+          maskImage:"linear-gradient(to right,#000 0,#000 calc(100% - 28px),transparent 100%)",
+          WebkitMaskImage:"linear-gradient(to right,#000 0,#000 calc(100% - 28px),transparent 100%)",
+        } : {})}}>
         <SlidingTabPill pill={tabsPill.pill} radius={8} background="rgba(176,48,216,0.14)" underline="#b030d8"/>
         {tabs.map(tab=>{
           const active = activeTab===tab.id;
           return (
-            <button key={tab.id} ref={tabsPill.setItemRef(tab.id)} onClick={()=>setActiveTab(tab.id)} style={{
-              padding:"11px 15px",border:"none",cursor:"pointer",flexShrink:0,background:"transparent",
+            /* 13px de padding = 44 px de alvo (a regra da casa, `Atelier/ui.js`
+               → HIT.mobile). E 0,52 de opacidade em vez de 0,42: sobre #14141c
+               o rótulo inativo saía em 4,10:1 — reprovado. Agora dá 5,63:1. */
+            <button key={tab.id} ref={tabsPill.setItemRef(tab.id)} onClick={()=>setActiveTab(tab.id)}
+              data-ativa={active?1:0} style={{
+              padding:"13px 15px",border:"none",cursor:"pointer",flexShrink:0,background:"transparent",
               fontFamily:"Cinzel,serif",fontSize:11.5,letterSpacing:"0.08em",textTransform:"uppercase",
-              color: active ? "#e8d4ff" : "rgba(255,255,255,0.42)",
+              color: active ? "#e8d4ff" : "rgba(255,255,255,0.52)",
               transition:"color 0.2s",display:"flex",alignItems:"center",gap:7,
-              position:"relative",zIndex:1,
+              position:"relative",zIndex:1,scrollSnapAlign:"center",
             }}
-              onMouseEnter={e=>{if(!active)e.currentTarget.style.color="rgba(255,255,255,0.75)";}}
-              onMouseLeave={e=>{e.currentTarget.style.color=active?"#e8d4ff":"rgba(255,255,255,0.42)";}}>
+              onMouseEnter={e=>{if(!active)e.currentTarget.style.color="rgba(255,255,255,0.82)";}}
+              onMouseLeave={e=>{e.currentTarget.style.color=active?"#e8d4ff":"rgba(255,255,255,0.52)";}}>
               <span style={{opacity: active ? 1 : 0.55, display:"flex", alignItems:"center"}}>{tab.svg}</span>
               {tab.label}
             </button>
@@ -5053,7 +5171,7 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
       </div>
 
       {/* ── Conteúdo ── */}
-      <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column",paddingTop:10}}>
+      <div style={{flex:1,minHeight:0,overflow:"hidden",display:"flex",flexDirection:"column",paddingTop:14}}>
         {activeTab==="chat"     && <CampaignChat campaignId={campaign.id} uid={uid} userName={userName} userPhoto={userPhoto} isMaster={isMaster}/>}
         {activeTab==="sheets"   && <SharedSheetsPanel campaignId={campaign.id} uid={uid} userName={userName} isMaster={isMaster} characters={characters}/>}
         {activeTab==="rolls"    && <RollFeed campaignId={campaign.id} uid={uid}/>}
@@ -5258,11 +5376,10 @@ function UpgradeModal({ onClose, onGoToPlans }) {
 /* ═══════════════════════════════
    DASHBOARD
 ═══════════════════════════════ */
-function Dashboard({ system, onCreateChar, characters, sessions, onSelectChar, onNav, userPlans = [], onShowUpgrade }) {
+function Dashboard({ system, onCreateChar, characters, sessions, onSelectChar, onNav, userPlans = [], onShowUpgrade, campaignCount = 0 }) {
   const locale = useLocale();
   const sT = locale.t;
   const accent = system?.accent || "var(--gold)";
-  const accentText = system?.accentText || system?.accent || "var(--gold)";
   const isSubscribed = userPlans.includes(system?.id);
   const charLimit = isSubscribed ? 5 : 1;
 
@@ -5270,179 +5387,169 @@ function Dashboard({ system, onCreateChar, characters, sessions, onSelectChar, o
     c.systemId === system?.id || (!c.systemId && system?.id === 'op')
   );
 
-  const SvgScroll  = ({c})=><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>;
-  const SvgMapPin  = ({c})=><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>;
-  const SvgClock   = ({c})=><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
+  const atLimit = sysChars.length >= charLimit;
 
-  /* "Sessões com IA" removido a pedido do Andre (2026-07-25) — 3 atalhos restantes */
+  /* ── Faixa de números ──
+     Antes eram três cards com ícone colorido dentro de um quadrado colorido:
+     "Fichas criadas", "Mapas: 0" e "Horas jogadas: 0h". Os dois últimos eram
+     literais fixos no código — nunca contaram nada. Número inventado em painel
+     é o cheiro mais forte de tela feita por IA: parece dado, não é. Ficaram só
+     os três que saem de estado real, e viraram blocos chapados separados por
+     filete, sem quadradinho de ícone e sem uma cor por card. */
   const stats = [
-    { label:"Fichas Criadas", val: String(sysChars.length), svg:<SvgScroll c={accent}/>,   color: accent,   nav:"sheet", hint:"Ver fichas" },
-    { label:"Mapas",          val: "0",                     svg:<SvgMapPin c="#7a9ed4"/>,   color:"#7a9ed4", nav:"map",   hint:"Abrir mapas" },
-    { label:"Horas Jogadas",  val: "0h",                    svg:<SvgClock  c="#6aaa7a"/>,   color:"#6aaa7a", nav:"party", hint:"Ver campanhas" },
+    { label:"Fichas",    val: String(sysChars.length),  nav:"sheet", hint:"Ver todas as fichas" },
+    { label:"Campanhas", val: String(campaignCount),    nav:"party", hint:"Ver campanhas" },
+    { label:"Sessões",   val: String(sessions?.length ?? 0), nav:"party", hint:"Ver campanhas" },
   ];
 
-  /* ── Empty state helpers ── */
-  const EmptyChars = () => (
-    <div style={{
-      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-      minHeight:180, padding:"28px 20px", gap:12, textAlign:"center",
-      background:"radial-gradient(ellipse at center, rgba(201,168,76,0.06) 0%, var(--card) 70%)",
-      border:"1px dashed rgba(201,168,76,0.18)", borderRadius:8,
-    }}>
-      <div style={{opacity:0.35, color:"var(--gold)"}}><svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></div>
-      <div style={{fontFamily:"Cinzel,serif", fontSize:12, letterSpacing:"0.08em", color:"var(--muted)", textTransform:"uppercase"}}>
-        Nenhum personagem criado
-      </div>
-      <div style={{fontFamily:"Crimson Pro,serif", fontSize:16, color:"var(--muted)", fontStyle:"italic", maxWidth:280}}>
-        Crie sua primeira ficha de agente e ela aparecerá aqui.
-      </div>
-      <button className="btn-gold" onClick={onCreateChar}>
-        + Criar Primeiro Agente
-      </button>
-    </div>
-  );
+  /* Trilho da direita: o painel terminava por volta dos 600px e deixava um
+     terço da tela vazio. Estes blocos ocupam a coluna estreita com contexto
+     real (limite do plano, atalhos das ferramentas) em vez de esticar os
+     cards de cima para preencher o buraco. */
+  const atalhos = [
+    { id:"master", t:"Ajudante do Mestre", d:"Wiki, grafo e diário do seu mundo" },
+    { id:"map",    t:"Mapas",              d:"Mesas táticas e mapas-múndi" },
+    { id:"music",  t:"Trilhas Sonoras",    d:"Ambientação para cada cena" },
+  ];
 
   return (
-    <div className="fade" style={{display:"flex", flexDirection:"column", gap:24}}>
+    <div className="fade nx-page">
 
-      {/* ── Hero unificado ──
-          O banner do sistema e o header "Bem-vindo" viviam empilhados e o
-          subtítulo repetia o nome do sistema (ORDEM PARANORMAL 2×). Agora é um
-          bloco único: identidade à esquerda, o ÚNICO CTA primário à direita. */}
-      <div style={{
-        position:"relative", overflow:"hidden",
-        padding:"22px 24px",
-        background:`radial-gradient(130% 200% at 0% 0%, ${system?.accent}1c, transparent 55%), linear-gradient(180deg, rgba(255,255,255,0.02), transparent)`,
-        border:`1px solid ${system?.accent}30`,
-        borderRadius:12, display:"flex", alignItems:"center", gap:18, flexWrap:"wrap",
-      }}>
-        <div aria-hidden="true" style={{
-          width:56, height:56, borderRadius:14, flexShrink:0, fontSize:28,
-          background:`${system?.accent}14`, border:`1px solid ${system?.accent}38`,
-          display:"flex", alignItems:"center", justifyContent:"center",
-          boxShadow:`0 0 18px ${system?.accent}22`,
-        }}>{system?.svgIcon ? system.svgIcon(false) : system?.icon}</div>
-        <div style={{flex:1, minWidth:220}}>
-          <div style={{fontFamily:"Cinzel,serif", fontSize:11, letterSpacing:"0.14em", color:"var(--muted)", textTransform:"uppercase", marginBottom:5}}>
-            {sT("dashboard.welcome")}
-          </div>
-          <div style={{display:"flex", alignItems:"center", gap:12, flexWrap:"wrap"}}>
-            <h1 style={{fontFamily:"'Cinzel Decorative',serif", fontSize:"clamp(20px,2.4vw,26px)", fontWeight:700, lineHeight:1.15,
-              background:`linear-gradient(135deg,${accent},#e8c96d)`,
-              WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", backgroundClip:"text"}}>{system?.name}</h1>
-            {/* Subscription seal — shimmering gold when PRO, static when free (AC-4) */}
-            <span className={isSubscribed ? "nx-shimmer" : ""}
-              title={isSubscribed ? "Assinante deste sistema" : "Plano gratuito — assine para desbloquear"}
-              style={{
-                display:"inline-flex", alignItems:"center", gap:5, flexShrink:0,
-                padding:"4px 11px", borderRadius:20,
-                fontFamily:"Cinzel,serif", fontSize:9, fontWeight:700,
-                letterSpacing:"0.14em", textTransform:"uppercase",
-                background: isSubscribed ? "linear-gradient(135deg,#c9a84c,#e8c96d)" : "rgba(255,255,255,0.05)",
-                color: isSubscribed ? "#1a1410" : "var(--muted)",
-                border: isSubscribed ? "none" : "1px solid var(--border2)",
-                boxShadow: isSubscribed ? "0 2px 12px rgba(201,168,76,0.4)" : "none",
-              }}>
-              {isSubscribed ? "★ Pro" : "Livre"}
-            </span>
-          </div>
-          {system?.desc && (
-            <div style={{fontFamily:"Crimson Pro,serif", fontSize:15, color:"var(--muted2)", fontStyle:"italic", marginTop:6, maxWidth:520, lineHeight:1.45}}>
-              {system.desc}
-            </div>
-          )}
+      {/* ── Cabeçalho ──
+          Era um "herói" de 100px: caixa com borda de acento, brilho radial no
+          fundo, quadrado com ícone e sombra, título em degradê roxo→dourado,
+          selo de plano e um botão. Cinco tratamentos visuais para dizer o nome
+          do sistema — que a barra lateral e a topbar JÁ diziam. Vira o mesmo
+          cabeçalho de todas as outras telas: sobrancelha, título, subtítulo,
+          filete. A identidade do sistema vive na migalha da topbar. */}
+      <div className="nx-head">
+        <div className="nx-head-txt">
+          <div className="nx-eyebrow">{sT("dashboard.welcome")}</div>
+          <h1 className="nx-h1">Painel</h1>
+          {system?.desc && <p className="nx-sub">{system.desc}</p>}
         </div>
-        <button
-          className="btn-gold"
-          style={{flexShrink:0, opacity: sysChars.length >= charLimit ? 0.45 : 1, cursor: sysChars.length >= charLimit ? "not-allowed" : "pointer"}}
-          onClick={() => {
-            if (sysChars.length >= charLimit) { onShowUpgrade?.(); }
-            else onCreateChar();
-          }}
-          title={sysChars.length >= charLimit ? (!isSubscribed ? "Assine o plano deste sistema para criar mais fichas." : `Limite de ${charLimit} fichas atingido`) : ""}
-        >
-          {sysChars.length >= charLimit
-            ? (!isSubscribed ? "⚡ Ver Planos" : `Limite atingido (${charLimit}/${charLimit})`)
-            : `+ Nova Ficha`}
-        </button>
+        <div className="nx-head-actions">
+          {/* Selo de plano: informação, não enfeite — vira texto ao lado do
+              botão em vez de uma pílula com degradê e sombra dourada. */}
+          <span title={isSubscribed ? "Assinante deste sistema" : "Plano gratuito"}
+            style={{fontFamily:"Cinzel,serif", fontSize:9.5, letterSpacing:"0.14em",
+              textTransform:"uppercase", color: isSubscribed ? "var(--gold)" : "var(--muted)"}}>
+            {isSubscribed ? "✦ Pro" : "Livre"}
+          </span>
+          <button
+            className="btn-gold"
+            style={{opacity: atLimit ? 0.45 : 1, cursor: atLimit ? "not-allowed" : "pointer"}}
+            onClick={() => { if (atLimit) onShowUpgrade?.(); else onCreateChar(); }}
+            title={atLimit ? (!isSubscribed ? "Assine o plano deste sistema para criar mais fichas." : `Limite de ${charLimit} fichas atingido`) : ""}
+          >
+            {atLimit ? (!isSubscribed ? "Ver planos" : `Limite ${charLimit}/${charLimit}`) : "+ Nova ficha"}
+          </button>
+        </div>
       </div>
 
-      {/* Stats — atalhos horizontais: número e rótulo na mesma linha de leitura,
-          seta à direita deixa claro que o card navega (affordance de clique) */}
-      <div className="dash-stats">
-        {stats.map((s,i)=>(
-          <button key={s.label} className="stat-card" title={s.hint}
-            onClick={()=>onNav && onNav(s.nav)}
-            style={{
-              background:"var(--card)", border:"1px solid var(--border)",
-              borderRadius:10, padding:"14px 16px", textAlign:"left", cursor:"pointer",
-              display:"flex", alignItems:"center", gap:14, minHeight:72,
-              animation:`statCardIn 0.4s ease ${i*0.08}s both`,
-            }}>
-            <div aria-hidden="true" style={{
-              width:44, height:44, borderRadius:11, flexShrink:0,
-              background:`${s.color}16`, border:`1px solid ${s.color}38`,
-              display:"flex", alignItems:"center", justifyContent:"center",
-            }}>{s.svg}</div>
-            <div style={{flex:1, minWidth:0}}>
-              <div style={{fontFamily:"'Cinzel Decorative',serif", fontSize:"1.55rem", color:s.color, lineHeight:1.05, fontVariantNumeric:"tabular-nums"}}>{s.val}</div>
-              <div style={{fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:"0.1em", color:"var(--muted)", textTransform:"uppercase", marginTop:4}}>{s.label}</div>
-            </div>
-            <span aria-hidden="true" style={{color:s.color, opacity:0.4, fontSize:14, flexShrink:0}}>→</span>
+      {/* Números — chapados, separados por filete vertical */}
+      <div className="nx-stats">
+        {stats.map((s)=>(
+          <button key={s.label} className="nx-stat" title={s.hint} onClick={()=>onNav && onNav(s.nav)}>
+            <span className="nx-stat-num">{s.val}</span>
+            <span className="nx-stat-cap">{s.label}</span>
           </button>
         ))}
       </div>
 
-      {/* Characters */}
-      <div>
-        <div style={{fontFamily:"Cinzel,serif", fontSize:14, letterSpacing:"0.08em", color:accentText, textTransform:"uppercase", marginBottom:14}}>
-          Seus Personagens
-        </div>
-        {sysChars.length === 0 ? <EmptyChars/> : (
-          <div style={{display:"flex", flexDirection:"column", gap:10}}>
-            {sysChars.map((c,i)=> system?.id === "op"
-              ? <DossierCard key={i} character={c} systemAccent={system?.accent} onClick={()=>onSelectChar && onSelectChar(c)} />
-              : (
-              <div key={i} style={{
-                background:"var(--card)", border:"1px solid var(--border)", borderRadius:8,
-                padding:"14px 18px", display:"flex", alignItems:"center", gap:16,
-                cursor:"pointer", transition:"border-color 0.2s",
-              }} onClick={()=>onSelectChar && onSelectChar(c)}
-                 onMouseEnter={e=>e.currentTarget.style.borderColor=system?.accent+"60"}
-                 onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border)"}>
-                <div style={{
-                  width:72, height:72, borderRadius:8, flexShrink:0,
-                  background:`${accent}18`, border:`1px solid ${accent}30`,
-                  display:"flex", alignItems:"center", justifyContent:"center", fontSize:30,
-                  overflow:"hidden",
-                }}>
-                  {getActiveAvatar(c)
-                    ? <img src={getActiveAvatar(c)} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
-                    : "🕵️"}
-                </div>
-                <div style={{flex:1, minWidth:0}}>
-                  <div style={{fontFamily:"Cinzel,serif", fontSize:17, color:"var(--text)", marginBottom:4, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
-                    {c.form?.personagem || "Sem nome"}
-                  </div>
-                  <div style={{fontFamily:"Cinzel,serif", fontSize:12, letterSpacing:1, color:"var(--muted)", textTransform:"uppercase"}}>
-                    {c.classe?.name || "—"} · {c.origem?.name || "—"} · {system?.name}
-                  </div>
-                </div>
-                <div style={{display:"flex", flexDirection:"column", gap:4, minWidth:100}}>
-                  <span style={{fontFamily:"Cinzel,serif", fontSize:11, color:"var(--muted)"}}>NEX {c.nex ?? 5}%</span>
-                  <div style={{height:4, background:"rgba(255,255,255,0.06)", borderRadius:2}}>
-                    <div style={{height:"100%", width:`${c.nex ?? 5}%`, background:`linear-gradient(90deg,${system?.accent||"var(--gold3)"},var(--gold))`, borderRadius:2}}/>
-                  </div>
-                </div>
-                <span style={{fontFamily:"Cinzel,serif", fontSize:11, color:accent, opacity:0.5, flexShrink:0}}>→</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* Corpo 2/1 — a lista à esquerda, contexto à direita. */}
+      <div className="nx-split">
 
-      {/* Seção "Últimas Sessões com IA" removida a pedido do Andre (2026-07-25) —
-          os personagens são o conteúdo central do painel */}
+        {/* ── Coluna principal: personagens ── */}
+        <div>
+          <div className="nx-sec">
+            <span className="nx-sec-t">Seus personagens</span>
+            {sysChars.length > 0 && (
+              <button className="nx-sec-a" onClick={()=>onNav && onNav("sheet")}>Ver todas →</button>
+            )}
+          </div>
+
+          {sysChars.length === 0 ? (
+            /* Vazio alinhado à esquerda, com UM caminho. O anterior era um
+               pôster centralizado com ícone de 52px e um segundo botão dourado
+               que disputava com o "+ Nova ficha" do cabeçalho — dois CTAs
+               primários idênticos na mesma tela. */
+            <div className="nx-empty">
+              <div className="nx-empty-t">Nenhum agente ainda</div>
+              <p className="nx-empty-d">
+                A ficha é o ponto de partida: atributos, perícias, inventário e rituais
+                ficam todos nela. Use o botão <em>Nova ficha</em> acima para criar a primeira.
+              </p>
+              <button className="nx-btn" onClick={onCreateChar}>Criar primeiro agente</button>
+            </div>
+          ) : (
+            <div className="nx-list">
+              {sysChars.map((c,i)=> system?.id === "op"
+                ? <DossierCard key={i} character={c} systemAccent={system?.accent} onClick={()=>onSelectChar && onSelectChar(c)} />
+                : (
+                <button key={i} className="nx-row" onClick={()=>onSelectChar && onSelectChar(c)}>
+                  <div style={{
+                    width:44, height:44, borderRadius:4, flexShrink:0,
+                    background:"rgba(255,255,255,0.04)", border:"1px solid var(--border)",
+                    display:"flex", alignItems:"center", justifyContent:"center", fontSize:19,
+                    overflow:"hidden",
+                  }}>
+                    {getActiveAvatar(c)
+                      ? <img src={getActiveAvatar(c)} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                      : "🕵️"}
+                  </div>
+                  <div style={{flex:1, minWidth:0}}>
+                    <div className="nx-row-t">{c.form?.personagem || "Sem nome"}</div>
+                    <div className="nx-row-m">{c.classe?.name || "—"} · {c.origem?.name || "—"}</div>
+                  </div>
+                  <div style={{display:"flex", flexDirection:"column", gap:6, width:104, flexShrink:0}}>
+                    <span style={{fontFamily:"'IBM Plex Mono',monospace", fontSize:10.5, color:"var(--muted)", letterSpacing:"0.04em"}}>
+                      NEX {c.nex ?? 5}%
+                    </span>
+                    {/* filete chapado no lugar do degradê de duas paradas */}
+                    <div style={{height:2, background:"rgba(255,255,255,0.07)"}}>
+                      <div style={{height:"100%", width:`${c.nex ?? 5}%`, background:accent}}/>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Trilho de contexto ── */}
+        <aside className="nx-rail">
+          <div>
+            <div className="nx-sec"><span className="nx-sec-t">Ferramentas</span></div>
+            <div className="nx-list">
+              {atalhos.map(a=>(
+                <button key={a.id} className="nx-row" style={{padding:"12px 8px"}} onClick={()=>onNav && onNav(a.id)}>
+                  <div style={{flex:1, minWidth:0}}>
+                    <div className="nx-row-t" style={{fontSize:13.5}}>{a.t}</div>
+                    <div className="nx-row-m" style={{fontSize:12, whiteSpace:"normal"}}>{a.d}</div>
+                  </div>
+                  <span aria-hidden="true" style={{color:"var(--muted)", fontSize:13, flexShrink:0}}>→</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="nx-sec"><span className="nx-sec-t">Seu plano</span></div>
+            <div className="nx-note">
+              <span className="nx-note-k">FICHAS {sysChars.length}/{charLimit}</span>
+              <span>{isSubscribed
+                ? "Assinatura ativa neste sistema."
+                : "O plano livre permite uma ficha por sistema."}</span>
+            </div>
+            {!isSubscribed && (
+              <button className="nx-sec-a" style={{marginTop:12, padding:0}} onClick={()=>onNav && onNav("planos")}>
+                Ver planos →
+              </button>
+            )}
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }
@@ -5956,68 +6063,57 @@ function Topbar({ screen, system, onChangeSystem, onLogout }) {
   return (
     <>
     <div style={{
-      height:52, background:"var(--surface)", borderBottom:"1px solid var(--border)",
-      display:"flex", alignItems:"center", padding:"0 20px",
+      height:56, background:"var(--surface)", borderBottom:"1px solid var(--border)",
+      display:"flex", alignItems:"center", padding:"0 24px",
       position:"sticky", top:0, zIndex:50, gap:0,
     }}>
 
-      {/* ── Título da página ── */}
-      <div style={{ display:"flex", flexDirection:"column", justifyContent:"center", gap:2, flexShrink:0 }}>
-        <div style={{ fontFamily:"Cinzel,serif", fontSize:8, letterSpacing:"0.2em", color:"var(--gold)", textTransform:"uppercase", lineHeight:1 }}>◈ Nexus RPG</div>
-        <div style={{ fontFamily:"Cinzel,serif", fontSize:13, color:"#e0d8c8", textTransform:"uppercase", letterSpacing:"0.06em", lineHeight:1 }}>{labels[screen]}</div>
-      </div>
-
-      {/* ── Divisor ── */}
-      <div style={{ width:1, height:28, background:"#2a2215", margin:"0 14px", flexShrink:0 }}/>
-
-      {/* ── Seletor de sistema ── */}
-      {system && (
-        <button onClick={onChangeSystem} className="topbar-sys" style={{
-          display:"flex", alignItems:"center", gap:7, cursor:"pointer",
-          padding:"5px 11px", borderRadius:6, flexShrink:0,
-          background:"#110f1a", border:"1px solid rgba(150,80,200,0.35)",
-          fontFamily:"Cinzel,serif", fontSize:10, letterSpacing:"0.12em",
-          color:"#c090e0", textTransform:"uppercase", transition:"border-color 0.2s",
-        }}
-          onMouseEnter={e=>e.currentTarget.style.borderColor="rgba(150,80,200,0.6)"}
-          onMouseLeave={e=>e.currentTarget.style.borderColor="rgba(150,80,200,0.35)"}
-          title="Trocar sistema"
-        >
-          <span style={{display:"flex",alignItems:"center"}}>{system?.svgIcon ? system.svgIcon(false) : system?.icon}</span>
-          <span>{system.name}</span>
-          <span style={{color:"var(--muted)",fontSize:12,transition:"color 0.2s"}}
-            onMouseEnter={e=>e.currentTarget.style.color="var(--gold)"}
-            onMouseLeave={e=>e.currentTarget.style.color="var(--muted)"}
-          >⇄</span>
-        </button>
-      )}
+      {/* ── Migalha de pão: Sistema / Tela ──
+          Antes eram TRÊS elementos de alturas diferentes empilhados na mesma
+          barra de 52px (bloco de título em 2 linhas, filete divisor, e uma
+          "aba" roxa com fundo e borda próprios que estourava a barra e ficava
+          visivelmente desalinhada). Vira uma linha só: o sistema é o primeiro
+          nível da migalha e ele MESMO é o botão de trocar — sem caixa colorida,
+          sem repetir o nome do sistema que a tela já mostra no cabeçalho. */}
+      <nav aria-label="Você está em" style={{
+        display:"flex", alignItems:"center", gap:9, minWidth:0, flexShrink:1,
+      }}>
+        {system && (
+          <>
+            <button onClick={onChangeSystem} className="topbar-sys" title="Trocar de sistema" style={{
+              display:"flex", alignItems:"center", gap:7, cursor:"pointer", minWidth:0,
+              background:"none", border:"none", padding:"4px 2px", borderRadius:4,
+              fontFamily:"Cinzel,serif", fontSize:12, letterSpacing:"0.04em",
+              color:"var(--muted)", transition:"color 0.2s",
+            }}
+              onMouseEnter={e=>e.currentTarget.style.color="var(--text)"}
+              onMouseLeave={e=>e.currentTarget.style.color="var(--muted)"}
+            >
+              <span style={{display:"flex",alignItems:"center",flexShrink:0,opacity:0.85}}>
+                {system?.svgIcon ? system.svgIcon(false) : system?.icon}
+              </span>
+              <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{system.name}</span>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
+                style={{flexShrink:0, opacity:0.5}} aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <span aria-hidden="true" style={{color:"var(--border2)", fontSize:13, flexShrink:0}}>/</span>
+          </>
+        )}
+        <span style={{
+          fontFamily:"Cinzel,serif", fontSize:13, color:"var(--text)",
+          letterSpacing:"0.03em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis",
+        }}>{labels[screen]}</span>
+      </nav>
 
       {/* ── Espaço flexível ── */}
       <div style={{flex:1}}/>
 
-      {/* ── Área direita ── */}
+      {/* ── Área direita ──
+          "Online" (sempre verde) e "✦ Plano Pro" (estático, não clicável) eram
+          enfeite: nenhum dos dois mudava nem levava a lugar nenhum. Enchiam a
+          barra de cor e de filetes divisores. O plano vive no menu do perfil. */}
       <div style={{display:"flex", gap:10, alignItems:"center"}}>
-
-        {/* Status online */}
-        <div style={{display:"flex", gap:5, alignItems:"center"}}>
-          <div style={{width:6,height:6,borderRadius:"50%",background:"#50b464",boxShadow:"0 0 5px #50b464",animation:"pulse 2s infinite"}}/>
-          <span style={{fontFamily:"Cinzel,serif",fontSize:8,letterSpacing:"0.1em",color:"#6ecb82",textTransform:"uppercase"}}>Online</span>
-        </div>
-
-        <div style={{width:1,height:18,background:"#2a2215"}}/>
-
-        {/* Plano Pro */}
-        <div style={{
-          padding:"3px 10px", borderRadius:20, cursor:"default",
-          background:"rgba(180,140,30,0.12)", border:"1px solid rgba(184,150,46,0.35)",
-          fontFamily:"Cinzel,serif", fontSize:8, letterSpacing:"0.15em",
-          color:"#b8962e", textTransform:"uppercase", transition:"border-color 0.2s",
-        }}
-          onMouseEnter={e=>e.currentTarget.style.borderColor="rgba(184,150,46,0.6)"}
-          onMouseLeave={e=>e.currentTarget.style.borderColor="rgba(184,150,46,0.35)"}
-        >✦ Plano Pro</div>
-
-        <div style={{width:1,height:18,background:"#2a2215"}}/>
 
         {/* Sino */}
         <button onClick={()=>{ setMenuOpen(false); setSelectedNews(NEWS_ITEMS[0]); setNotifOpen(true); }} style={{
@@ -10447,7 +10543,7 @@ function MusicScreen({ nowPlaying, onNowPlaying, musicTokens, onMusicTokens, ytP
       setSpPlaylists(items);
       setTab("spotify");
       const uid = auth.currentUser?.uid;
-      if (uid) await fsSetMusicLink(uid, "spotify", { clientId: cid, connectedAt: Date.now() });
+      if (uid) await usersRepo.setMusicLink(uid, "spotify", { clientId: cid, connectedAt: Date.now() });
     } catch (e) {
       setErr("Spotify: " + e.message);
     } finally {
@@ -10481,7 +10577,7 @@ function MusicScreen({ nowPlaying, onNowPlaying, musicTokens, onMusicTokens, ytP
       const items = await ytFetchPlaylists(token);
       setYtPlaylists(items);
       setTab("youtube");
-      if (user?.uid) await fsSetMusicLink(user.uid, "youtube", { email: ytEmail, name: ytName, connectedAt: Date.now() });
+      if (user?.uid) await usersRepo.setMusicLink(user.uid, "youtube", { email: ytEmail, name: ytName, connectedAt: Date.now() });
     } catch (e) {
       if (e.code !== "auth/popup-closed-by-user" && e.code !== "auth/cancelled-popup-request") {
         setErr("YouTube: " + (e.message || "Tente novamente."));
@@ -10518,7 +10614,7 @@ function MusicScreen({ nowPlaying, onNowPlaying, musicTokens, onMusicTokens, ytP
     if (selectedPlaylist?.svc === "youtube") setSelectedPlaylist(null);
     if (nowPlaying?.svc === "youtube") onNowPlaying(null);
     const uid = auth.currentUser?.uid;
-    if (uid) fsDeleteMusicLink(uid, "youtube");
+    if (uid) usersRepo.deleteMusicLink(uid, "youtube");
   };
   const disconnectSP = () => {
     localStorage.removeItem("nx_sp_token"); localStorage.removeItem("nx_sp_exp"); localStorage.removeItem("nx_sp_email");
@@ -10526,7 +10622,7 @@ function MusicScreen({ nowPlaying, onNowPlaying, musicTokens, onMusicTokens, ytP
     if (selectedPlaylist?.svc === "spotify") setSelectedPlaylist(null);
     if (nowPlaying?.svc === "spotify") onNowPlaying(null);
     const uid = auth.currentUser?.uid;
-    if (uid) fsDeleteMusicLink(uid, "spotify");
+    if (uid) usersRepo.deleteMusicLink(uid, "spotify");
   };
 
   /* ── Local MP3 functions ── */
@@ -11546,9 +11642,8 @@ function PublicSheetView({ charId }) {
   const editorToken = urlParams.get("editor");
 
   useEffect(() => {
-    getDoc(doc(db, "publicSheets", charId))
-      .then(snap => {
-        const d = snap.exists() ? snap.data() : null;
+    publicSheetsRepo.get(charId)
+      .then(d => {
         setData(d);
         if (d) { setEditedChar(d); editedCharRef.current = d; }
         setLoading(false);
@@ -11563,7 +11658,7 @@ function PublicSheetView({ charId }) {
     setSubmitState("submitting");
     // flush debounce: forces onUpdate(latest.current) synchronously → updates editedCharRef
     flushSaveRef.current?.();
-    await fsSavePendingEdit(charId, editedCharRef.current || data, editorName.trim());
+    await publicSheetsRepo.savePendingEdit(charId, editedCharRef.current || data, editorName.trim());
     setSubmitState("done");
   };
 
@@ -11742,42 +11837,33 @@ export default function App() {
   });
   const ytPlayerRef        = useRef(null);
   const rollCampaignRef    = useRef(null);
-  const liveSheetRefsRef   = useRef({}); // { characterId: [docRef] }
+  /* { characterId: [{campaignId, sheetId}] } — COORDENADAS, não handles do Firestore.
+     Antes da spec 0029 isto guardava `DocumentReference` cru vindo do snapshot, e a
+     escrita lá embaixo usava a ref direto. Era uma bomba silenciosa: a ref sobrevive à
+     desmontagem do listener que a produziu, então continuava gravável depois que a
+     assinatura já tinha morrido. Agora só atravessa string (AC-3). */
+  const liveSheetRefsRef   = useRef({});
 
   // Global live-sheet tracker — stays active regardless of which screen is open
   const campaignsRef = useRef([]);
   campaignsRef.current = campaigns;
   useEffect(() => {
+    // O repo não emite nada quando não há uid/campanha, então zerar é responsabilidade daqui.
     if (!currentUser?.uid) { liveSheetRefsRef.current = {}; return; }
-    const uid = currentUser.uid;
     const camps = campaignsRef.current;
     if (!camps.length) return;
-    const unsubs = camps.map(camp =>
-      onSnapshot(collection(db, "campaigns", camp.id, "sharedSheets"), snap => {
-        const next = { ...liveSheetRefsRef.current };
-        snap.docs.forEach(d => {
-          const data = d.data();
-          if (data.ownerId !== uid) return;
-          const cId = data.characterId;
-          if (!next[cId]) next[cId] = [];
-          next[cId] = next[cId].filter(r => r.id !== d.id);
-          if (data.isLive) next[cId].push(d.ref);
-          if (!next[cId].length) delete next[cId];
-        });
-        liveSheetRefsRef.current = next;
-      }, () => {})
+    return sharedSheetsRepo.watchLiveRefsByCharacter(
+      camps.map(c => c.id),
+      currentUser.uid,
+      (mapa) => { liveSheetRefsRef.current = mapa; }
     );
-    return () => unsubs.forEach(u => u());
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.uid, campaigns.map(c => c.id).join('|')]);
 
   // Escuta plano em tempo real — ativa automaticamente após PIX pago
   useEffect(() => {
     if (!currentUser) { setUserPlans([]); return; }
-    const unsub = onSnapshot(doc(db, "users", currentUser.uid), snap => {
-      if (snap.exists()) setUserPlans(snap.data().subscribedSystems || []);
-    }, () => {});
-    return unsub;
+    return usersRepo.watchSubscribedSystems(currentUser.uid, setUserPlans);
   }, [currentUser?.uid]);
 
   useEffect(() => {
@@ -11908,7 +11994,7 @@ export default function App() {
   const handleLoadPendingEdits = () => {
     if (!createdChar?.public) return;
     const cId = String(createdChar.id || createdChar.createdAt);
-    fsGetPendingEdits(cId).then(setPendingEdits);
+    publicSheetsRepo.listPendingEdits(cId).then(setPendingEdits);
   };
   const handleApprovePendingEdit = async (edit, mergedChar) => {
     if (!createdChar) return;
@@ -11917,14 +12003,14 @@ export default function App() {
     const final = mergedChar ? { ...mergedChar, ...keep } : { ...createdChar, ...edit.proposedData, ...keep };
     setCreatedChar(final);
     saveCharacter(final);
-    fsSavePublicSheet(cId, final, currentUser?.uid);
-    await fsResolvePendingEdit(cId, edit.id, "approved");
+    publicSheetsRepo.save(cId, final, currentUser?.uid);
+    await publicSheetsRepo.resolvePendingEdit(cId, edit.id, "approved");
     setPendingEdits(prev => prev.filter(e => e.id !== edit.id));
   };
   const handleRejectPendingEdit = async (edit) => {
     if (!createdChar) return;
     const cId = String(createdChar.id || createdChar.createdAt);
-    await fsResolvePendingEdit(cId, edit.id, "rejected");
+    await publicSheetsRepo.resolvePendingEdit(cId, edit.id, "rejected");
     setPendingEdits(prev => prev.filter(e => e.id !== edit.id));
   };
 
@@ -11954,14 +12040,11 @@ export default function App() {
         setCreatedChar(updated);
         saveCharacter(updated);
         const cId = String(updated.id || updated.createdAt);
-        if (updated.public) fsSavePublicSheet(cId, updated, currentUser?.uid);
-        else fsRemovePublicSheet(cId);
+        if (updated.public) publicSheetsRepo.save(cId, updated, currentUser?.uid);
+        else publicSheetsRepo.remove(cId);
         // Sync to live sharedSheets via global ref (always active)
-        (liveSheetRefsRef.current[cId] || []).forEach(ref =>
-          updateDoc(ref, {
-            characterData: updated,
-            characterName: updated.form?.personagem || "Sem nome",
-          }).catch(console.error)
+        (liveSheetRefsRef.current[cId] || []).forEach(coord =>
+          sharedSheetsRepo.updateCharacterData(coord, updated)
         );
       };
       const sheetFallback = (
@@ -11999,7 +12082,7 @@ export default function App() {
       );
     }
     switch(screen){
-      case "dashboard": return <Dashboard system={activeSystem} onCreateChar={()=>setCreatingChar(true)} characters={characters} sessions={sessions} onSelectChar={c=>{ setCreatedChar(c); setScreen("sheet"); }} onNav={setScreen} userPlans={userPlans} onShowUpgrade={()=>setScreen("planos")}/>;
+      case "dashboard": return <Dashboard system={activeSystem} onCreateChar={()=>setCreatingChar(true)} characters={characters} sessions={sessions} onSelectChar={c=>{ setCreatedChar(c); setScreen("sheet"); }} onNav={setScreen} userPlans={userPlans} onShowUpgrade={()=>setScreen("planos")} campaignCount={campaigns.length}/>;
       case "sheet":     return <SheetList characters={characters} system={activeSystem} onCreateChar={()=>setCreatingChar(true)} onSelectChar={c=>{ setCreatedChar(c); }} onDeleteChar={(c)=>{ deleteCharacter(c); if (createdChar && ((createdChar.id && createdChar.id===c.id) || (!createdChar.id && createdChar.createdAt===c.createdAt))) setCreatedChar(null); }} onUpdateChar={(c)=>saveCharacter(c)}/>;
       /* `plan` vem do MESMO mecanismo que o resto do app usa para cota:
          `userPlans` é o array `subscribedSystems` do doc do usuário, escutado
@@ -12038,7 +12121,7 @@ export default function App() {
           </>
         );
       }
-      default: return <Dashboard system={activeSystem} onCreateChar={()=>setCreatingChar(true)} characters={characters} sessions={sessions} onNav={setScreen} userPlans={userPlans} onShowUpgrade={()=>setScreen("planos")}/>;
+      default: return <Dashboard system={activeSystem} onCreateChar={()=>setCreatingChar(true)} characters={characters} sessions={sessions} onNav={setScreen} userPlans={userPlans} onShowUpgrade={()=>setScreen("planos")} campaignCount={campaigns.length}/>;
     }
   };
 
@@ -12092,7 +12175,10 @@ export default function App() {
             <div style={{ display: screen === "music" ? "block" : "none" }}>
               <MusicScreen nowPlaying={nowPlaying} onNowPlaying={setNowPlaying} musicTokens={musicTokens} onMusicTokens={setMusicTokens} ytPlayerRef={ytPlayerRef} />
             </div>
-            {screen !== "music" && <div key={screen} className="fade-screen" style={(screen==="master" || (screen==="sheet" && createdChar && activeSystem?.id==="op")) ? {flex:1, display:"flex", flexDirection:"column", minHeight:0} : {}}>{renderScreen()}</div>}
+            {/* A campanha ABERTA é uma tela de trabalho: participa do flex para que a
+                altura venha do fluxo (ver `camp-root`). A LISTA de campanhas continua
+                fluindo normalmente — ela cresce com o conteúdo e rola no `main`. */}
+            {screen !== "music" && <div key={screen} className="fade-screen" style={(screen==="master" || (screen==="party" && !!selectedCampaign) || (screen==="sheet" && createdChar && activeSystem?.id==="op")) ? {flex:1, display:"flex", flexDirection:"column", minHeight:0} : {}}>{renderScreen()}</div>}
           </main>
           {nowPlaying && <MusicPlayerBar nowPlaying={nowPlaying} onNowPlaying={setNowPlaying} ytPlayerRef={ytPlayerRef} />}
           <MobileBottomNav active={screen} onNav={setScreen}/>

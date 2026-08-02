@@ -8,8 +8,13 @@ export const PING_MS = 3000;
 export const isFresh = (entry, now = Date.now(), staleMs = STALE_MS) =>
   entry?.at != null && now - entry.at <= staleMs;
 
-/* Throttle trailing puro: garante 1 chamada por janela, sempre com o último argumento. */
-export function makeThrottle(fn, ms, nowFn = Date.now, timers = { set: setTimeout, clear: clearTimeout }) {
+/* Throttle trailing puro: garante 1 chamada por janela, sempre com o último argumento.
+ * Os timers padrão são embrulhados em seta de propósito: `{ set: setTimeout }` faria
+ * `timers.set(...)` chamar o `setTimeout` do navegador com `this` = objeto literal, e o
+ * Chrome responde com `TypeError: Illegal invocation` (tela preta ao abrir a mesa tática).
+ * A seta chama o global sem receptor, que é o que a WebIDL exige. */
+export function makeThrottle(fn, ms, nowFn = Date.now,
+  timers = { set: (cb, wait) => setTimeout(cb, wait), clear: (id) => clearTimeout(id) }) {
   let last = -Infinity, timer = null, pending;
   const fire = () => { last = nowFn(); timer = null; fn(pending); };
   return (arg) => {

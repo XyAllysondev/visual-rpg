@@ -26,7 +26,7 @@ import { descansoRecuperado } from "../model/acampamento";
 import { PERIGO_MAXIMO } from "../model/encontros";
 import { formatarRelogio, formatarSuprimentos, periodoDoDia } from "./mesaUi";
 import {
-  HORAS_DE_ACAMPAMENTO, HORAS_PADRAO_DE_ACAMPAMENTO, avisoDeSuprimentos,
+  HORAS_DE_ACAMPAMENTO, HORAS_PADRAO_DE_ACAMPAMENTO, avisoDeSuprimentos, detalheDeSuprimentos,
 } from "./encontrosUi";
 import { FF, FS, FW, HIT, LINE, R, SP, T, btnStyle, campoStyle } from "../Atelier/ui";
 
@@ -84,7 +84,9 @@ export default function Acampamento({
   }, [party?.inGameDatetime, party?.supplies, horas, consumoPorDia]);
 
   const avisoDaPrevia = avisoDeSuprimentos(previa.comida);
+  const detalheDaPrevia = detalheDeSuprimentos(previa.comida);
   const avisoDoResultado = resultado ? avisoDeSuprimentos(resultado.suprimentos) : "";
+  const detalheDoResultado = resultado ? detalheDeSuprimentos(resultado.suprimentos) : "";
 
   return (
     <section
@@ -154,7 +156,7 @@ export default function Acampamento({
       </div>
 
       {avisoDaPrevia ? (
-        <p data-testid="wmm-acampamento-aviso" style={{ ...T.meta, margin: 0, color: "var(--text)" }}>
+        <p data-testid="wmm-acampamento-aviso" title={detalheDaPrevia || undefined} style={{ ...T.meta, margin: 0, color: "var(--text)" }}>
           {avisoDaPrevia}
         </p>
       ) : null}
@@ -211,7 +213,7 @@ export default function Acampamento({
             {formatarRelogio(party?.inGameDatetime)} · {formatarSuprimentos(party?.supplies)}
           </div>
           {avisoDoResultado ? (
-            <div style={{ ...T.meta, marginTop: SP.x1, color: "var(--text)" }}>{avisoDoResultado}</div>
+            <div title={detalheDoResultado || undefined} style={{ ...T.meta, marginTop: SP.x1, color: "var(--text)" }}>{avisoDoResultado}</div>
           ) : null}
         </div>
       ) : null}

@@ -1,35 +1,24 @@
 import { useState, useEffect } from "react";
+import * as campaignsRepo from "../infrastructure/firestore/campaignsRepo";
+import * as messagesRepo from "../infrastructure/firestore/messagesRepo";
 import {
-  collection, query, where, onSnapshot, getDocs,
-  doc, addDoc, updateDoc, serverTimestamp, arrayUnion, arrayRemove,
-} from "firebase/firestore";
-import { db } from "../firebase";
+  generateInviteCode, systemOf, isFull,
+  MAX_CAMPAIGNS_PER_SYSTEM, DEFAULT_SYSTEM, DEFAULT_MAX_PLAYERS,
+} from "../domain/campaign";
 
-const generateCode = () => {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
-};
+/* Este hook é a camada de APLICAÇÃO da Campanha (spec 0029): ele orquestra o repositório,
+   aplica as regras de limite e traduz falha em mensagem PT-BR. O repositório não faz nada
+   disso — só lê e escreve. */
 
-const fsGetCampaigns = (uid, cb, onError) => {
-  const q = query(collection(db, "campaigns"), where("members", "array-contains", uid));
-  return onSnapshot(q, snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() }))), onError || (() => cb([])));
-};
-
-const fsCreateCamp = async (uid, userName, data) => {
+const criarCampanha = async (uid, userName, data) => {
   try {
-    const system = data.system || "Genérico";
-    const existingQ = query(
-      collection(db, "campaigns"),
-      where("masterId", "==", uid),
-      where("system", "==", system),
-      where("isActive", "==", true)
-    );
-    const existingSnap = await getDocs(existingQ);
-    if (existingSnap.size >= 3) {
-      return { limitError: `Você já possui 3 campanhas do sistema "${system}". Exclua uma antes de criar outra.` };
+    const system = data.system || DEFAULT_SYSTEM;
+    const jaMestra = await campaignsRepo.countActiveByMasterAndSystem(uid, system);
+    if (jaMestra >= MAX_CAMPAIGNS_PER_SYSTEM) {
+      return { limitError: `Você já possui ${MAX_CAMPAIGNS_PER_SYSTEM} campanhas do sistema "${system}". Exclua uma antes de criar outra.` };
     }
-    const code = generateCode();
-    const ref = await addDoc(collection(db, "campaigns"), {
+    const code = generateInviteCode();
+    const id = await campaignsRepo.create({
       name: data.name,
       description: data.description || "",
       system,
@@ -38,52 +27,37 @@ const fsCreateCamp = async (uid, userName, data) => {
       inviteCode: code,
       members: [uid],
       memberNames: { [uid]: userName },
-      createdAt: serverTimestamp(),
       isActive: true,
-      maxPlayers: data.maxPlayers || 6,
+      maxPlayers: data.maxPlayers || DEFAULT_MAX_PLAYERS,
       coverImage: data.coverImage || null,
     });
-    return { id: ref.id, code };
-  } catch (e) { console.error(e); return null; }
+    return { id, code };
+  } catch (e) { console.error("[useCampaign] criar campanha falhou:", e); return null; }
 };
 
-const fsJoinCamp = async (uid, userName, code) => {
+const entrarNaCampanha = async (uid, userName, code) => {
   try {
-    const q = query(collection(db, "campaigns"), where("inviteCode", "==", code.toUpperCase()));
-    const snap = await getDocs(q);
-    const activeDoc = snap.docs.find(d => d.data().isActive !== false);
-    if (!activeDoc) return { error: "Código inválido ou campanha não encontrada." };
-    const camp = activeDoc.data();
+    const camp = await campaignsRepo.findActiveByInviteCode(code);
+    if (!camp) return { error: "Código inválido ou campanha não encontrada." };
     if (camp.members.includes(uid)) return { error: "Você já é membro desta campanha." };
-    if (camp.members.length >= (camp.maxPlayers || 6)) return { error: "Campanha lotada." };
-    const campSystem = camp.system || "Genérico";
-    const memberLimitQ = query(collection(db, "campaigns"), where("members", "array-contains", uid));
-    const memberLimitSnap = await getDocs(memberLimitQ);
-    const sameSystemActive = memberLimitSnap.docs.filter(d => {
-      const data = d.data();
-      return data.isActive !== false && (data.system || "Genérico") === campSystem;
-    }).length;
-    if (sameSystemActive >= 3) return { error: `Você já participa de 3 campanhas do sistema "${campSystem}".` };
-    await updateDoc(doc(db, "campaigns", activeDoc.id), {
-      members: arrayUnion(uid),
-      [`memberNames.${uid}`]: userName,
-    });
-    await addDoc(collection(db, "campaigns", activeDoc.id, "messages"), {
-      userId: "system", userName: "Sistema", userPhoto: null,
-      content: `${userName} entrou na campanha.`,
-      type: "system", timestamp: serverTimestamp(),
-    });
-    return { id: activeDoc.id };
-  } catch (e) { console.error(e); return { error: "Erro ao entrar na campanha." }; }
+    if (isFull(camp)) return { error: "Campanha lotada." };
+
+    const system = systemOf(camp);
+    const jaJoga = await campaignsRepo.countActiveByMemberAndSystem(uid, system);
+    if (jaJoga >= MAX_CAMPAIGNS_PER_SYSTEM) {
+      return { error: `Você já participa de ${MAX_CAMPAIGNS_PER_SYSTEM} campanhas do sistema "${system}".` };
+    }
+
+    await campaignsRepo.addMember(camp.id, uid, userName);
+    await messagesRepo.sendSystem(camp.id, `${userName} entrou na campanha.`);
+    return { id: camp.id };
+  } catch (e) { console.error("[useCampaign] entrar na campanha falhou:", e); return { error: "Erro ao entrar na campanha." }; }
 };
 
-const fsLeaveCamp = async (campId, uid) => {
+const sairDaCampanha = async (campId, uid) => {
   try {
-    await updateDoc(doc(db, "campaigns", campId), {
-      members: arrayRemove(uid),
-      admins: arrayRemove(uid),
-    });
-  } catch (e) { console.error(e); }
+    await campaignsRepo.removeMember(campId, uid);
+  } catch (e) { console.error("[useCampaign] sair da campanha falhou:", e); }
 };
 
 export function useCampaign(uid, userName) {
@@ -94,7 +68,9 @@ export function useCampaign(uid, userName) {
   useEffect(() => {
     if (!uid) { setCampaigns([]); return; }
     setCampsLoading(true);
-    const unsub = fsGetCampaigns(uid, (list) => {
+    // O backoff de 5 s para reassinar é POLÍTICA DE UI e mora aqui, não no repositório
+    // (spec 0029, design §"Onde a lógica de negócio fica").
+    const unsub = campaignsRepo.watchByMember(uid, (list) => {
       setCampaigns(list);
       setCampsLoading(false);
     }, () => {
@@ -106,19 +82,19 @@ export function useCampaign(uid, userName) {
   }, [uid, subKey]);
 
   const createCampaign = async (data) => {
-    const r = await fsCreateCamp(uid, userName, data);
+    const r = await criarCampanha(uid, userName, data);
     if (r && !r.limitError) setSubKey(k => k + 1);
     return r;
   };
 
   const joinCampaign = async (code) => {
-    const r = await fsJoinCamp(uid, userName, code);
+    const r = await entrarNaCampanha(uid, userName, code);
     if (!r?.error) setSubKey(k => k + 1);
     return r;
   };
 
   const leaveCampaign = async (campId) => {
-    await fsLeaveCamp(campId, uid);
+    await sairDaCampanha(campId, uid);
     setSubKey(k => k + 1);
   };
 

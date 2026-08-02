@@ -367,7 +367,10 @@ export default function TelaDaMesa({
   selecionadoId = null,
   recemRevelados = [],
   onClicarNo,
-  altura = 560,
+  /* `null` = "toma a caixa que te derem". O `ResizeObserver` logo abaixo já lê a
+     caixa REAL, então a câmera passa a enquadrar no que o usuário vê — antes ela
+     enquadrava em 560 px e o usuário via 420. Número explícito continua valendo. */
+  altura = null,
   destaque = null,
   relogio = null,
   anima = true,
@@ -507,7 +510,8 @@ export default function TelaDaMesa({
       role="application"
       aria-label="Mapa-múndi da mesa: lugares descobertos e trilhas reveladas"
       style={{
-        height: altura,
+        height: altura ?? "100%",
+        flex: altura ? "none" : 1,
         minHeight: 320,
         borderRadius: R.card,
         background: "radial-gradient(circle at 50% 40%, #171720, #0b0b11 70%)",

@@ -1,32 +1,10 @@
 import { useState, useEffect } from "react";
-import { doc, setDoc, deleteDoc, collection, query, where, getDocs } from "firebase/firestore";
-import { db } from "../firebase";
+import * as charactersRepo from "../infrastructure/firestore/charactersRepo";
+import { isSameCharacter as isSameChar } from "../domain/character";
 
-// Falhas de Firestore NÃO são mais engolidas em silêncio (assessment-0021 grupo C): estas
-// funções rejeitam a Promise, e o hook loga + expõe um flag para a UI avisar o usuário —
-// senão a sincronização entre dispositivos falhava calada e parecia perda de ficha.
-const fsSaveChar = async (uid, character) => {
-  if (!uid || !character) return;
-  const charId = String(character.id || character.createdAt || Date.now());
-  await setDoc(doc(db, "users", uid, "characters", charId), { ...character, _updatedAt: Date.now() });
-};
-
-const fsDeleteChar = async (uid, character) => {
-  if (!uid || !character) return;
-  const charId = String(character.id || character.createdAt || Date.now());
-  await deleteDoc(doc(db, "users", uid, "characters", charId));
-};
-
-// Retorna [] em coleção vazia; REJEITA em erro real (para distinguir "sem fichas" de "falhou").
-const fsLoadChars = async (uid, systemId) => {
-  if (!uid) return [];
-  const q = query(collection(db, "users", uid, "characters"), where("systemId", "==", systemId));
-  const snap = await getDocs(q);
-  return snap.docs.map(d => { const data = d.data(); delete data._updatedAt; return data; });
-};
-
-const isSameChar = (a, b) =>
-  (a.id && a.id === b.id) || (!a.id && a.createdAt === b.createdAt);
+// Falhas de Firestore NÃO são engolidas em silêncio (assessment-0021 grupo C): o repositório
+// é `strict` — rejeita a Promise — e o hook loga + expõe um flag para a UI avisar o usuário.
+// Sem isso, a sincronização entre dispositivos falhava calada e parecia perda de ficha.
 
 export function useCharacter(uid, systemId) {
   const [characters, setCharacters] = useState(() => {
@@ -46,7 +24,7 @@ export function useCharacter(uid, systemId) {
     if (!uid) return;
     setCharsLoading(true);
     setLoadError(false);
-    fsLoadChars(uid, systemId).then(fsChars => {
+    charactersRepo.listBySystem(uid, systemId).then(fsChars => {
       setCharsLoading(false);
       if (fsChars.length > 0) {
         setCharacters(fsChars);
@@ -73,7 +51,7 @@ export function useCharacter(uid, systemId) {
       const exists = prev.some(c => isSameChar(c, char));
       return exists ? prev.map(c => isSameChar(c, char) ? char : c) : [...prev, char];
     });
-    fsSaveChar(uid, char)
+    charactersRepo.save(uid, char)
       .then(() => setSaveError(null))
       .catch(e => {
         console.error("[useCharacter] falha ao salvar ficha no Firestore:", e);
@@ -83,7 +61,7 @@ export function useCharacter(uid, systemId) {
 
   const deleteCharacter = (char) => {
     setCharacters(prev => prev.filter(c => !isSameChar(c, char)));
-    fsDeleteChar(uid, char).catch(e => console.error("[useCharacter] falha ao excluir ficha no Firestore:", e));
+    charactersRepo.remove(uid, char).catch(e => console.error("[useCharacter] falha ao excluir ficha no Firestore:", e));
   };
 
   return { characters, setCharacters, charsLoading, loadError, saveError, clearSaveError: () => setSaveError(null), saveCharacter, deleteCharacter };

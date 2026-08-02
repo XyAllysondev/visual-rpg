@@ -74,7 +74,7 @@ import {
   MARCA_DA_PAUSA, MARCA_DO_PERIGO, TEXTO_DA_PAUSA,
   assinaturaDaPendencia, candidatosAEncontro, flagsComPausa, formatarChance,
   formatarRolagem, idDoEncontro, nomesSugeridos, perigoDaRegiao, sugestaoDeEncontro,
-  temPendencia, viagemPausada, avisoDeSuprimentos,
+  temPendencia, viagemPausada, avisoDeSuprimentos, detalheDeSuprimentos,
 } from "../Mesa/encontrosUi";
 
 /* ── Cenário ─────────────────────────────────────────────────────────── */
@@ -316,10 +316,22 @@ describe("encontrosUi — números, ids e avisos", () => {
     expect(idDoEncontro(null)).toBe("encontro-d1-00");
   });
 
-  it("o aviso de comida diz o que falta e NÃO inventa penalidade de regra", () => {
+  /* REFINO DE LAYOUT (2026-08-02): a FRASE deixou de carregar a fração.
+     "faltaram 0,3 ração(ões)" é o resto da divisão — a máquina falando — e
+     ocupava a linha inteira da coluna de 340 px com o que o mestre não
+     decide. A consequência ficou na frase; o número foi para o atributo
+     "title", via detalheDeSuprimentos(). O contrato que este teste guarda (dizer a
+     verdade sobre a comida SEM inventar penalidade de regra) continua
+     inteiro — agora verificado nas duas pontas. */
+  it("o aviso de comida diz a consequência, o detalhe guarda o número, e nenhum dos dois inventa regra", () => {
     const aviso = avisoDeSuprimentos({ esgotou: true, deficit: 0.5, restante: 0 });
-    expect(aviso).toMatch(/faltaram/i);
+    expect(aviso).toMatch(/a comida acabou/i);
     expect(aviso).not.toMatch(/-\d|exaust|fome|condi[çc]|penalidad|dano/i);
+    /* O número existe, só não está na frase. */
+    expect(aviso).not.toMatch(/0,5/);
+    expect(detalheDeSuprimentos({ esgotou: true, deficit: 0.5, restante: 0 })).toMatch(/faltaram 0,5/i);
+    expect(detalheDeSuprimentos({ esgotou: false, deficit: 0, restante: 3 })).toBe("");
+    expect(detalheDeSuprimentos(null)).toBe("");
     expect(avisoDeSuprimentos({ esgotou: false, deficit: 0, restante: 3 })).toBe("");
     expect(avisoDeSuprimentos(null)).toBe("");
   });
@@ -611,8 +623,14 @@ describe("acampar", () => {
     comCenario({ party: partyEm("n3", { supplies: 0.1, flags: { [MARCA_DO_PERIGO]: 0 } }) });
     montarMestre();
 
-    expect(screen.getByTestId("wmm-acampamento-aviso")).toHaveTextContent(/faltaram/i);
-    expect(screen.getByTestId("wmm-acampamento-aviso").textContent)
+    /* REFINO DE LAYOUT (2026-08-02): a fração saiu da FRASE e foi para o
+       atributo "title" — a linha visível diz a consequência, e o resto da
+       divisão fica a um hover de distância. Verificado nas duas pontas para
+       que o número não possa sumir em silêncio. */
+    const avisoDaComida = screen.getByTestId("wmm-acampamento-aviso");
+    expect(avisoDaComida).toHaveTextContent(/a comida acabou/i);
+    expect(avisoDaComida.getAttribute("title")).toMatch(/faltaram/i);
+    expect(avisoDaComida.textContent)
       .not.toMatch(/exaust|fome|-\d|condi[çc]/i);
 
     fireEvent.click(screen.getByTestId("wmm-acampar"));

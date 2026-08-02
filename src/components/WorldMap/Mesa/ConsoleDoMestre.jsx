@@ -43,8 +43,10 @@ export const DEGRAUS_DO_NO = [
   { valor: "visited", label: "Visitado", dica: "Como se o grupo já tivesse estado lá." },
 ];
 
+/* `SP.x3` entre os filhos, não `SP.x2`: cinco seções × três filhos são ~60 px
+   de respiro que antes não cabiam — e agora cabem, porque a coluna rola. */
 const Secao = ({ titulo, children, acao }) => (
-  <div style={{ display: "flex", flexDirection: "column", gap: SP.x2 }}>
+  <div style={{ display: "flex", flexDirection: "column", gap: SP.x3 }}>
     <div style={{ display: "flex", alignItems: "center", gap: SP.x2, justifyContent: "space-between" }}>
       <div style={T.section}>{titulo}</div>
       {acao}
@@ -153,7 +155,7 @@ export default function ConsoleDoMestre({
 
         {destinos.length === 0 ? (
           <p style={{ ...T.meta, margin: 0 }}>
-            Nenhuma trilha revelada sai daqui. Libere uma abaixo, ou mova o grupo à mão.
+            Nenhuma trilha sai daqui. Libere uma abaixo ou mova o grupo.
           </p>
         ) : (
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexWrap: "wrap", gap: SP.x2 }}>
@@ -214,7 +216,7 @@ export default function ConsoleDoMestre({
         <p style={{ ...T.meta, margin: 0 }}>
           {pausada
             ? "O grupo vê que a viagem parou — e nada além disso."
-            : "Parar a viagem trava os destinos para o grupo, sem dizer por quê."}
+            : "Trava os destinos. O grupo não vê o motivo."}
         </p>
       </Secao>
 
@@ -228,7 +230,7 @@ export default function ConsoleDoMestre({
         }
       >
         <p style={{ ...T.meta, margin: 0 }}>
-          O que o grupo ainda não viu. Marque, escolha até onde acende e libere para todos na hora.
+          Marque o que revelar e escolha até onde acende.
         </p>
 
         <input
@@ -251,7 +253,11 @@ export default function ConsoleDoMestre({
           <ul
             aria-label="O que ainda está oculto"
             style={{
-              listStyle: "none", margin: 0, padding: 0, maxHeight: 236, overflowY: "auto",
+              /* Eram 236 px de janela para 1260 px de itens — dentro de um
+                 scroll de 774 px, que por sua vez rolava o mapa. Três níveis
+                 de rolagem para marcar uma caixinha. A coluna já rola sozinha
+                 agora (`.wmm-coluna`), então esta janela pode ser gente. */
+              listStyle: "none", margin: 0, padding: 0, maxHeight: 420, overflowY: "auto",
               border: `1px solid ${LINE.hair}`, borderRadius: R.ctl,
             }}
           >

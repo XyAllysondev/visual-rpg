@@ -129,7 +129,10 @@ const listaDe = (v) => (Array.isArray(v) ? v : []);
  * @param {string} props.campaignId
  * @param {string} props.uid quem está olhando.
  * @param {boolean} props.isMaster papel REAL (nunca a visão).
- * @param {number} [props.altura] altura do palco, em px.
+ * @param {number|null} [props.altura] altura do palco, em px. O PADRÃO é `null`:
+ *   o palco toma a altura da caixa disponível. Quem passa número continua
+ *   mandando — a assinatura não mudou, só o default deixou de ser 560, que
+ *   sobrava em telas altas e faltava em todas as outras.
  * @param {()=>void} [props.onSair]
  * @param {(sceneId:string, evento:object)=>void} [props.onEntrarNaCena] leva a
  *   mesa para a cena tática vinculada a um evento (F5). Sem esta prop o atalho
@@ -140,7 +143,7 @@ export default function MesaDoMapaMundi({
   campaignId,
   uid,
   isMaster = false,
-  altura = 560,
+  altura = null,
   onSair,
   onEntrarNaCena,
 }) {
@@ -1312,23 +1315,36 @@ export default function MesaDoMapaMundi({
   const semMapa = !carregandoInstancias && instancias.length === 0;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: SP.x3, minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: SP.x3, flex: 1, minHeight: 0, height: "100%" }}>
       <MesaStyles />
 
       {/* ── Cabeçalho ──────────────────────────────────────────────── */}
-      <header style={{ display: "flex", alignItems: "center", gap: SP.x3, flexWrap: "wrap" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: FF.display, fontSize: FS.h3, color: "var(--gold2,var(--gold))" }}>
-            {instancia?.name || "Mapa-múndi"}
-          </div>
-          <div style={T.section}>
-            {comoJogador ? "Visão do jogador" : "Visão do mestre"}
-            {instancias.length > 1 ? ` · ${instancias.length} mapas nesta mesa` : ""}
-          </div>
+      {/* UMA LINHA, não um bloco de duas. O par título+subtítulo gastava 84 px no
+          desktop e 134 px no celular (título em 3 linhas) para dizer duas coisas
+          que cabem em 44. O papel virou chip ao lado do nome — para de competir
+          com ele — e o sufixo "(cópia)" (encanamento do clone) sai do palco;
+          ele continua na lista do ateliê, onde de fato distingue. */}
+      <header style={{ display: "flex", alignItems: "center", gap: SP.x3, flexWrap: "nowrap", flexShrink: 0, minHeight: 40 }}>
+        <div
+          style={{
+            fontFamily: FF.display, fontSize: FS.lead, color: "var(--gold2,var(--gold))",
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, flex: 1,
+          }}
+          title={instancia?.name || "Mapa-múndi"}
+        >
+          {(instancia?.name || "Mapa-múndi").replace(/\s*\(cópia\)\s*$/i, "")}
         </div>
+        <span
+          style={{
+            ...T.section, flexShrink: 0, padding: "3px 9px",
+            borderRadius: R.pill, border: `1px solid ${LINE.raise}`, whiteSpace: "nowrap",
+          }}
+        >
+          {comoJogador ? "Visão do jogador" : "Visão do mestre"}
+        </span>
 
         {instancias.length > 1 ? (
-          <label className="wmm-focus" style={{ ...T.meta, display: "inline-flex", alignItems: "center", gap: SP.x2 }}>
+          <label className="wmm-focus" style={{ ...T.meta, display: "inline-flex", alignItems: "center", gap: SP.x2, flexShrink: 0 }}>
             Mapa
             <select
               value={instanciaId}
@@ -1348,7 +1364,7 @@ export default function MesaDoMapaMundi({
         ) : null}
 
         {onSair ? (
-          <button type="button" className="wmm-acao" onClick={onSair} style={btnStyle("quiet", "sm")}>
+          <button type="button" className="wmm-acao" onClick={onSair} style={{ ...btnStyle("quiet", "sm"), flexShrink: 0 }}>
             ← Voltar
           </button>
         ) : null}
@@ -1359,8 +1375,10 @@ export default function MesaDoMapaMundi({
         role="status"
         aria-live="polite"
         data-testid="wmm-anuncio"
+        /* Continua SEMPRE no DOM com `aria-live` — quem some é a RESERVA de
+           20 px (+12 de gap) quando não há anúncio nenhum a fazer. */
         style={{
-          margin: 0, minHeight: 20, ...T.meta,
+          margin: 0, minHeight: anuncio ? 20 : 0, ...T.meta, flexShrink: 0,
           color: anuncio ? "var(--text)" : "var(--muted)",
         }}
       >
@@ -1394,10 +1412,14 @@ export default function MesaDoMapaMundi({
       ) : (
         <div
           className="wmm-layout"
+          /* `stretch` + `flex:1`: a grade ocupa a altura que sobrou, e o palco
+             cresce dentro dela. Antes era `alignItems:"start"` com o palco de
+             560 px fixos — sobrava 130 px em 1920 e faltavam 140 em 1440.
+             A coluna do painel encolhe até 300 px, não fica travada em 340. */
           style={{
             display: "grid",
-            gridTemplateColumns: podeVerMolde ? "minmax(0,1fr) 340px" : "minmax(0,1fr) 300px",
-            gap: SP.x4, alignItems: "start", minHeight: 0,
+            gridTemplateColumns: podeVerMolde ? "minmax(0,1fr) clamp(300px,24vw,380px)" : "minmax(0,1fr) 300px",
+            gap: SP.x4, alignItems: "stretch", flex: 1, minHeight: 0,
           }}
         >
           <TelaDaMesa
@@ -1430,7 +1452,18 @@ export default function MesaDoMapaMundi({
             relogio={party?.inGameDatetime ?? null}
           />
 
-          <div style={{ display: "flex", flexDirection: "column", gap: SP.x3, minWidth: 0 }}>
+          {/* O SCROLL MORA AQUI — e só aqui. Quatro dos cinco painéis do mestre
+              tinham 0 px visíveis e só eram alcançáveis rolando o pai comum, que
+              levava o mapa junto. Agora a coluna rola sozinha, com o palco parado. */}
+          <div
+            className="wmm-coluna"
+            style={{
+              display: "flex", flexDirection: "column", gap: SP.x3,
+              minWidth: 0, minHeight: 0,
+              overflowY: "auto", overflowX: "hidden",
+              paddingRight: 6, paddingBottom: SP.x4, scrollbarGutter: "stable",
+            }}
+          >
             {podeVerMolde ? (
               <ConsoleDoMestre
                 noAtual={noAtualDesenhado || listaDe(molde?.nos).find((n) => n?.id === noDoGrupo) || null}

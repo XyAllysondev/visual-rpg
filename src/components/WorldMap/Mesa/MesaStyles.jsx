@@ -193,9 +193,24 @@ export function MesaStyles() {
   .wmm-painel { animation:wmm-painel-in 200ms cubic-bezier(.16,1,.3,1) both; }
   @keyframes wmm-painel-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
 
-  /* ── RESPONSIVO ──────────────────────────────────────────────────── */
-  @media(max-width:899px){
-    .wmm-layout { grid-template-columns:1fr !important; }
+  /* ── A COLUNA DO PAINEL ROLA SOZINHA ─────────────────────────────────
+     O scroll saiu do pai comum (que levava o mapa embora ao rolar) e veio
+     para cá. A barra é fina e discreta — mas EXISTE: sem ela o mestre não
+     tem sinal de que os outros quatro painéis continuam abaixo. */
+  .wmm-coluna { scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.14) transparent; }
+  .wmm-coluna::-webkit-scrollbar { width:8px }
+  .wmm-coluna::-webkit-scrollbar-track { background:transparent }
+  .wmm-coluna::-webkit-scrollbar-thumb { background:rgba(255,255,255,.14); border-radius:4px }
+  .wmm-coluna::-webkit-scrollbar-thumb:hover { background:rgba(255,255,255,.24) }
+
+  /* ── RESPONSIVO ──────────────────────────────────────────────────────
+     A coluna única começava em 899px — tarde demais. Entre 900 e 1200 a
+     coluna fixa comia 29% da largura e o palco ficava com 824 px (medido em
+     1440). Em coluna única o palco leva 52vh (mínimo 320) e o painel rola
+     sob ele, dentro da própria caixa — não arrastando o mapa junto. */
+  @media(max-width:1099px){
+    .wmm-layout { grid-template-columns:1fr !important;
+                  grid-template-rows:minmax(320px,52vh) minmax(0,1fr) !important; }
     .wmm-painel { animation:none; }
   }
 

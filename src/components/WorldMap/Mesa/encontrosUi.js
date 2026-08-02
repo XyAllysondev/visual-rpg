@@ -297,14 +297,30 @@ export function avisoDeSuprimentos(consumo) {
   if (!consumo || typeof consumo !== "object") return "";
   const deficit = Number.isFinite(consumo.deficit) ? consumo.deficit : 0;
   if (deficit > 0) {
-    const falta = Math.round(deficit * 10) / 10;
-    return `A comida acabou no meio do descanso — faltaram ${String(falta).replace(".", ",")}`
-      + " ração(ões). O que isso custa ao grupo é decisão sua.";
+    /* "faltaram 0,3 ração(ões)" é a máquina falando: o mestre precisa da
+       CONSEQUÊNCIA, não do resto da divisão. A fração continua disponível —
+       ver `detalheDeSuprimentos`, que a tela pendura no `title`. */
+    return "A comida acabou no meio do descanso. O que isso custa ao grupo é decisão sua.";
   }
   if (consumo.esgotou || consumo.restante === 0) {
     return "Foi a última ração. O próximo dia começa sem comida.";
   }
   return "";
+}
+
+/**
+ * O número cru por trás de `avisoDeSuprimentos` — para o `title`, nunca para a
+ * frase. Quem quiser conferir a conta, confere; quem só quer mestrar, não lê.
+ *
+ * @param {{deficit?:number}} consumo
+ * @returns {string} `""` quando não faltou nada.
+ */
+export function detalheDeSuprimentos(consumo) {
+  if (!consumo || typeof consumo !== "object") return "";
+  const deficit = Number.isFinite(consumo.deficit) ? consumo.deficit : 0;
+  if (!(deficit > 0)) return "";
+  const falta = Math.round(deficit * 10) / 10;
+  return `Faltaram ${String(falta).replace(".", ",")} ração(ões).`;
 }
 
 /* ════════════════════════════════════════════════════════════════════

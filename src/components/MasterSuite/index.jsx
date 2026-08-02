@@ -650,26 +650,30 @@ export default function MasterSuite({ uid }) {
           {rail}
         </div>
       ) : (
-        <>
-          <header style={{
-            flexShrink: 0, minHeight: 52, display: "flex", alignItems: "center",
-            gap: SP.x4, padding: `0 ${SP.x6}px`,
-            background: SURF.rail, borderBottom: `1px solid ${LINE.edge}`,
-          }}>
-            {sigilo}
-            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: SP.x2, minWidth: 0 }}>
-              {seletor}
-              {world ? <Btn kind="primary" icon="plus" onClick={() => novaEntidade()}>Entidade</Btn> : null}
-            </div>
-          </header>
-          <div style={{
-            flexShrink: 0, display: "flex", minHeight: 42,
-            padding: `${SP.x1}px ${SP.x6}px`,
-            background: SURF.rail, borderBottom: `1px solid ${LINE.edge}`,
-          }}>
-            {rail}
+        /* Desktop também vira UMA faixa (spec 0029). Eram duas empilhadas —
+         * um header de 52px que carregava o sigilo sozinho na ponta esquerda
+         * e o seletor+botão lá na direita, com um vão morto de ~900px no meio,
+         * mais o rail de abas logo abaixo. Somadas à topbar do app davam três
+         * barras de cromo antes de qualquer conteúdo, e o sigilo órfão lia
+         * como sobra de layout. Agora é o mesmo arranjo do mobile: sigilo,
+         * abas (que já rolam sozinhas via `.forja-rail`), e as ações à
+         * direita depois de um filete. */
+        <div style={{
+          flexShrink: 0, display: "flex", alignItems: "center", gap: SP.x3,
+          minHeight: 52, padding: `${SP.x1}px ${SP.x6}px`,
+          background: SURF.rail, borderBottom: `1px solid ${LINE.edge}`,
+        }}>
+          {sigilo}
+          {rail}
+          <span aria-hidden="true" style={{
+            width: 1, alignSelf: "stretch", margin: `${SP.x2}px 0`,
+            background: LINE.edge, flexShrink: 0,
+          }} />
+          <div style={{ display: "flex", alignItems: "center", gap: SP.x2, minWidth: 0, flexShrink: 0 }}>
+            {seletor}
+            {world ? <Btn kind="primary" icon="plus" onClick={() => novaEntidade()}>Entidade</Btn> : null}
           </div>
-        </>
+        </div>
       )}
 
       {/* ── VIEWPORT DA FERRAMENTA (o único container rolável) ── */}
