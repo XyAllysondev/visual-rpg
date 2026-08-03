@@ -86,9 +86,20 @@ export const OrdemSheetStyles = () => (
     /* O realce do ativo é a pílula deslizante (spec 0022) — os botões só mudam
        cor/peso; fundo e sublinhado vivem no <SlidingTabPill>. A borda transparente
        fica para o box-model não encolher 2px. */
-    .op-tabs-row{ display:flex; width:100%; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; position:relative; }
+    /* No DESKTOP as abas QUEBRAM em vez de rolar.
+       Eram 5 abas e cabiam; a "Progressão" virou a sexta e o conteúdo passou a
+       546px numa coluna de 458px. A faixa tinha overflow-x:auto sem barra e sem
+       aviso nenhum, então "Descrição" simplesmente sumia cortada no meio da
+       palavra — parecia defeito, não algo rolável. Rolagem horizontal escondida
+       é ruim no desktop (exige shift+roda ou arrastar), e aqui não é preciso:
+       a coluna tem folga VERTICAL. Quebrando, as seis ficam visíveis de uma vez.
+       A pílula deslizante acompanha porque measurePill mede top/height também,
+       não só left/width (useSlidingPill.js).
+       ATENÇÃO: nada de crase neste arquivo — ele inteiro é um template literal
+       e uma crase solta fecha a string e derruba o build. */
+    .op-tabs-row{ display:flex; flex-wrap:wrap; width:100%; position:relative; }
     .op-tabs-row::-webkit-scrollbar{ display:none; }
-    .op-tab{ flex:0 0 auto; min-width:70px; text-align:center; font-family:Inter,'Inter var',system-ui,sans-serif; font-size:11.5px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; padding:11px 14px; cursor:pointer;
+    .op-tab{ flex:0 0 auto; min-width:0; text-align:center; font-family:Inter,'Inter var',system-ui,sans-serif; font-size:11.5px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; padding:11px 12px; cursor:pointer;
       border:none; border-bottom:2px solid transparent; background:transparent; color:var(--muted2); transition:color 0.18s; white-space:nowrap; position:relative; z-index:1; }
     .op-tab:hover{ color:var(--text); background:rgba(201,168,76,0.05); }
     .op-tab.active{ color:var(--el-glow); font-weight:700; }
@@ -228,7 +239,15 @@ export const OrdemSheetStyles = () => (
       .op-mobile-hidden{ display:none !important; }
 
       /* Header */
-      .op-tab{ font-size:11px; padding:11px 12px; min-height:44px; -webkit-tap-highlight-color:transparent; }
+      /* No mobile a coluna é a tela inteira: quebrar 6 abas daria 3 linhas e
+         comeria a dobra. Aqui volta a rolar — com a máscara do .forja-rail,
+         que desbota os últimos 22px para avisar que continua. Arrastar de lado
+         é gesto natural no toque, ao contrário do desktop. */
+      .op-tabs-row{ flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch;
+        scroll-snap-type:x proximity;
+        -webkit-mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 22px),transparent 100%);
+                mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 22px),transparent 100%); }
+      .op-tab{ font-size:11px; padding:11px 12px; min-height:44px; scroll-snap-align:center; -webkit-tap-highlight-color:transparent; }
       .op-dial{ width:76px; height:76px; }
       .op-photo-frame{ height:160px !important; }
 
