@@ -1,10 +1,17 @@
 /**
  * Mapa-Múndi — camada de persistência do ATELIÊ (spec 0028, F1: AC-1/AC-2/AC-3).
  *
- * Único ponto de contato do Mapa-Múndi com o Firestore. Nenhum componente de
- * `WorldMap/` deve importar `firebase/firestore` direto: tudo passa por aqui,
- * para que o modelo fique num lugar só e possa ser testado com o SDK mockado.
- * Segue o precedente da casa (`MasterSuite/worldsStore.js`).
+ * Único ponto de contato do Mapa-Múndi com os DADOS. Nenhum componente de
+ * `WorldMap/` fala com a persistência direto: tudo passa por aqui, para que o
+ * modelo fique num lugar só e possa ser testado com o SDK mockado.
+ *
+ * Desde a spec 0030 (onda 1.5 do ADR-0010) este módulo também não fala com o SDK
+ * direto: o acesso a dados desceu para
+ * `src/infrastructure/firestore/worldMapsRepo.js`. O que ficou aqui é o que É
+ * deste módulo — validação em PT-BR, cotas por plano, redução da ilustração,
+ * dedup, cache e os hooks de React. O repositório é burro de propósito: recebe
+ * ids de string e objetos planos, e nenhuma primitiva do SDK atravessa a
+ * fronteira nos dois sentidos (AC-3/AC-4).
  *
  * Modelo — só o lado do Ateliê nesta fase (design.md §3):
  *   users/{uid}/worldmaps/{mapId}
@@ -71,11 +78,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import { useState, useEffect } from "react";
-import {
-  doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, addDoc, query, orderBy,
-  onSnapshot, serverTimestamp, writeBatch, increment,
-} from "firebase/firestore";
-import { db } from "../../firebase";
+import * as worldMapsRepo from "../../infrastructure/firestore/worldMapsRepo";
 import { mensagemDeErro } from "../MasterSuite/model/erros";
 import { canAddNode, canCreateMap, quotaFor } from "./model/quotas";
 import { criarNo, criarTrilha, pontasDaTrilha, trilhaDuplicada } from "./model/graph";
@@ -119,8 +122,12 @@ export const FUNDO_DOC_ID = "background";
 /** Valor de `backgroundRef` no doc raiz quando a ilustração está em base64. */
 export const FUNDO_REF = `${MEDIA}/${FUNDO_DOC_ID}`;
 
-/** Limite duro do Firestore: 500 operações por `writeBatch`. */
-export const BATCH_LIMIT = 500;
+/**
+ * Limite duro do Firestore: 500 operações por lote. Quem o aplica é o repositório
+ * (o `writeBatch` não sai de lá); segue exportado daqui porque é o número que a
+ * suíte do ateliê usa para provar que o lote é fatiado.
+ */
+export { BATCH_LIMIT } from "../../infrastructure/firestore/worldMapsRepo";
 
 /**
  * Raio de revelação inicial de um mapa novo, em unidades de mundo. É só o ponto
@@ -143,43 +150,6 @@ function requireText(value, message) {
 const asNumber = (value, padrao = 0) =>
   (Number.isFinite(value) && value >= 0 ? value : padrao);
 
-/* ── Helpers de caminho ──────────────────────────────────────────────────── */
-
-const userRef = (uid) => doc(db, USERS, uid);
-const mapsCol = (uid) => collection(db, USERS, uid, WORLDMAPS);
-const mapRef = (uid, mapId) => doc(db, USERS, uid, WORLDMAPS, mapId);
-const subCol = (uid, mapId, nome) => collection(db, USERS, uid, WORLDMAPS, mapId, nome);
-const fundoRef = (uid, mapId) =>
-  doc(db, USERS, uid, WORLDMAPS, mapId, MEDIA, FUNDO_DOC_ID);
-
-/**
- * `serverTimestamp()` chega `null` no snapshot local (latency compensation) até
- * o servidor confirmar — o que jogaria o mapa recém-criado para o FIM da lista
- * ordenada por `updatedAt` e mostraria "—" no tempo relativo.
- * `serverTimestamps:"estimate"` entrega uma estimativa local no lugar do `null`.
- */
-const snapToList = (snap) =>
-  snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) }));
-
-/**
- * Aplica operações em lotes de no máximo `BATCH_LIMIT`, respeitando o limite do
- * Firestore. `ops` é uma lista de `{ type: 'set'|'update'|'delete', ref, data }`.
- * A ordem é preservada: o que precisa acontecer por último deve vir por último.
- */
-async function commitOps(ops) {
-  if (!ops.length) return;
-  for (let i = 0; i < ops.length; i += BATCH_LIMIT) {
-    const batch = writeBatch(db);
-    for (const op of ops.slice(i, i + BATCH_LIMIT)) {
-      if (op.type === "delete") batch.delete(op.ref);
-      else if (op.type === "update") batch.update(op.ref, op.data);
-      else batch.set(op.ref, op.data);
-    }
-    // Sequencial de propósito: lotes são atômicos entre si, não em conjunto.
-    await batch.commit(); // eslint-disable-line no-await-in-loop
-  }
-}
-
 /* ── Cota (AC-3) ─────────────────────────────────────────────────────────── */
 
 /**
@@ -192,8 +162,7 @@ async function commitOps(ops) {
  */
 async function contarMapas(uid) {
   try {
-    const snap = await getDocs(mapsCol(uid));
-    return snap.size;
+    return await worldMapsRepo.contarMapas(uid);
   } catch (e) {
     console.error("[worldMapStore] falha ao contar os mapas-múndi do mestre:", e);
     throw new Error(
@@ -235,7 +204,7 @@ export async function createWorldMap(uid, data = {}) {
   const veredito = canCreateMap(plano, quantos);
   if (!veredito.ok) throw new Error(veredito.motivo);
 
-  const ref = await addDoc(mapsCol(ownerUid), {
+  return worldMapsRepo.criarMapa(ownerUid, {
     name,
     description: asText(data.description),
     // Fundo — caminho Storage (volta com o Blaze):
@@ -260,10 +229,9 @@ export async function createWorldMap(uid, data = {}) {
     origem: asText(data.origem) || null,
     /* Onde o grupo começa quando o molde virar instância na mesa (AC-7). */
     startNodeId: asText(data.startNodeId) || null,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+    // `createdAt`/`updatedAt` são carimbados pelo repositório: `serverTimestamp()`
+    // é FieldValue do SDK e não atravessa a fronteira (AC-4).
   });
-  return ref.id;
 }
 
 /**
@@ -280,7 +248,7 @@ export async function updateWorldMap(uid, mapId, patch = {}) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
     throw new Error("Informe os campos do mapa-múndi que devem ser atualizados.");
   }
-  const data = { ...patch, updatedAt: serverTimestamp() };
+  const data = { ...patch };
   if ("name" in patch) {
     data.name = requireText(patch.name, "O nome do mapa-múndi não pode ficar vazio.");
   }
@@ -293,7 +261,7 @@ export async function updateWorldMap(uid, mapId, patch = {}) {
   if ("height" in patch) data.height = asNumber(patch.height, 0);
   // `plan` é insumo da cota, não campo do documento — nunca é persistido.
   delete data.plan;
-  await updateDoc(mapRef(ownerUid, id), data);
+  await worldMapsRepo.atualizarMapa(ownerUid, id, data);
 }
 
 /**
@@ -319,14 +287,7 @@ export async function deleteWorldMap(uid, mapId) {
   const ownerUid = requireText(uid, "É preciso estar autenticado para remover um mapa-múndi.");
   const id = requireText(mapId, "Informe qual mapa-múndi deve ser removido.");
 
-  const ops = [];
-  for (const nome of SUBCOLECOES) {
-    const snap = await getDocs(subCol(ownerUid, id, nome)); // eslint-disable-line no-await-in-loop
-    snap.docs.forEach((d) => ops.push({ type: "delete", ref: d.ref }));
-  }
-  ops.push({ type: "delete", ref: fundoRef(ownerUid, id) }); // a ilustração
-  ops.push({ type: "delete", ref: mapRef(ownerUid, id) });   // o molde por último
-  await commitOps(ops);
+  await worldMapsRepo.apagarMapaEmCascata(ownerUid, id, SUBCOLECOES);
   fundoCache.delete(chaveDoFundo(ownerUid, id));
 }
 
@@ -340,8 +301,7 @@ export async function deleteWorldMap(uid, mapId) {
 export async function getWorldMap(uid, mapId) {
   const ownerUid = requireText(uid, "É preciso estar autenticado para abrir um mapa-múndi.");
   const id = requireText(mapId, "Informe qual mapa-múndi deve ser carregado.");
-  const snap = await getDoc(mapRef(ownerUid, id));
-  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  return worldMapsRepo.lerMapa(ownerUid, id);
 }
 
 /* ── Fundo do mapa ───────────────────────────────────────────────────────────
@@ -565,37 +525,31 @@ async function subirParaFirestore(uid, mapId, file) {
   const hash = await hashDataUrl(data);
 
   /* Dedup: se o documento já tem exatamente esta imagem, não reescreve ~900 KB
-   * à toa. A falha da leitura não impede o upload — só desliga o dedup. */
-  const alvo = fundoRef(uid, mapId);
-  const atual = await getDoc(alvo).catch((e) => {
-    console.warn("[worldMapStore] não deu para conferir o fundo atual (dedup desligado):", e);
-    return null;
-  });
-  const jaEstaLa = !!atual && atual.exists() && atual.data()?.hash === hash;
+   * à toa. A falha da leitura não impede o upload — só desliga o dedup (o
+   * repositório devolve `null`, é a única operação `silent` do agregado). */
+  const hashGravado = await worldMapsRepo.lerHashDoFundo(uid, mapId);
 
-  if (!jaEstaLa) {
-    await setDoc(alvo, {
+  if (hashGravado !== hash) {
+    await worldMapsRepo.gravarFundo(uid, mapId, {
       kind: "background",
       data,
       hash,
       width,
       height,
       bytes: data.length,
-      updatedAt: serverTimestamp(),
     });
   }
 
   /* O doc raiz recebe SÓ o ponteiro e a miniatura — nunca `data`. Este objeto é
    * gate de teste (`worldMapStore.test.js`): a lista de mapas é assinada em
    * tempo real e não pode trafegar a ilustração inteira a cada snapshot. */
-  await updateDoc(mapRef(uid, mapId), {
+  await worldMapsRepo.atualizarMapa(uid, mapId, {
     backgroundRef: FUNDO_REF,
     backgroundThumb: miniatura,
     backgroundUrl: null,   // limpa o caminho Storage: a fonte da verdade é uma só
     backgroundPath: null,
     width,
     height,
-    updatedAt: serverTimestamp(),
   });
 
   fundoCache.set(chaveDoFundo(uid, mapId), data);
@@ -626,14 +580,13 @@ async function subirParaStorage(uid, mapId, file) {
   const { width, height } = local ? await medir(local) : { width: 0, height: 0 };
   const miniatura = local ? await miniaturaDe(local) : null;
 
-  await updateDoc(mapRef(uid, mapId), {
+  await worldMapsRepo.atualizarMapa(uid, mapId, {
     backgroundUrl: url,
     backgroundPath: caminho,
     backgroundRef: null,   // a fonte da verdade passa a ser o arquivo
     backgroundThumb: miniatura,
     width,
     height,
-    updatedAt: serverTimestamp(),
   });
 
   fundoCache.delete(chaveDoFundo(uid, mapId));
@@ -659,8 +612,7 @@ export async function getBackground(uid, mapId) {
   const chave = chaveDoFundo(ownerUid, id);
   if (fundoCache.has(chave)) return fundoCache.get(chave);
 
-  const snap = await getDoc(fundoRef(ownerUid, id));
-  const data = snap.exists() ? (snap.data()?.data || null) : null;
+  const data = await worldMapsRepo.lerFundo(ownerUid, id);
   if (data) fundoCache.set(chave, data);
   return data;
 }
@@ -692,9 +644,9 @@ export function useWorldMaps(uid) {
     if (!uid) { setMaps([]); setLoading(false); setError(null); return undefined; }
     setLoading(true);
     setError(null);
-    const unsub = onSnapshot(
-      query(mapsCol(uid), orderBy("updatedAt", "desc")),
-      (snap) => { setMaps(snapToList(snap)); setLoading(false); },
+    const unsub = worldMapsRepo.observarMapas(
+      uid,
+      (lista) => { setMaps(lista); setLoading(false); },
       (err) => { setError(err); setMaps([]); setLoading(false); },
     );
     return () => unsub();
@@ -725,11 +677,9 @@ export function useWorldMaps(uid) {
 /** Escreve a marca (ou a apaga) no perfil. Erro sobe traduzido por quem chama. */
 async function marcarDispensa(uid, valor, acao) {
   const ownerUid = requireText(uid, `É preciso estar autenticado para ${acao}.`);
-  await setDoc(
-    userRef(ownerUid),
-    { [CAMPO_DISPENSA]: valor, [CAMPO_DISPENSA_EM]: valor ? serverTimestamp() : null },
-    { merge: true },
-  );
+  /* Os nomes dos campos são do domínio (`model/mapaPadrao.js`); o carimbo de data
+   * é da infraestrutura — por isso ela recebe os nomes e monta o resto. */
+  await worldMapsRepo.marcarDispensaDoPadrao(ownerUid, CAMPO_DISPENSA, CAMPO_DISPENSA_EM, valor);
 }
 
 /**
@@ -780,10 +730,10 @@ export function useMapaPadraoDispensado(uid) {
     if (!uid) { setDispensado(false); setLoading(false); setError(null); return undefined; }
     setLoading(true);
     setError(null);
-    const unsub = onSnapshot(
-      userRef(uid),
-      (snap) => {
-        setDispensado(padraoDispensado(snap.exists() ? snap.data() : null));
+    const unsub = worldMapsRepo.observarPerfil(
+      uid,
+      (dados) => {
+        setDispensado(padraoDispensado(dados));
         setLoading(false);
       },
       (err) => {
@@ -824,25 +774,8 @@ export function useMapaPadraoDispensado(uid) {
  *  edita em duas abas.
  * ══════════════════════════════════════════════════════════════════════════ */
 
-const nodeRef = (uid, mapId, nodeId) => doc(db, USERS, uid, WORLDMAPS, mapId, NODES, nodeId);
-const edgeRef = (uid, mapId, edgeId) => doc(db, USERS, uid, WORLDMAPS, mapId, EDGES, edgeId);
-const eventRef = (uid, mapId, eventId) => doc(db, USERS, uid, WORLDMAPS, mapId, EVENTS, eventId);
-
 /** `id` é a chave do documento, nunca um campo dentro dele. */
 const semId = (obj) => { const { id, ...resto } = obj; return resto; };
-
-/**
- * O `increment` do SDK, com degradação honesta.
- *
- * Existe porque o dublê de `firebase/firestore` de uma suíte pode não trazer o
- * `increment` (é uma função nova aqui). Sem ele, cai no valor absoluto que o
- * chamador já tem em mãos — o contador continua certo, só perde a proteção
- * contra duas abas gravando ao mesmo tempo.
- */
-function passoDaContagem(delta, absoluto) {
-  if (typeof increment === "function") return increment(delta);
-  return Math.max(0, asNumber(absoluto, 0) + delta);
-}
 
 /* ── Nós ─────────────────────────────────────────────────────────────────── */
 
@@ -869,16 +802,11 @@ export async function createNode(uid, mapId, dados, opcoes = {}) {
   if (!veredito.ok) throw new Error(veredito.motivo);
 
   const no = criarNo(dados); // valida e normaliza — a régua é o `model/graph.js`
-  const ref = await addDoc(subCol(ownerUid, id, NODES), {
-    ...semId(no),
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-  await updateDoc(mapRef(ownerUid, id), {
-    nodeCount: passoDaContagem(1, quantos),
-    updatedAt: serverTimestamp(),
-  });
-  return ref.id;
+  const novoId = await worldMapsRepo.adicionarNo(ownerUid, id, semId(no));
+  // `quantos` viaja junto porque o repositório precisa dele quando o `increment()`
+  // do SDK não está disponível — mas quem soube contar foi a tela.
+  await worldMapsRepo.ajustarContagemDeNos(ownerUid, id, 1, quantos);
+  return novoId;
 }
 
 /**
@@ -904,10 +832,9 @@ export async function updateNode(uid, mapId, nodeId, patch = {}) {
     && !(Number.isFinite(patch.x) && Number.isFinite(patch.y))) {
     throw new Error("O nó precisa de coordenadas x e y numéricas para ser movido.");
   }
-  const data = { ...semId(patch), updatedAt: serverTimestamp() };
-  await updateDoc(nodeRef(ownerUid, id, noId), data);
+  await worldMapsRepo.atualizarNo(ownerUid, id, noId, semId(patch));
   // O doc raiz também envelhece: é o `updatedAt` que ordena a lista do ateliê.
-  await updateDoc(mapRef(ownerUid, id), { updatedAt: serverTimestamp() });
+  await worldMapsRepo.tocarMapa(ownerUid, id);
 }
 
 /**
@@ -931,28 +858,18 @@ export async function deleteNode(uid, mapId, nodeId, opcoes = {}) {
   const noId = requireText(nodeId, "Informe qual nó deve ser removido.");
 
   let trilhas = Array.isArray(opcoes.trilhas) ? opcoes.trilhas : null;
-  if (!trilhas) {
-    const snap = await getDocs(subCol(ownerUid, id, EDGES));
-    trilhas = snapToList(snap);
-  }
+  if (!trilhas) trilhas = await worldMapsRepo.listarTrilhas(ownerUid, id);
   const incidentes = trilhas.filter((t) => {
     const [de, para] = pontasDaTrilha(t);
     return de === noId || para === noId;
   });
 
-  const ops = incidentes
-    .filter((t) => asText(t?.id))
-    .map((t) => ({ type: "delete", ref: edgeRef(ownerUid, id, t.id) }));
-  ops.push({ type: "delete", ref: nodeRef(ownerUid, id, noId) });
-  ops.push({
-    type: "update",
-    ref: mapRef(ownerUid, id),
-    data: {
-      nodeCount: passoDaContagem(-1, asNumber(opcoes.nodeCount, 0)),
-      updatedAt: serverTimestamp(),
-    },
+  /* QUEM toca o nó é decisão daqui (`pontasDaTrilha`); o repositório recebe só os
+   * ids e garante que tudo cai no mesmo lote. */
+  await worldMapsRepo.apagarNoComTrilhas(ownerUid, id, noId, {
+    trilhaIds: incidentes.filter((t) => asText(t?.id)).map((t) => t.id),
+    contagem: { delta: -1, absoluto: asNumber(opcoes.nodeCount, 0) },
   });
-  await commitOps(ops);
   return { trilhasRemovidas: incidentes.length };
 }
 
@@ -980,13 +897,9 @@ export async function createEdge(uid, mapId, dados, opcoes = {}) {
     throw new Error("Já existe uma trilha ligando esses dois lugares. Edite a que existe em vez de criar outra.");
   }
 
-  const ref = await addDoc(subCol(ownerUid, id, EDGES), {
-    ...semId(trilha),
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-  await updateDoc(mapRef(ownerUid, id), { updatedAt: serverTimestamp() });
-  return ref.id;
+  const novoId = await worldMapsRepo.adicionarTrilha(ownerUid, id, semId(trilha));
+  await worldMapsRepo.tocarMapa(ownerUid, id);
+  return novoId;
 }
 
 /**
@@ -1008,8 +921,8 @@ export async function updateEdge(uid, mapId, edgeId, patch = {}) {
   if ("pathPoints" in patch && !Array.isArray(patch.pathPoints)) {
     throw new Error("Os pontos de controle da trilha precisam ser uma lista de { x, y } numéricos.");
   }
-  await updateDoc(edgeRef(ownerUid, id, trilhaId), { ...semId(patch), updatedAt: serverTimestamp() });
-  await updateDoc(mapRef(ownerUid, id), { updatedAt: serverTimestamp() });
+  await worldMapsRepo.atualizarTrilha(ownerUid, id, trilhaId, semId(patch));
+  await worldMapsRepo.tocarMapa(ownerUid, id);
 }
 
 /**
@@ -1024,8 +937,8 @@ export async function deleteEdge(uid, mapId, edgeId) {
   const ownerUid = requireText(uid, "É preciso estar autenticado para remover uma trilha.");
   const id = requireText(mapId, "Informe de qual mapa-múndi é a trilha.");
   const trilhaId = requireText(edgeId, "Informe qual trilha deve ser removida.");
-  await deleteDoc(edgeRef(ownerUid, id, trilhaId));
-  await updateDoc(mapRef(ownerUid, id), { updatedAt: serverTimestamp() });
+  await worldMapsRepo.apagarTrilha(ownerUid, id, trilhaId);
+  await worldMapsRepo.tocarMapa(ownerUid, id);
 }
 
 /* ── Eventos (F5 · AC-1, AC-8) ───────────────────────────────────────────
@@ -1060,13 +973,9 @@ export async function createEvent(uid, mapId, dados) {
   const id = requireText(mapId, "Informe em qual mapa-múndi o evento deve ser ancorado.");
 
   const evento = criarEvento(dados);
-  const ref = await addDoc(subCol(ownerUid, id, EVENTS), {
-    ...semId(evento),
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-  await updateDoc(mapRef(ownerUid, id), { updatedAt: serverTimestamp() });
-  return ref.id;
+  const novoId = await worldMapsRepo.adicionarEvento(ownerUid, id, semId(evento));
+  await worldMapsRepo.tocarMapa(ownerUid, id);
+  return novoId;
 }
 
 /**
@@ -1084,8 +993,8 @@ export async function updateEvent(uid, mapId, eventId, patch = {}) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
     throw new Error("Informe os campos do evento que devem ser atualizados.");
   }
-  await updateDoc(eventRef(ownerUid, id, evId), { ...semId(patch), updatedAt: serverTimestamp() });
-  await updateDoc(mapRef(ownerUid, id), { updatedAt: serverTimestamp() });
+  await worldMapsRepo.atualizarEvento(ownerUid, id, evId, semId(patch));
+  await worldMapsRepo.tocarMapa(ownerUid, id);
 }
 
 /**
@@ -1100,8 +1009,8 @@ export async function deleteEvent(uid, mapId, eventId) {
   const ownerUid = requireText(uid, "É preciso estar autenticado para remover um evento.");
   const id = requireText(mapId, "Informe de qual mapa-múndi é o evento.");
   const evId = requireText(eventId, "Informe qual evento deve ser removido.");
-  await deleteDoc(eventRef(ownerUid, id, evId));
-  await updateDoc(mapRef(ownerUid, id), { updatedAt: serverTimestamp() });
+  await worldMapsRepo.apagarEvento(ownerUid, id, evId);
+  await worldMapsRepo.tocarMapa(ownerUid, id);
 }
 
 /**
@@ -1127,24 +1036,11 @@ export async function semearGrafo(uid, mapId, grafo = {}) {
   const nos = (Array.isArray(grafo.nos) ? grafo.nos : []).filter((n) => asText(n?.id));
   const trilhas = (Array.isArray(grafo.trilhas) ? grafo.trilhas : []).filter((t) => asText(t?.id));
 
-  const ops = [
-    ...nos.map((n) => ({
-      type: "set",
-      ref: nodeRef(ownerUid, id, n.id),
-      data: { ...semId(n), createdAt: serverTimestamp(), updatedAt: serverTimestamp() },
-    })),
-    ...trilhas.map((t) => ({
-      type: "set",
-      ref: edgeRef(ownerUid, id, t.id),
-      data: { ...semId(t), createdAt: serverTimestamp(), updatedAt: serverTimestamp() },
-    })),
-    {
-      type: "update",
-      ref: mapRef(ownerUid, id),
-      data: { nodeCount: nos.length, updatedAt: serverTimestamp() },
-    },
-  ];
-  await commitOps(ops);
+  await worldMapsRepo.semearGrafo(ownerUid, id, {
+    nos: nos.map((n) => ({ id: n.id, dados: semId(n) })),
+    trilhas: trilhas.map((t) => ({ id: t.id, dados: semId(t) })),
+    nodeCount: nos.length,
+  });
   return { nos: nos.length, trilhas: trilhas.length };
 }
 
@@ -1182,14 +1078,14 @@ export function useGrafo(uid, mapId) {
 
     const falhou = (err) => { setError(err); setChegada({ nos: true, trilhas: true }); };
 
-    const unsubNos = onSnapshot(
-      subCol(uid, mapId, NODES),
-      (snap) => { setNos(snapToList(snap)); setChegada((c) => (c.nos ? c : { ...c, nos: true })); },
+    const unsubNos = worldMapsRepo.observarNos(
+      uid, mapId,
+      (lista) => { setNos(lista); setChegada((c) => (c.nos ? c : { ...c, nos: true })); },
       falhou,
     );
-    const unsubTrilhas = onSnapshot(
-      subCol(uid, mapId, EDGES),
-      (snap) => { setTrilhas(snapToList(snap)); setChegada((c) => (c.trilhas ? c : { ...c, trilhas: true })); },
+    const unsubTrilhas = worldMapsRepo.observarTrilhas(
+      uid, mapId,
+      (lista) => { setTrilhas(lista); setChegada((c) => (c.trilhas ? c : { ...c, trilhas: true })); },
       falhou,
     );
     return () => { unsubNos(); unsubTrilhas(); };
@@ -1219,9 +1115,9 @@ export function useEventos(uid, mapId) {
       return undefined;
     }
     setEstado({ eventos: [], loading: true, error: null });
-    const unsub = onSnapshot(
-      subCol(uid, mapId, EVENTS),
-      (snap) => setEstado({ eventos: snapToList(snap), loading: false, error: null }),
+    const unsub = worldMapsRepo.observarEventos(
+      uid, mapId,
+      (lista) => setEstado({ eventos: lista, loading: false, error: null }),
       (err) => setEstado({ eventos: [], loading: false, error: err }),
     );
     return () => unsub();

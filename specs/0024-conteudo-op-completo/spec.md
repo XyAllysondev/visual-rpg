@@ -47,6 +47,10 @@ qualitativo e o texto marca o que é resumo.
 ### AC-3: Graus de treinamento com nomes oficiais
 - **Dado** `TREINO_TIERS`
 - **Quando** a ficha exibe o grau de uma perícia
+> ⚠ **AC-3 SUBSTITUÍDO pela spec 0033 (AC-16), 2026-08-02.** Este AC adotou "Competente" a partir
+> de fonte secundária. Com o PDF oficial em mãos (v1.2), o nome do grau +10 é **Veterano**, e o
+> Andre confirmou. O código e os testes seguem a 0033; o texto abaixo fica só como histórico.
+
 - **Então** os rótulos são Destreinado/Treinado/Competente/Expert (o +10 deixa de se chamar
   "Veterano"). Bônus (0/5/10/15) e cores não mudam.
 

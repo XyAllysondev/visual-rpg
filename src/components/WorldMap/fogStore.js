@@ -1,10 +1,16 @@
 /* ════════════════════════════════════════════════════════════════════
  *  PERSISTÊNCIA DA NÉVOA  (spec 0028 · F3 · AC-5, AC-10)
  *  --------------------------------------------------------------------
- *  O único ponto de contato da névoa com o Firestore. Nenhum componente de
- *  `WorldMap/` importa `firebase/firestore` direto — mesma regra do
- *  `worldMapStore.js`, que continua sendo o dono do MOLDE (mapa, nós,
- *  trilhas, ilustração). Este arquivo é dono da MÁSCARA, e só dela.
+ *  O dono da MÁSCARA, e só dela — o MOLDE (mapa, nós, trilhas, ilustração)
+ *  é do `worldMapStore.js`.
+ *
+ *  ── ONDE ESTE ARQUIVO ACABA (spec 0030 · onda 1.5) ──────────────────
+ *  O I/O saiu daqui: quem fala com o Firestore é
+ *  `infrastructure/firestore/fogRepo.js` (ADR-0010). Aqui ficou o que só
+ *  este módulo sabe — o FORMATO da névoa (serializar/desserializar), a
+ *  RECUSA por tamanho e a POLÍTICA DE UI (debounce, estados do React).
+ *  A divisão não é cosmética: o repo trata `data` como string opaca, então
+ *  existe UM lugar que entende bitmap de névoa, e é `model/fogMask.js`.
  *
  *  ── POR QUE UM DOCUMENTO SÓ PARA ELA ────────────────────────────────
  *  `users/{uid}/worldmaps/{mapId}/media/fog`
@@ -40,14 +46,18 @@
  * ════════════════════════════════════════════════════════════════════ */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { doc, getDoc, setDoc, deleteDoc, onSnapshot, serverTimestamp } from "firebase/firestore";
-import { db } from "../../firebase";
+import * as fogRepo from "../../infrastructure/firestore/fogRepo";
 import {
   cabeNoDocumento, desserializar, serializar, TETO_DA_MASCARA_BYTES,
 } from "./model/fogMask";
 
 /* ── Caminho ─────────────────────────────────────────────────────────── */
 
+/* Onda 1.5 (spec 0030): quem monta o caminho agora é `infrastructure/firestore/paths.js`
+   (`atelieMediaDoc`), e quem fala com o SDK é o `fogRepo`. Estas constantes sobreviveram
+   porque são o VOCABULÁRIO público do módulo — `FOG_REF` é gravado no molde e o contrato
+   de `fogStore.test.js` confere o caminho por elas. Elas descrevem o caminho; não o
+   constroem mais. Se `paths.js` mudar a coleção, é o teste do caminho que acusa. */
 export const USERS = "users";
 export const WORLDMAPS = "worldmaps";
 export const MEDIA = "media";
@@ -60,8 +70,6 @@ export const FOG_REF = `${MEDIA}/${FOG_DOC_ID}`;
 
 /** Quanto tempo o mestre precisa ficar parado antes de a névoa ir ao banco. */
 export const ESPERA_DA_NEVOA = 900;
-
-const fogRef = (uid, mapId) => doc(db, USERS, uid, WORLDMAPS, mapId, MEDIA, FOG_DOC_ID);
 
 const texto = (valor) => (typeof valor === "string" ? valor.trim() : "");
 
@@ -88,12 +96,12 @@ function exigir(valor, mensagem) {
 export async function lerFog(uid, mapId) {
   const dono = exigir(uid, "É preciso estar autenticado para abrir a névoa do mapa.");
   const id = exigir(mapId, "Informe de qual mapa-múndi é a névoa.");
-  const snap = await getDoc(fogRef(dono, id));
-  if (!snap.exists()) return null;
-  return decodificar(snap.data());
+  const registro = await fogRepo.get(dono, id);
+  if (!registro) return null;
+  return decodificar(registro);
 }
 
-/** Documento → máscara, tolerando payload quebrado. */
+/** Registro → máscara, tolerando payload quebrado. */
 function decodificar(dados) {
   const bruto = dados && typeof dados.data === "string" ? dados.data : "";
   if (!bruto) return null;
@@ -132,14 +140,16 @@ export async function salvarFog(uid, mapId, mascara, opcoes = {}) {
   const cabe = cabeNoDocumento(mascara, teto);
   if (!cabe.ok) throw new Error(cabe.motivo);
 
+  /* A serialização acontece AQUI: o `fogRepo` recebe `data` já pronto e o grava sem
+     tocar. O `updatedAt` é carimbado lá dentro, porque `serverTimestamp()` é primitiva
+     do SDK e não atravessa a fronteira (ADR-0010). */
   const data = serializar(mascara);
-  await setDoc(fogRef(dono, id), {
+  await fogRepo.save(dono, id, {
     data,
     largura: mascara.largura,
     altura: mascara.altura,
     escala: mascara.escala,
     bytes: data.length,
-    updatedAt: serverTimestamp(),
   });
   return { bytes: data.length };
 }
@@ -151,7 +161,7 @@ export async function salvarFog(uid, mapId, mascara, opcoes = {}) {
 export async function apagarFog(uid, mapId) {
   const dono = exigir(uid, "É preciso estar autenticado para apagar a névoa.");
   const id = exigir(mapId, "Informe de qual mapa-múndi é a névoa.");
-  await deleteDoc(fogRef(dono, id));
+  await fogRepo.remove(dono, id);
 }
 
 /* ── Hooks ───────────────────────────────────────────────────────────── */
@@ -181,10 +191,10 @@ export function useFog(uid, mapId) {
     }
     setEstado({ mascara: null, bytes: 0, loading: true, error: null });
 
-    const unsub = onSnapshot(
-      fogRef(uid, mapId),
-      (snap) => {
-        const dados = snap.exists() ? snap.data() : null;
+    const unsub = fogRepo.watch(
+      uid,
+      mapId,
+      (dados) => {
         setEstado({
           mascara: dados ? decodificar(dados) : null,
           bytes: dados && Number.isFinite(dados.bytes) ? dados.bytes : 0,
@@ -192,6 +202,7 @@ export function useFog(uid, mapId) {
           error: null,
         });
       },
+      /* O erro sobe CRU: a tela distingue `permission-denied` de queda de rede. */
       (err) => setEstado({ mascara: null, bytes: 0, loading: false, error: err }),
     );
     return () => unsub();

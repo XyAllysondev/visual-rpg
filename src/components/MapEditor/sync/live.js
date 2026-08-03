@@ -1,6 +1,10 @@
 /* Canal efêmero live_{uid} (spec 0010 / ADR 0006 §5): ping, apontador, régua e câmera.
- * Throttle 250ms (trailing) no publisher; receptor descarta payload velho (staleness). */
-import { collection, doc, onSnapshot, setDoc, deleteDoc, query, where } from 'firebase/firestore';
+ * Throttle 250ms (trailing) no publisher; receptor descarta payload velho (staleness).
+ *
+ * O acesso ao Firestore vive em `infrastructure/firestore/mapSyncRepo` desde a onda 1.5
+ * (spec 0030 / ADR-0010). Aqui ficam o throttle e a regra de frescor — as duas coisas que
+ * dependem do relógio do cliente, e por isso não são infraestrutura. */
+import { setLive, clearLive, watchLive } from '../../../infrastructure/firestore/mapSyncRepo';
 
 export const STALE_MS = 6000;
 export const PING_MS = 3000;
@@ -26,21 +30,20 @@ export function makeThrottle(fn, ms, nowFn = Date.now,
   };
 }
 
+/* `db` continua na assinatura, ignorado: `MapEditor/index.jsx` ainda chama
+   `makeLivePublisher(db, …)` e ele pertence a outra onda. */
 export function makeLivePublisher(db, cid, uid, base = {}, throttleMs = 250) {
-  const ref = doc(db, 'campaigns', cid, 'map', 'live_' + uid);
   let state = {};
-  const write = () =>
-    setDoc(ref, { kind: 'live', uid, at: Date.now(), ...base, ...state })
-      .catch((e) => console.error('[mesa] live falhou:', e));
+  /* `at` é o relógio do CLIENTE de propósito: quem recebe compara com o próprio relógio
+     em `isFresh`, e um `serverTimestamp` só chegaria depois do round-trip. */
+  const write = () => setLive(cid, uid, { kind: 'live', uid, at: Date.now(), ...base, ...state });
   const throttledWrite = makeThrottle(write, throttleMs);
   return {
     publish(patch) { state = { ...state, ...patch }; throttledWrite(); },
-    destroy() { deleteDoc(ref).catch(() => {}); },
+    destroy() { clearLive(cid, uid); },
   };
 }
 
 export function subscribeLive(db, cid, cb) {
-  return onSnapshot(query(collection(db, 'campaigns', cid, 'map'), where('kind', '==', 'live')),
-    (snap) => cb(snap.docs.map(d => d.data())),
-    (e) => console.error('[mesa] snapshot live falhou:', e));
+  return watchLive(cid, cb);
 }

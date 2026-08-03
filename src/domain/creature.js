@@ -26,14 +26,21 @@ export const maxHp = (creature) => toInt(creature && creature.hpMax);
  *
  * Criatura recém-adicionada não tem `hpCurrent` gravado — está intacta, logo vale `hpMax`.
  *
- * QUIRK PRESERVADO (AC-7): o `|| max` do legado faz uma criatura com `hpCurrent` igual a 0
- * ser lida como PV cheio, porque `0` é falsy. Consertar isso muda o comportamento de quem
- * já tem criatura caída no banco — é decisão de outra spec, não efeito colateral desta.
+ * **CORRIGIDO na spec 0032 (Q3).** O legado fazia `toInt(raw) || max`, e como `0` é falsy,
+ * uma criatura com `hpCurrent === 0` era lida como PV CHEIO: a criatura abatida "revivia"
+ * na próxima leitura da tela. A spec 0029 preservou o defeito de propósito (AC-7), para que
+ * a refatoração fosse a comportamento constante; consertá-lo era escopo desta spec.
+ *
+ * A distinção agora é explícita, em vez de depender de falsy:
+ * - `hpCurrent` ausente (`null`/`undefined`) → criatura intacta → `hpMax`
+ * - `hpCurrent` presente, inclusive `0` ou `"0"` → é o valor, e 0 continua 0
+ *
+ * `toInt` segue tolerante (string livre do formulário), então `hpCurrent: "abc"` vira 0 —
+ * o mesmo que o legado fazia com texto ilegível, só que sem ressuscitar a criatura.
  */
 export const currentHp = (creature) => {
-  const max = maxHp(creature);
-  const raw = creature && creature.hpCurrent != null ? creature.hpCurrent : creature && creature.hpMax;
-  return toInt(raw) || max;
+  if (!creature) return 0;
+  return creature.hpCurrent != null ? toInt(creature.hpCurrent) : maxHp(creature);
 };
 
 /**

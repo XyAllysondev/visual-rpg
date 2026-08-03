@@ -72,9 +72,12 @@ describe("CLASS_POWERS — AC-2 (catálogo fiel ao livro base)", () => {
 });
 
 describe("TREINO_TIERS — AC-3 (nomes oficiais dos graus)", () => {
-  it("usa Destreinado/Treinado/Competente/Expert", () => {
+  /* Spec 0033: o grau +10 voltou a se chamar VETERANO — nome do livro oficial (v1.2), com o PDF
+   * em mãos e confirmado pelo Andre. O AC-3 da 0024 tinha adotado "Competente" por fonte
+   * secundária. Este teste agora trava o nome certo. */
+  it("usa Destreinado/Treinado/Veterano/Expert", () => {
     expect([0, 5, 10, 15].map((k) => TREINO_TIERS[k].label)).toEqual([
-      "Destreinado", "Treinado", "Competente", "Expert",
+      "Destreinado", "Treinado", "Veterano", "Expert",
     ]);
   });
 });

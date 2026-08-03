@@ -68,12 +68,16 @@ export async function remove(charId) {
 export async function savePendingEdit(charId, proposedData, editorName) {
   if (!charId) return;
   return silent("publicSheetsRepo.savePendingEdit", undefined, () => {
-    const id = String(Date.now());
-    return setDoc(docAt(pendingEditDoc(charId, id)), {
-      id,
+    // UM único `Date.now()`: o legado chamava duas vezes (uma para o ID, outra para o campo),
+    // e na virada de milissegundo entre elas o ID deixava de ser igual ao `timestamp` —
+    // quebrando a invariante que este JSDoc promete e fazendo a ordem por ID divergir da
+    // ordem por data. Ler o relógio uma vez só elimina a janela.
+    const agora = Date.now();
+    return setDoc(docAt(pendingEditDoc(charId, String(agora))), {
+      id: String(agora),
       proposedData,
       editorName: editorName || "Anônimo",
-      timestamp: Date.now(),
+      timestamp: agora,
       status: "pending",
     });
   });

@@ -23,6 +23,38 @@
   "eslintConfig": {
     "extends": [
       "react-app"
+    ],
+    "rules": {
+      "no-restricted-imports": [
+        "error",
+        {
+          "paths": [
+            {
+              "name": "firebase/firestore",
+              "message": "Acesso a dados passa pelos repositórios de src/infrastructure/firestore/ (ADR-0010, spec 0029 AC-5). Precisa de uma operação nova? Adicione-a ao repositório do agregado, não aqui."
+            }
+          ]
+        }
+      ]
+    },
+    "overrides": [
+      {
+        "files": [
+          "src/infrastructure/**",
+          "src/firebase.js"
+        ],
+        "rules": {
+          "no-restricted-imports": "off"
+        }
+      },
+      {
+        "files": [
+          "**/__tests__/**"
+        ],
+        "rules": {
+          "no-restricted-imports": "off"
+        }
+      }
     ]
   },
   "browserslist": {

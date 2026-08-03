@@ -1,9 +1,16 @@
 /**
- * Forja do Mestre — camada de persistência (spec 0027, AC-2/AC-3/AC-5/AC-7).
+ * Forja do Mestre — regra e estado da persistência (spec 0027, AC-2/AC-3/AC-5/AC-7).
  *
- * Único ponto de contato da suíte com o Firestore. Nenhum componente da Forja
- * deve importar `firebase/firestore` diretamente: tudo passa por aqui, para que
- * o modelo de dados fique num lugar só e possa ser testado com o SDK mockado.
+ * Continua sendo o único ponto de contato da suíte com os dados do mundo: nenhum
+ * componente da Forja fala com o Firestore. O que mudou na onda 1.5 (spec 0030)
+ * é COMO se fala: o SDK sumiu daqui e o endereçamento/escrita/assinatura passou
+ * para `infrastructure/firestore/worldsRepo`. O que ficou é o que este arquivo
+ * sempre foi de verdade — a regra da Forja:
+ *
+ *  - validação em português (o que a UI mostra quando o mestre erra);
+ *  - `nameLower`, tags e atributos normalizados;
+ *  - o cruzamento das conexões pelos DOIS lados (`fromId`/`toId`);
+ *  - a semeadura do mundo demo, traduzindo ids locais em ids reais.
  *
  * Modelo:
  *   worlds/{worldId}                  { ownerUid, name, nameLower, description, genre, createdAt, updatedAt }
@@ -14,16 +21,15 @@
  *
  * Regras da casa:
  *  - `nameLower` é SEMPRE derivado de `name` (busca insensível a caixa — AC-4).
- *  - `createdAt`/`updatedAt` usam `serverTimestamp()`; toda escrita mexe em `updatedAt`.
+ *  - `createdAt`/`updatedAt` viajam como o sentinela `SERVER_TIMESTAMP` do repo,
+ *    que o traduz na borda; toda escrita mexe em `updatedAt`.
  *  - Nada falha em silêncio: entradas inválidas viram `Error` em PT-BR e erros do
  *    Firestore sobem para quem chamou (nos hooks, viram o campo `error`).
  */
 import { useState, useEffect, useCallback } from "react";
-import {
-  doc, getDoc, updateDoc, collection, addDoc, query, orderBy,
-  onSnapshot, getDocs, serverTimestamp, where, deleteDoc, writeBatch,
-} from "firebase/firestore";
-import { auth, db } from "../../firebase";
+import { auth } from "../../firebase";
+import * as worldsRepo from "../../infrastructure/firestore/worldsRepo";
+import { SERVER_TIMESTAMP } from "../../infrastructure/firestore/worldsRepo";
 import { buildDemoWorld } from "./model/demoWorld";
 
 /* ── Constantes ──────────────────────────────────────────────────────────── */
@@ -33,8 +39,8 @@ export const ENTITIES = "entities";
 export const CONNECTIONS = "connections";
 export const FOLDERS = "folders";
 
-/** Limite duro do Firestore: 500 operações por `writeBatch`. */
-export const BATCH_LIMIT = 500;
+/** Limite duro do Firestore: 500 operações por lote. Quem o aplica é o repo. */
+export { BATCH_LIMIT } from "../../infrastructure/firestore/worldsRepo";
 
 /** Escopos válidos de pasta (wiki = verbetes, journal = páginas do Diário). */
 export const FOLDER_SCOPES = ["wiki", "journal"];
@@ -81,39 +87,6 @@ function sanitizeAttributes(attributes) {
   }, []);
 }
 
-/* ── Helpers de caminho ──────────────────────────────────────────────────── */
-
-const worldsCol = () => collection(db, WORLDS);
-const worldRef = (worldId) => doc(db, WORLDS, worldId);
-const subCol = (worldId, name) => collection(db, WORLDS, worldId, name);
-const subRef = (worldId, name, id) => doc(db, WORLDS, worldId, name, id);
-
-/**
- * `serverTimestamp()` chega `null` no snapshot local (latency compensation) até o
- * servidor confirmar — o que jogaria o doc recém-escrito para o FIM de "recentes"
- * e mostraria "—" no tempo relativo. `serverTimestamps:"estimate"` entrega uma
- * estimativa local no lugar do `null`, corrigida no snapshot seguinte.
- */
-const snapToList = (snap) =>
-  snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) }));
-
-/**
- * Mesma leitura de `snapToList`, mais o estado de confirmação de CADA mundo.
- *
- * `d.metadata.hasPendingWrites` é `true` enquanto a escrita existe só no cliente
- * (latency compensation) — o snapshot local chega antes do servidor confirmar.
- * Isso importa fora do store: a regra de leitura das subcoleções faz `get()` no
- * documento do mundo, que ainda NÃO existe para o servidor, então assinar o
- * acervo de um mundo pendente volta `permission-denied`. Quem consome usa este
- * campo para não escolher sozinho um mundo que o servidor ainda não conhece.
- */
-const worldsFromSnap = (snap) =>
-  snap.docs.map((d) => ({
-    id: d.id,
-    ...d.data({ serverTimestamps: "estimate" }),
-    pendenteNoServidor: !!(d.metadata && d.metadata.hasPendingWrites),
-  }));
-
 /**
  * Dono gravado em CADA documento das subcoleções.
  *
@@ -127,25 +100,6 @@ function ownerUidAtual() {
   const uid = auth.currentUser && auth.currentUser.uid;
   if (!uid) throw new Error("É preciso estar autenticado para escrever neste mundo.");
   return uid;
-}
-
-/**
- * Aplica operações em lotes de no máximo `BATCH_LIMIT`, respeitando o limite do
- * Firestore. `ops` é uma lista de `{ type: 'set'|'update'|'delete', ref, data }`.
- * A ordem é preservada: o que precisa acontecer por último deve vir por último.
- */
-async function commitOps(ops) {
-  if (!ops.length) return;
-  for (let i = 0; i < ops.length; i += BATCH_LIMIT) {
-    const batch = writeBatch(db);
-    for (const op of ops.slice(i, i + BATCH_LIMIT)) {
-      if (op.type === "delete") batch.delete(op.ref);
-      else if (op.type === "update") batch.update(op.ref, op.data);
-      else batch.set(op.ref, op.data);
-    }
-    // Sequencial de propósito: lotes são atômicos entre si, não em conjunto.
-    await batch.commit(); // eslint-disable-line no-await-in-loop
-  }
 }
 
 /* ── Mundos ──────────────────────────────────────────────────────────────── */
@@ -163,17 +117,16 @@ async function commitOps(ops) {
 export async function createWorld(uid, { name, description, genre, demo } = {}) {
   const ownerUid = requireText(uid, "É preciso estar autenticado para criar um mundo.");
   const worldName = requireText(name, "Dê um nome ao mundo antes de criá-lo.");
-  const ref = await addDoc(worldsCol(), {
+  return worldsRepo.createWorld({
     ownerUid,
     name: worldName,
     nameLower: toNameLower(worldName),
     description: asText(description),
     genre: asText(genre),
     demo: demo === true,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+    createdAt: SERVER_TIMESTAMP,
+    updatedAt: SERVER_TIMESTAMP,
   });
-  return ref.id;
 }
 
 /** Atualiza campos do mundo. `name`, se vier, é validado e re-deriva `nameLower`. */
@@ -182,13 +135,13 @@ export async function updateWorld(worldId, patch = {}) {
   if (!patch || typeof patch !== "object") {
     throw new Error("Informe os campos do mundo que devem ser atualizados.");
   }
-  const data = { ...patch, updatedAt: serverTimestamp() };
+  const data = { ...patch, updatedAt: SERVER_TIMESTAMP };
   if ("name" in patch) {
     const worldName = requireText(patch.name, "O nome do mundo não pode ficar vazio.");
     data.name = worldName;
     data.nameLower = toNameLower(worldName);
   }
-  await updateDoc(worldRef(id), data);
+  await worldsRepo.updateWorld(id, data);
 }
 
 /**
@@ -197,7 +150,7 @@ export async function updateWorld(worldId, patch = {}) {
  */
 export async function touchWorld(worldId) {
   const id = requireText(worldId, "Informe qual mundo deve ser atualizado.");
-  await updateDoc(worldRef(id), { updatedAt: serverTimestamp() });
+  await worldsRepo.updateWorld(id, { updatedAt: SERVER_TIMESTAMP });
 }
 
 /**
@@ -207,19 +160,18 @@ export async function touchWorld(worldId) {
 export async function deleteWorld(worldId) {
   const id = requireText(worldId, "Informe qual mundo deve ser removido.");
   const ops = [];
-  for (const name of [ENTITIES, CONNECTIONS, FOLDERS]) {
-    const snap = await getDocs(subCol(id, name)); // eslint-disable-line no-await-in-loop
-    snap.docs.forEach((d) => ops.push({ type: "delete", ref: d.ref }));
+  for (const nome of [ENTITIES, CONNECTIONS, FOLDERS]) {
+    const docs = await worldsRepo.listSubcollection(id, nome); // eslint-disable-line no-await-in-loop
+    docs.forEach((d) => ops.push({ op: "delete", path: [nome, d.id] }));
   }
-  ops.push({ type: "delete", ref: worldRef(id) }); // o mundo por último
-  await commitOps(ops);
+  ops.push({ op: "delete", path: [] }); // o mundo por último
+  await worldsRepo.commitBatch(id, ops);
 }
 
 /** Lê um mundo avulso (sem listener). `null` se não existir. */
 export async function getWorld(worldId) {
   const id = requireText(worldId, "Informe qual mundo deve ser carregado.");
-  const snap = await getDoc(worldRef(id));
-  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  return worldsRepo.getWorld(id);
 }
 
 /* ── Entidades (wiki) ────────────────────────────────────────────────────── */
@@ -233,7 +185,7 @@ export async function createEntity(worldId, data = {}) {
   const id = requireText(worldId, "Selecione um mundo antes de criar a entidade.");
   const name = requireText(data.name, "Dê um nome à entidade antes de salvá-la.");
   const type = requireText(data.type, "Escolha o tipo da entidade antes de salvá-la.");
-  const ref = await addDoc(subCol(id, ENTITIES), {
+  return worldsRepo.createEntity(id, {
     ownerUid: ownerUidAtual(),
     type,
     name,
@@ -243,10 +195,9 @@ export async function createEntity(worldId, data = {}) {
     folderId: asText(data.folderId) || null,
     attributes: sanitizeAttributes(data.attributes),
     imageUrl: asText(data.imageUrl) || null,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+    createdAt: SERVER_TIMESTAMP,
+    updatedAt: SERVER_TIMESTAMP,
   });
-  return ref.id;
 }
 
 /** Atualiza um verbete. `name`/`tags`/`attributes` passam pelas mesmas regras da criação. */
@@ -256,7 +207,7 @@ export async function updateEntity(worldId, entityId, patch = {}) {
   if (!patch || typeof patch !== "object") {
     throw new Error("Informe os campos da entidade que devem ser atualizados.");
   }
-  const data = { ...patch, updatedAt: serverTimestamp() };
+  const data = { ...patch, updatedAt: SERVER_TIMESTAMP };
   if ("name" in patch) {
     const name = requireText(patch.name, "O nome da entidade não pode ficar vazio.");
     data.name = name;
@@ -268,30 +219,33 @@ export async function updateEntity(worldId, entityId, patch = {}) {
   if ("tags" in patch) data.tags = sanitizeTags(patch.tags);
   if ("attributes" in patch) data.attributes = sanitizeAttributes(patch.attributes);
   if ("folderId" in patch) data.folderId = asText(patch.folderId) || null;
-  await updateDoc(subRef(id, ENTITIES, docId), data);
+  await worldsRepo.updateEntity(id, docId, data);
 }
 
 /**
  * Remove o verbete E as conexões que o referenciam (AC-5: nada de arestas órfãs).
  * Entidade e conexões saem no mesmo lote sempre que couberem nos 500.
+ *
+ * As duas buscas (origem e destino) são nossas, não do repositório: cruzar os
+ * lados e decidir que uma autoligação só pode ser apagada uma vez é regra da
+ * Forja, não endereçamento.
  */
 export async function deleteEntity(worldId, entityId) {
   const id = requireText(worldId, "Selecione um mundo antes de remover a entidade.");
   const docId = requireText(entityId, "Informe qual entidade deve ser removida.");
-  const connections = subCol(id, CONNECTIONS);
-  const [fromSnap, toSnap] = await Promise.all([
-    getDocs(query(connections, where("fromId", "==", docId))),
-    getDocs(query(connections, where("toId", "==", docId))),
+  const [comoOrigem, comoDestino] = await Promise.all([
+    worldsRepo.listConnectionsByEndpoint(id, "fromId", docId),
+    worldsRepo.listConnectionsByEndpoint(id, "toId", docId),
   ]);
   const seen = new Set();
   const ops = [];
-  for (const d of [...fromSnap.docs, ...toSnap.docs]) {
-    if (seen.has(d.id)) continue; // autoligação legada apareceria nas duas buscas
-    seen.add(d.id);
-    ops.push({ type: "delete", ref: d.ref });
+  for (const conn of [...comoOrigem, ...comoDestino]) {
+    if (seen.has(conn.id)) continue; // autoligação legada apareceria nas duas buscas
+    seen.add(conn.id);
+    ops.push({ op: "delete", path: [CONNECTIONS, conn.id] });
   }
-  ops.push({ type: "delete", ref: subRef(id, ENTITIES, docId) });
-  await commitOps(ops);
+  ops.push({ op: "delete", path: [ENTITIES, docId] });
+  await worldsRepo.commitBatch(id, ops);
 }
 
 /* ── Conexões ────────────────────────────────────────────────────────────── */
@@ -311,36 +265,34 @@ export async function createConnection(worldId, conn = {}) {
     throw new Error("Uma entidade não pode ser conectada a ela mesma.");
   }
   const inverse = asText(conn.inverse) || relation;
-  const collectionRef = subCol(id, CONNECTIONS);
-  const [directSnap, reverseSnap] = await Promise.all([
-    getDocs(query(collectionRef, where("fromId", "==", fromId), where("toId", "==", toId))),
-    getDocs(query(collectionRef, where("fromId", "==", toId), where("toId", "==", fromId))),
+  const [diretas, inversas] = await Promise.all([
+    worldsRepo.listConnectionsBetween(id, fromId, toId),
+    worldsRepo.listConnectionsBetween(id, toId, fromId),
   ]);
   const wanted = relation.toLowerCase();
   const duplicated = [
-    ...directSnap.docs.map((d) => asText(d.data().relation)),
-    ...reverseSnap.docs.map((d) => asText(d.data().inverse)),
+    ...diretas.map((c) => asText(c.relation)),
+    ...inversas.map((c) => asText(c.inverse)),
   ].some((label) => label.toLowerCase() === wanted);
   if (duplicated) {
     throw new Error("Essa conexão já existe entre as duas entidades.");
   }
-  const ref = await addDoc(collectionRef, {
+  return worldsRepo.createConnection(id, {
     ownerUid: ownerUidAtual(),
     fromId,
     toId,
     relation,
     inverse,
     kind: asText(conn.kind) || null,
-    createdAt: serverTimestamp(),
+    createdAt: SERVER_TIMESTAMP,
   });
-  return ref.id;
 }
 
 /** Remove uma conexão (a UI pode chamar a partir de qualquer um dos dois lados). */
 export async function deleteConnection(worldId, connectionId) {
   const id = requireText(worldId, "Selecione um mundo antes de remover a conexão.");
   const docId = requireText(connectionId, "Informe qual conexão deve ser removida.");
-  await deleteDoc(subRef(id, CONNECTIONS, docId));
+  await worldsRepo.deleteConnection(id, docId);
 }
 
 /* ── Pastas ──────────────────────────────────────────────────────────────── */
@@ -353,16 +305,15 @@ export async function createFolder(worldId, data = {}) {
   if (!FOLDER_SCOPES.includes(scope)) {
     throw new Error(`Escopo de pasta inválido: "${scope}". Use "wiki" ou "journal".`);
   }
-  const ref = await addDoc(subCol(id, FOLDERS), {
+  return worldsRepo.createFolder(id, {
     ownerUid: ownerUidAtual(),
     name,
     scope,
     parentId: asText(data.parentId) || null,
     order: Number.isFinite(data.order) ? data.order : 0,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+    createdAt: SERVER_TIMESTAMP,
+    updatedAt: SERVER_TIMESTAMP,
   });
-  return ref.id;
 }
 
 /** Atualiza uma pasta (renomear, mover, reordenar). */
@@ -372,7 +323,7 @@ export async function updateFolder(worldId, folderId, patch = {}) {
   if (!patch || typeof patch !== "object") {
     throw new Error("Informe os campos da pasta que devem ser atualizados.");
   }
-  const data = { ...patch, updatedAt: serverTimestamp() };
+  const data = { ...patch, updatedAt: SERVER_TIMESTAMP };
   if ("name" in patch) {
     data.name = requireText(patch.name, "O nome da pasta não pode ficar vazio.");
   }
@@ -388,7 +339,7 @@ export async function updateFolder(worldId, folderId, patch = {}) {
     if (parentId === docId) throw new Error("Uma pasta não pode ser filha dela mesma.");
     data.parentId = parentId;
   }
-  await updateDoc(subRef(id, FOLDERS, docId), data);
+  await worldsRepo.updateFolder(id, docId, data);
 }
 
 /**
@@ -399,24 +350,23 @@ export async function updateFolder(worldId, folderId, patch = {}) {
 export async function deleteFolder(worldId, folderId) {
   const id = requireText(worldId, "Selecione um mundo antes de remover a pasta.");
   const docId = requireText(folderId, "Informe qual pasta deve ser removida.");
-  const ref = subRef(id, FOLDERS, docId);
-  const snap = await getDoc(ref);
-  const parentId = snap.exists() ? (snap.data().parentId ?? null) : null;
+  const pasta = await worldsRepo.getFolder(id, docId);
+  const parentId = pasta ? (pasta.parentId ?? null) : null;
 
-  const [entitySnap, childSnap] = await Promise.all([
-    getDocs(query(subCol(id, ENTITIES), where("folderId", "==", docId))),
-    getDocs(query(subCol(id, FOLDERS), where("parentId", "==", docId))),
+  const [entidades, subpastas] = await Promise.all([
+    worldsRepo.listEntitiesInFolder(id, docId),
+    worldsRepo.listChildFolders(id, docId),
   ]);
 
   const ops = [];
-  entitySnap.docs.forEach((d) => ops.push({
-    type: "update", ref: d.ref, data: { folderId: null, updatedAt: serverTimestamp() },
+  entidades.forEach((e) => ops.push({
+    op: "update", path: [ENTITIES, e.id], data: { folderId: null, updatedAt: SERVER_TIMESTAMP },
   }));
-  childSnap.docs.forEach((d) => ops.push({
-    type: "update", ref: d.ref, data: { parentId, updatedAt: serverTimestamp() },
+  subpastas.forEach((f) => ops.push({
+    op: "update", path: [FOLDERS, f.id], data: { parentId, updatedAt: SERVER_TIMESTAMP },
   }));
-  ops.push({ type: "delete", ref });
-  await commitOps(ops);
+  ops.push({ op: "delete", path: [FOLDERS, docId] });
+  await worldsRepo.commitBatch(id, ops);
 }
 
 /* ── Mundo demo (AC-7) ───────────────────────────────────────────────────── */
@@ -453,7 +403,13 @@ export async function seedDemoWorld(uid) {
   return worldId;
 }
 
-/** Grava entidades e conexões do seed no mundo já criado. */
+/**
+ * Grava entidades e conexões do seed no mundo já criado.
+ *
+ * Os ids são reservados ANTES da escrita (`newSubDocId`) justamente para que as
+ * conexões já nasçam apontando para os documentos certos — entidades e arestas
+ * entram no MESMO lote, e um lote não pode ler o id que ele próprio vai gerar.
+ */
 async function popularDemo(worldId, seed) {
   const localToReal = new Map();
   const dono = ownerUidAtual();
@@ -467,11 +423,11 @@ async function popularDemo(worldId, seed) {
     }
     const name = requireText(entity.name, "Uma entidade do mundo demo está sem nome.");
     const type = requireText(entity.type, `A entidade "${name}" do mundo demo está sem tipo.`);
-    const ref = doc(subCol(worldId, ENTITIES)); // id gerado pelo cliente
-    localToReal.set(localId, ref.id);
+    const realId = worldsRepo.newSubDocId(worldId, ENTITIES); // id gerado pelo cliente
+    localToReal.set(localId, realId);
     ops.push({
-      type: "set",
-      ref,
+      op: "set",
+      path: [ENTITIES, realId],
       data: {
         ownerUid: dono,
         type,
@@ -482,8 +438,8 @@ async function popularDemo(worldId, seed) {
         folderId: null,
         attributes: sanitizeAttributes(entity.attributes),
         imageUrl: asText(entity.imageUrl) || null,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+        createdAt: SERVER_TIMESTAMP,
+        updatedAt: SERVER_TIMESTAMP,
       },
     });
   }
@@ -498,8 +454,8 @@ async function popularDemo(worldId, seed) {
     }
     const relation = requireText(conn.relation, "Uma conexão do mundo demo está sem relação.");
     ops.push({
-      type: "set",
-      ref: doc(subCol(worldId, CONNECTIONS)),
+      op: "set",
+      path: [CONNECTIONS, worldsRepo.newSubDocId(worldId, CONNECTIONS)],
       data: {
         ownerUid: dono,
         fromId,
@@ -507,35 +463,36 @@ async function popularDemo(worldId, seed) {
         relation,
         inverse: asText(conn.inverse) || relation,
         kind: asText(conn.kind) || null,
-        createdAt: serverTimestamp(),
+        createdAt: SERVER_TIMESTAMP,
       },
     });
   }
 
-  await commitOps(ops);
+  await worldsRepo.commitBatch(worldId, ops);
 }
 
 /* ── Hooks ───────────────────────────────────────────────────────────────── */
 
 /**
  * Assina uma coleção e devolve `{ data, loading, error }`.
- * `buildQuery` devolve a query ou `null` (nada para assinar → lista vazia).
- * `mapSnap` traduz o snapshot em lista — trocável para quem precisa de mais do
- * que os campos do documento (ver `worldsFromSnap`).
+ *
+ * `montarAssinatura` devolve a função de assinatura do repositório — ou `null`
+ * quando não há nada para assinar (sem uid, sem mundo ativo). Retornar `null` e
+ * não assinar é o que mantém a Forja quieta enquanto o mestre não escolheu nada:
+ * `loading` fica `false` e a lista fica vazia sem tocar a rede.
  */
-function useCollection(buildQuery, deps, mapSnap = snapToList) {
+function useCollection(montarAssinatura, deps) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    const q = buildQuery();
-    if (!q) { setData([]); setLoading(false); setError(null); return undefined; }
+    const assinar = montarAssinatura();
+    if (!assinar) { setData([]); setLoading(false); setError(null); return undefined; }
     setLoading(true);
     setError(null);
-    const unsub = onSnapshot(
-      q,
-      (snap) => { setData(mapSnap(snap)); setLoading(false); },
+    const unsub = assinar(
+      (lista) => { setData(lista); setLoading(false); },
       (err) => { setError(err); setData([]); setLoading(false); },
     );
     return () => unsub();
@@ -548,21 +505,20 @@ function useCollection(buildQuery, deps, mapSnap = snapToList) {
 /**
  * Mundos do mestre, do mais recente para o mais antigo (AC-2).
  *
- * Cada mundo carrega `pendenteNoServidor` (ver `worldsFromSnap`): `true` enquanto
+ * Cada mundo carrega `pendenteNoServidor` (ver `worldsRepo`): `true` enquanto
  * a criação só existe no cliente. Ler o acervo de um mundo pendente é negado.
  *
- * ATENÇÃO (infra): filtro de igualdade em `ownerUid` + ordenação por `updatedAt`
- * exige um ÍNDICE COMPOSTO em `worlds` (ownerUid ASC, updatedAt DESC). Sem ele o
+ * ATENÇÃO (infra): a query do repositório (igualdade em `ownerUid` + ordenação
+ * por `updatedAt` desc) exige um ÍNDICE COMPOSTO em `worlds`. Sem ele o
  * Firestore recusa a query e o erro chega em `error` com o link de criação do
- * índice no console. Criar antes de liberar a Forja em produção.
+ * índice no console.
  */
 export function useWorlds(uid) {
   const { data, loading, error } = useCollection(
     () => (uid
-      ? query(worldsCol(), where("ownerUid", "==", uid), orderBy("updatedAt", "desc"))
+      ? (onChange, onError) => worldsRepo.watchWorldsByOwner(uid, onChange, onError)
       : null),
     [uid],
-    worldsFromSnap,
   );
   return { worlds: data, loading, error };
 }
@@ -570,7 +526,10 @@ export function useWorlds(uid) {
 /** Verbetes do mundo ativo (AC-3/AC-4). Ordenação fina fica com a UI. */
 export function useEntities(worldId) {
   const { data, loading, error } = useCollection(
-    () => (worldId ? query(subCol(worldId, ENTITIES), orderBy("updatedAt", "desc")) : null),
+    () => (worldId
+      ? (onChange, onError) => worldsRepo.watchSubcollection(
+        worldId, ENTITIES, { campo: "updatedAt", direcao: "desc" }, onChange, onError)
+      : null),
     [worldId],
   );
   return { entities: data, loading, error };
@@ -579,7 +538,10 @@ export function useEntities(worldId) {
 /** Conexões do mundo ativo (AC-5). */
 export function useConnections(worldId) {
   const { data, loading, error } = useCollection(
-    () => (worldId ? query(subCol(worldId, CONNECTIONS), orderBy("createdAt", "desc")) : null),
+    () => (worldId
+      ? (onChange, onError) => worldsRepo.watchSubcollection(
+        worldId, CONNECTIONS, { campo: "createdAt", direcao: "desc" }, onChange, onError)
+      : null),
     [worldId],
   );
   return { connections: data, loading, error };
@@ -588,7 +550,10 @@ export function useConnections(worldId) {
 /** Pastas do mundo ativo. */
 export function useFolders(worldId) {
   const { data, loading, error } = useCollection(
-    () => (worldId ? query(subCol(worldId, FOLDERS), orderBy("order", "asc")) : null),
+    () => (worldId
+      ? (onChange, onError) => worldsRepo.watchSubcollection(
+        worldId, FOLDERS, { campo: "order", direcao: "asc" }, onChange, onError)
+      : null),
     [worldId],
   );
   return { folders: data, loading, error };
@@ -649,9 +614,9 @@ export function useActiveWorld(uid) {
   useEffect(() => {
     if (!uid || !activeWorldId) return undefined;
     let cancelled = false;
-    getDoc(worldRef(activeWorldId))
-      .then((snap) => {
-        if (cancelled || snap.exists()) return;
+    worldsRepo.getWorld(activeWorldId)
+      .then((mundo) => {
+        if (cancelled || mundo) return;
         writeStoredWorld(uid, null);
         setActive(null);
       })

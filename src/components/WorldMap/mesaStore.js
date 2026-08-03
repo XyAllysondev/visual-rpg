@@ -90,20 +90,27 @@
  * ════════════════════════════════════════════════════════════════════ */
 
 import { useEffect, useState } from "react";
-import {
-  doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, query, where,
-  onSnapshot, serverTimestamp, writeBatch, runTransaction,
-} from "firebase/firestore";
-import { db } from "../../firebase";
+/* Desde a onda 1.5 (spec 0030) nenhuma linha daqui fala `firebase/firestore`: caminho,
+   lote, transação e política de erro moram no repositório. O que ficou neste arquivo é
+   o que É deste arquivo — as projeções da lista branca, a régua de estados, o formato
+   dos documentos e as decisões das corridas entre abas. */
+import * as mesaRepo from "../../infrastructure/firestore/mesaRepo";
 import {
   cabeNoDocumento, criarMascara, desserializar, serializar, TETO_DA_MASCARA_BYTES,
 } from "./model/fogMask";
 import { ehDelta, idDoDelta, mesclarRecebidos } from "./model/fogDelta";
 import { construirMapaPadrao, ehMapaPadrao, moldeDoMapaPadrao } from "./model/mapaPadrao";
 import { ESTADOS_NO, ESTADOS_TRILHA } from "./model/revelacao";
-import { getBackground, NODES, EDGES, USERS, WORLDMAPS as WORLDMAPS_DO_ATELIE } from "./worldMapStore";
+/* `USERS`/`WORLDMAPS` saíram desta lista porque só existiam para montar o caminho do
+   ateliê à mão — quem o monta agora é `paths.js` (`atelieMapDoc`/`atelieSubCol`). Os
+   exports continuam existindo no `worldMapStore`; deixá-los importados sem uso viraria
+   aviso de lint, e aviso de lint reprova o build com `CI=true`. */
+import { getBackground, NODES, EDGES } from "./worldMapStore";
 
-/* ── Caminhos ────────────────────────────────────────────────────────── */
+/* ── Nomes das coleções ──────────────────────────────────────────────────
+   Continuam exportados porque a tela e os testes os leem, mas eles NÃO montam
+   mais caminho nenhum: quem endereça documento é `infrastructure/firestore/paths.js`,
+   via os ALVOS do `mesaRepo`. Renomear uma coleção se faz lá, e lá quebra teste. */
 
 export const CAMPAIGNS = "campaigns";
 export const WORLDMAPS = "worldmaps";
@@ -114,10 +121,10 @@ export const GM = "gm";
 export const MEDIA = "media";
 
 /** Id fixo do documento único dentro de `party`, `fog` e `gm`. */
-export const ESTADO_DOC_ID = "estado";
+export const ESTADO_DOC_ID = mesaRepo.ESTADO_DOC_ID;
 
 /** Id fixo da cópia da ilustração dentro de `media`. */
-export const FUNDO_DOC_ID = "background";
+export const FUNDO_DOC_ID = mesaRepo.FUNDO_DOC_ID;
 
 /** Valor de `backgroundRef` na instância quando a arte foi copiada para cá. */
 export const FUNDO_REF = `${MEDIA}/${FUNDO_DOC_ID}`;
@@ -132,8 +139,8 @@ export const FUNDO_REF = `${MEDIA}/${FUNDO_DOC_ID}`;
  */
 export const SEPARADOR_DA_INSTANCIA = "~";
 
-/** Limite duro do Firestore: 500 operações por `writeBatch`. */
-export const BATCH_LIMIT = 500;
+/** Limite duro do Firestore: 500 operações por lote. Quem o aplica é o repositório. */
+export const BATCH_LIMIT = mesaRepo.BATCH_LIMIT;
 
 /* ── Validação ───────────────────────────────────────────────────────── */
 
@@ -147,38 +154,21 @@ function exigir(valor, mensagem) {
   return t;
 }
 
-/* ── Refs ────────────────────────────────────────────────────────────── */
-
-const instanciasCol = (cid) => collection(db, CAMPAIGNS, cid, WORLDMAPS);
-const instanciaRef = (cid, iid) => doc(db, CAMPAIGNS, cid, WORLDMAPS, iid);
-const reveladoCol = (cid, iid) => collection(db, CAMPAIGNS, cid, WORLDMAPS, iid, REVEALED);
-const reveladoRef = (cid, iid, docId) => doc(db, CAMPAIGNS, cid, WORLDMAPS, iid, REVEALED, docId);
-const partyRef = (cid, iid) => doc(db, CAMPAIGNS, cid, WORLDMAPS, iid, PARTY, ESTADO_DOC_ID);
-const fogCol = (cid, iid) => collection(db, CAMPAIGNS, cid, WORLDMAPS, iid, FOG);
-const fogRef = (cid, iid) => doc(db, CAMPAIGNS, cid, WORLDMAPS, iid, FOG, ESTADO_DOC_ID);
-const deltaRef = (cid, iid, docId) => doc(db, CAMPAIGNS, cid, WORLDMAPS, iid, FOG, docId);
-const gmRef = (cid, iid) => doc(db, CAMPAIGNS, cid, WORLDMAPS, iid, GM, ESTADO_DOC_ID);
-const fundoDaMesaRef = (cid, iid) => doc(db, CAMPAIGNS, cid, WORLDMAPS, iid, MEDIA, FUNDO_DOC_ID);
-
-const snapToList = (snap) =>
-  snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) }));
-
-/**
- * Aplica operações em lotes de no máximo `BATCH_LIMIT`.
- * `ops` é `{ type:'set'|'update'|'delete', ref, data }`, na ordem de execução.
- */
-async function commitOps(ops) {
-  if (!ops.length) return;
-  for (let i = 0; i < ops.length; i += BATCH_LIMIT) {
-    const batch = writeBatch(db);
-    for (const op of ops.slice(i, i + BATCH_LIMIT)) {
-      if (op.type === "delete") batch.delete(op.ref);
-      else if (op.type === "update") batch.update(op.ref, op.data);
-      else batch.set(op.ref, op.data);
-    }
-    await batch.commit(); // eslint-disable-line no-await-in-loop
-  }
-}
+/* ── Como este arquivo endereça documento ────────────────────────────────
+ *
+ *  Não endereça. Toda operação nomeia um ALVO do `mesaRepo` — `"instancia"`,
+ *  `"party"`, `"gm"`, `"fog"`, `"revelado"`, `"fundo"` — e o repositório traduz
+ *  para o caminho de `paths.js`.
+ *
+ *  Isso vale um parágrafo porque é o que mantém o segredo mecânico: `"gm"` e
+ *  `"party"` são documentos DIFERENTES (o jogador lê um e não lê o outro), e a
+ *  diferença entre eles deixou de ser uma string a um caractere de distância no
+ *  meio de um `doc(db, …)` de sete segmentos.
+ *
+ *  O carimbo de tempo do servidor também não se monta aqui: pede-se por nome
+ *  (`carimbar: ["updatedAt"]`), porque `serverTimestamp()` é FieldValue do SDK e
+ *  não pode atravessar a fronteira (spec 0030 AC-4).
+ * ────────────────────────────────────────────────────────────────────── */
 
 /* ════════════════════════════════════════════════════════════════════
  *  O ID DA INSTÂNCIA
@@ -470,19 +460,17 @@ async function lerMolde(uid, mapId) {
     const { mapa, nos, trilhas } = construirMapaPadrao();
     return { mapa: { ...moldeDoMapaPadrao(), ...mapa, id: mapId }, nos, trilhas };
   }
-  const raiz = await getDoc(doc(db, USERS, uid, WORLDMAPS_DO_ATELIE, mapId));
-  if (!raiz.exists()) {
+  const raiz = await mesaRepo.lerMoldeDoAtelie(uid, mapId);
+  if (!raiz) {
     throw new Error("Este mapa-múndi não existe mais no seu ateliê. Atualize a lista e tente de novo.");
   }
+  /* `NODES`/`EDGES` continuam vindo do `worldMapStore`: quem é dono do formato do
+     ateliê é ele, não a persistência da mesa. */
   const [nos, trilhas] = await Promise.all([
-    getDocs(collection(db, USERS, uid, WORLDMAPS_DO_ATELIE, mapId, NODES)),
-    getDocs(collection(db, USERS, uid, WORLDMAPS_DO_ATELIE, mapId, EDGES)),
+    mesaRepo.listarSubcolecaoDoMolde(uid, mapId, NODES),
+    mesaRepo.listarSubcolecaoDoMolde(uid, mapId, EDGES),
   ]);
-  return {
-    mapa: { id: raiz.id, ...raiz.data() },
-    nos: snapToList(nos),
-    trilhas: snapToList(trilhas),
-  };
+  return { mapa: raiz, nos, trilhas };
 }
 
 /** O nó onde o grupo começa: o declarado no molde ou, na falta, o primeiro. */
@@ -546,22 +534,22 @@ export async function levarParaMesa(uid, mapId, campaignId, opcoes = {}) {
   const cid = exigir(campaignId, "Escolha a campanha que vai receber o mapa.");
   const instanceId = idDaInstancia(dono, molde);
 
-  const jaExiste = await getDoc(instanciaRef(cid, instanceId));
-  if (jaExiste.exists() && !opcoes.recomecar) throw new Error(INSTANCIA_JA_EXISTE);
+  const jaExiste = await mesaRepo.existeInstancia(cid, instanceId);
+  if (jaExiste && !opcoes.recomecar) throw new Error(INSTANCIA_JA_EXISTE);
 
   const { mapa, nos, trilhas } = await lerMolde(dono, molde);
   const inicio = noInicial(mapa, nos);
 
   /* Recomeçar limpa o que havia antes — inclusive as revelações. É o único
      caminho que regride o revelado, e ele é explícito e pedido. */
-  if (jaExiste.exists() && opcoes.recomecar) await limparProgresso(cid, instanceId);
+  if (jaExiste && opcoes.recomecar) await limparProgresso(cid, instanceId);
 
   const ops = [];
 
   ops.push({
-    type: "set",
-    ref: instanciaRef(cid, instanceId),
-    data: {
+    tipo: "set",
+    alvo: "instancia",
+    dados: {
       ...cabecalhoDaInstancia(mapa),
       /* Ponteiro para o molde — é RASTRO, não dependência: o jogador não
          alcança este caminho, e a mesa continua jogável se ele sumir (AC-7). */
@@ -573,15 +561,14 @@ export async function levarParaMesa(uid, mapId, campaignId, opcoes = {}) {
       masterUid: dono,
       startNodeId: inicio?.id || null,
       backgroundRef: null, // preenchido abaixo quando a arte é copiada
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
     },
+    carimbar: ["createdAt", "updatedAt"],
   });
 
   ops.push({
-    type: "set",
-    ref: partyRef(cid, instanceId),
-    data: {
+    tipo: "set",
+    alvo: "party",
+    dados: {
       currentNodeId: inicio?.id || null,
       x: numero(inicio?.x, 0),
       y: numero(inicio?.y, 0),
@@ -591,19 +578,19 @@ export async function levarParaMesa(uid, mapId, campaignId, opcoes = {}) {
       supplies: null,
       speedModifier: 1,
       flags: {},
-      updatedAt: serverTimestamp(),
     },
+    carimbar: ["updatedAt"],
   });
 
   ops.push({
-    type: "set",
-    ref: gmRef(cid, instanceId),
-    data: {
+    tipo: "set",
+    alvo: "gm",
+    dados: {
       triggeredEventIds: [],
       pendingEncounter: null,
       gmScratch: "",
-      updatedAt: serverTimestamp(),
     },
+    carimbar: ["updatedAt"],
   });
 
   /* Névoa FECHADA. A máscara toda em zero é o estado coberto (`fogMask.js`);
@@ -615,16 +602,16 @@ export async function levarParaMesa(uid, mapId, campaignId, opcoes = {}) {
     const fechada = criarMascara(largura, altura);
     const data = serializar(fechada);
     ops.push({
-      type: "set",
-      ref: fogRef(cid, instanceId),
-      data: {
+      tipo: "set",
+      alvo: "fog", // sem `docId` → `fog/estado`, a base consolidada
+      dados: {
         data,
         largura: fechada.largura,
         altura: fechada.altura,
         escala: fechada.escala,
         bytes: data.length,
-        updatedAt: serverTimestamp(),
       },
+      carimbar: ["updatedAt"],
     });
   }
 
@@ -638,35 +625,36 @@ export async function levarParaMesa(uid, mapId, campaignId, opcoes = {}) {
     });
     if (arte) {
       ops.push({
-        type: "set",
-        ref: fundoDaMesaRef(cid, instanceId),
-        data: { kind: "background", data: arte, bytes: arte.length, updatedAt: serverTimestamp() },
+        tipo: "set",
+        alvo: "fundo",
+        dados: { kind: "background", data: arte, bytes: arte.length },
+        carimbar: ["updatedAt"],
       });
-      ops.push({
-        type: "update",
-        ref: instanciaRef(cid, instanceId),
-        data: { backgroundRef: FUNDO_REF },
-      });
+      /* Sem carimbo, de propósito: era assim no legado. Este `update` é o remate
+         de uma criação que acabou de gravar `updatedAt` duas linhas acima. */
+      ops.push({ tipo: "update", alvo: "instancia", dados: { backgroundRef: FUNDO_REF } });
     }
   }
 
-  await commitOps(ops);
+  await mesaRepo.aplicarEmLote(cid, instanceId, ops);
   return { instanceId, startNodeId: inicio?.id || null, nos: nos.length, trilhas: trilhas.length };
 }
 
 /** Apaga tudo que pende da instância, menos o documento raiz. */
 async function limparProgresso(cid, instanceId) {
-  const revelados = await getDocs(reveladoCol(cid, instanceId));
-  const ops = revelados.docs.map((d) => ({ type: "delete", ref: d.ref }));
+  const revelados = await mesaRepo.listarRevelado(cid, instanceId);
+  const ops = revelados.map((d) => ({ tipo: "delete", alvo: "revelado", docId: d.id }));
   /* A névoa é uma COLEÇÃO desde a F7 (base consolidada + deltas pendentes).
      Apagar só `fog/estado` deixaria os deltas órfãos, e a mesa recomeçada
-     nasceria com pedaços do mapa antigo já abertos. */
-  const nevoa = await getDocs(fogCol(cid, instanceId)).catch(() => ({ docs: [] }));
-  nevoa.docs.forEach((d) => ops.push({ type: "delete", ref: d.ref }));
-  ops.push({ type: "delete", ref: partyRef(cid, instanceId) });
-  ops.push({ type: "delete", ref: fogRef(cid, instanceId) });
-  ops.push({ type: "delete", ref: gmRef(cid, instanceId) });
-  await commitOps(ops);
+     nasceria com pedaços do mapa antigo já abertos.
+     `listarNevoa` é a única leitura `silent` do repositório: o legado engolia a
+     falha aqui para que recomeçar nunca travasse (AC-7 preserva). */
+  const nevoa = await mesaRepo.listarNevoa(cid, instanceId);
+  nevoa.forEach((d) => ops.push({ tipo: "delete", alvo: "fog", docId: d.id }));
+  ops.push({ tipo: "delete", alvo: "party" });
+  ops.push({ tipo: "delete", alvo: "fog" });
+  ops.push({ tipo: "delete", alvo: "gm" });
+  await mesaRepo.aplicarEmLote(cid, instanceId, ops);
 }
 
 /**
@@ -680,9 +668,9 @@ export async function removerDaMesa(campaignId, instanceId) {
   const cid = exigir(campaignId, "Informe de qual campanha o mapa deve sair.");
   const iid = exigir(instanceId, "Informe qual mapa da mesa deve sair.");
   await limparProgresso(cid, iid);
-  await commitOps([
-    { type: "delete", ref: fundoDaMesaRef(cid, iid) },
-    { type: "delete", ref: instanciaRef(cid, iid) },
+  await mesaRepo.aplicarEmLote(cid, iid, [
+    { tipo: "delete", alvo: "fundo" },
+    { tipo: "delete", alvo: "instancia" },
   ]);
 }
 
@@ -751,7 +739,7 @@ export async function publicarRevelacao(campaignId, instanceId, conteudo = {}, o
   const anteriores = new Map();
   const jaTem = Array.isArray(opcoes.existentes)
     ? opcoes.existentes
-    : snapToList(await getDocs(reveladoCol(cid, iid)));
+    : await mesaRepo.listarRevelado(cid, iid);
   jaTem.forEach((d) => { if (d?.id) anteriores.set(d.id, d); });
 
   const ops = [];
@@ -760,11 +748,7 @@ export async function publicarRevelacao(campaignId, instanceId, conteudo = {}, o
   const enfileirar = (docId, novo) => {
     const antes = anteriores.get(docId);
     if (antes && mesmoDocumento(antes, { ...novo, id: docId })) { pulados += 1; return; }
-    ops.push({
-      type: "set",
-      ref: reveladoRef(cid, iid, docId),
-      data: { ...novo, updatedAt: serverTimestamp() },
-    });
+    ops.push({ tipo: "set", alvo: "revelado", docId, dados: novo, carimbar: ["updatedAt"] });
   };
 
   nos.forEach((item) => {
@@ -791,7 +775,7 @@ export async function publicarRevelacao(campaignId, instanceId, conteudo = {}, o
     enfileirar(idReveladoDoEvento(texto(alvo.id)), projecaoDoEvento(alvo));
   });
 
-  await commitOps(ops);
+  await mesaRepo.aplicarEmLote(cid, iid, ops);
   return { gravados: ops.length, pulados };
 }
 
@@ -841,11 +825,14 @@ export async function rebaixarRevelacao(campaignId, instanceId, docId, estado = 
   const iid = exigir(instanceId, "Informe qual mapa da mesa deve mudar.");
   const alvo = exigir(docId, "Informe o que deve ser rebaixado.");
   const novo = texto(estado);
+  /* APAGA o documento — não grava `state: "hidden"`. Um documento com estado oculto
+     contaria ao jogador que há alguma coisa ali para descobrir, e o segredo vaza pela
+     DIFERENÇA, não pelo dado. `hidden` é a ausência (ver `ESTADOS_DO_NO`). */
   if (!novo || novo === "hidden") {
-    await deleteDoc(reveladoRef(cid, iid, alvo));
+    await mesaRepo.apagarRevelado(cid, iid, alvo);
     return;
   }
-  await updateDoc(reveladoRef(cid, iid, alvo), { state: novo, updatedAt: serverTimestamp() });
+  await mesaRepo.atualizarRevelado(cid, iid, alvo, { state: novo });
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -884,12 +871,13 @@ export async function sincronizarMolde(uid, mapId, campaignId, instanceId) {
   const porNo = new Map(nos.filter((n) => texto(n?.id)).map((n) => [n.id, n]));
   const porTrilha = new Map(trilhas.filter((t) => texto(t?.id)).map((t) => [t.id, t]));
 
-  const revelados = snapToList(await getDocs(reveladoCol(cid, iid)));
+  const revelados = await mesaRepo.listarRevelado(cid, iid);
 
   const ops = [{
-    type: "update",
-    ref: instanciaRef(cid, iid),
-    data: { ...cabecalhoDaInstancia(mapa), syncedAt: serverTimestamp(), updatedAt: serverTimestamp() },
+    tipo: "update",
+    alvo: "instancia",
+    dados: cabecalhoDaInstancia(mapa),
+    carimbar: ["syncedAt", "updatedAt"],
   }];
 
   let atualizados = 0;
@@ -912,14 +900,16 @@ export async function sincronizarMolde(uid, mapId, campaignId, instanceId) {
 
     if (mesmoDocumento(atual, { ...novo, id: atual.id })) { preservados += 1; return; }
     ops.push({
-      type: "set",
-      ref: reveladoRef(cid, iid, atual.id),
-      data: { ...novo, updatedAt: serverTimestamp() },
+      tipo: "set",
+      alvo: "revelado",
+      docId: atual.id,
+      dados: novo,
+      carimbar: ["updatedAt"],
     });
     atualizados += 1;
   });
 
-  await commitOps(ops);
+  await mesaRepo.aplicarEmLote(cid, iid, ops);
   return { atualizados, preservados, orfaos };
 }
 
@@ -1018,10 +1008,11 @@ export async function moverGrupo(campaignId, instanceId, destino = {}) {
     x: destino.x,
     y: destino.y,
     movedBy: texto(destino.quem) || null,
-    updatedAt: serverTimestamp(),
   };
+  /* `viagem` só entra quando quem chama a informou: mover SEM falar da viagem não pode
+     apagar o percurso de quem está viajando. O `updatedAt` é carimbado pelo repositório. */
   if ("viagem" in destino) data.viagem = destino.viagem || null;
-  await updateDoc(partyRef(cid, iid), data);
+  await mesaRepo.atualizarParty(cid, iid, data);
 }
 
 /**
@@ -1040,10 +1031,7 @@ export async function moverGrupo(campaignId, instanceId, destino = {}) {
 export async function atualizarViagem(campaignId, instanceId, viagem) {
   const cid = exigir(campaignId, "Informe em qual campanha o grupo está.");
   const iid = exigir(instanceId, "Informe em qual mapa da mesa o grupo está.");
-  await updateDoc(partyRef(cid, iid), {
-    viagem: viagem || null,
-    updatedAt: serverTimestamp(),
-  });
+  await mesaRepo.atualizarParty(cid, iid, { viagem: viagem || null });
 }
 
 /**
@@ -1070,25 +1058,23 @@ export async function concluirViagem(campaignId, instanceId, viagemId, patch = {
   const cid = exigir(campaignId, "Informe em qual campanha o grupo está.");
   const iid = exigir(instanceId, "Informe em qual mapa da mesa o grupo está.");
   const alvo = texto(viagemId);
-  const ref = partyRef(cid, iid);
   const permitidos = ["currentNodeId", "x", "y", "inGameDatetime", "supplies", "speedModifier", "flags"];
 
-  return runTransaction(db, async (tx) => {
-    const snap = await tx.get(ref);
-    const atual = snap.exists() ? snap.data() : null;
+  /* A DECISÃO é daqui: qual viagem é essa, e se ela ainda está de pé. O repositório só
+     garante que ler e escrever aconteçam como uma coisa só. */
+  return mesaRepo.transacionar(cid, iid, "party", (atual) => {
     const emCurso = atual?.viagem || null;
 
     /* Já fechada por outro cliente (ou por outra aba desta mesma pessoa). Não é
-       erro: é a corrida acontecendo e sendo resolvida. */
+       erro: é a corrida acontecendo e sendo resolvida. Sem `gravar`, nada é escrito. */
     if (alvo && emCurso && texto(emCurso.id) && texto(emCurso.id) !== alvo) {
-      return { aplicou: false, motivo: "outra-viagem" };
+      return { resultado: { aplicou: false, motivo: "outra-viagem" } };
     }
-    if (alvo && !emCurso) return { aplicou: false, motivo: "ja-concluida" };
+    if (alvo && !emCurso) return { resultado: { aplicou: false, motivo: "ja-concluida" } };
 
-    const data = { viagem: null, updatedAt: serverTimestamp() };
-    permitidos.forEach((campo) => { if (campo in patch) data[campo] = patch[campo]; });
-    tx.set(ref, data, { merge: true });
-    return { aplicou: true, motivo: "" };
+    const gravar = { viagem: null };
+    permitidos.forEach((campo) => { if (campo in patch) gravar[campo] = patch[campo]; });
+    return { resultado: { aplicou: true, motivo: "" }, gravar, carimbar: ["updatedAt"] };
   });
 }
 
@@ -1107,12 +1093,15 @@ export async function atualizarParty(campaignId, instanceId, patch = {}) {
   const permitidos = [
     "currentNodeId", "x", "y", "inGameDatetime", "supplies", "speedModifier", "flags", "viagem",
   ];
-  const data = { updatedAt: serverTimestamp() };
+  /* `campo in patch` e não `patch[campo] !== undefined`: desligar a pausa da viagem
+     manda `flags` SEM a chave da pausa, e desligar um encontro é a AUSÊNCIA do campo,
+     nunca um `false` gravado. Gravar `false` diria ao jogador que a coisa existe. */
+  const data = {};
   permitidos.forEach((campo) => { if (campo in patch) data[campo] = patch[campo]; });
-  if (Object.keys(data).length === 1) {
+  if (Object.keys(data).length === 0) {
     throw new Error("Informe o que deve mudar no grupo.");
   }
-  await updateDoc(partyRef(cid, iid), data);
+  await mesaRepo.atualizarParty(cid, iid, data);
 }
 
 /*  ── POR QUE NÃO EXISTE MAIS UM "salvarFogDaMesa" ───────────────────
@@ -1154,8 +1143,10 @@ export async function salvarDeltaDaNevoa(campaignId, instanceId, delta, opcoes =
   if (!delta || !delta.bits) throw new Error("Não há névoa nova para transmitir neste mapa.");
 
   const id = idDoDelta(opcoes.sessao, opcoes.n);
+  /* A CODIFICAÇÃO é daqui (RLE+varint, `model/fogMask.js`). O repositório recebe a
+     string pronta e grava — nenhum bit é mexido do outro lado da fronteira (AC-3). */
   const data = serializar(delta);
-  await setDoc(deltaRef(cid, iid, id), {
+  await mesaRepo.salvarNevoaDelta(cid, iid, id, {
     kind: "delta",
     data,
     largura: delta.largura,
@@ -1163,7 +1154,6 @@ export async function salvarDeltaDaNevoa(campaignId, instanceId, delta, opcoes =
     escala: delta.escala,
     bytes: data.length,
     porQuem: texto(opcoes.sessao) || null,
-    updatedAt: serverTimestamp(),
   });
   return { id, bytes: data.length };
 }
@@ -1203,9 +1193,9 @@ export async function consolidarNevoaDaMesa(campaignId, instanceId, mascara, opc
   const apagar = lista(opcoes.deltas).filter((id) => ehDelta(id));
 
   const ops = [{
-    type: "set",
-    ref: fogRef(cid, iid),
-    data: {
+    tipo: "set",
+    alvo: "fog", // sem `docId` → `fog/estado`
+    dados: {
       kind: "base",
       data,
       largura: mascara.largura,
@@ -1213,15 +1203,17 @@ export async function consolidarNevoaDaMesa(campaignId, instanceId, mascara, opc
       escala: mascara.escala,
       bytes: data.length,
       /* Contador de consolidações: é por ele que o outro cliente distingue
-         "a mesma base de novo" de "uma base nova que preciso considerar". */
+         "a mesma base de novo" de "uma base nova que preciso considerar".
+         `Date.now()` e não o relógio do servidor de propósito — o outro cliente só
+         precisa saber que MUDOU, e um número já resolvido dispensa a ida à rede. */
       rev: Date.now(),
       regrediu: !!opcoes.regrediu,
-      updatedAt: serverTimestamp(),
     },
+    carimbar: ["updatedAt"],
   }];
-  apagar.forEach((id) => ops.push({ type: "delete", ref: deltaRef(cid, iid, id) }));
+  apagar.forEach((id) => ops.push({ tipo: "delete", alvo: "fog", docId: id }));
 
-  await commitOps(ops);
+  await mesaRepo.aplicarEmLote(cid, iid, ops);
   return { bytes: data.length, apagados: apagar.length };
 }
 
@@ -1248,12 +1240,12 @@ export async function atualizarGm(campaignId, instanceId, patch = {}) {
   const cid = exigir(campaignId, "Informe em qual campanha o mapa está.");
   const iid = exigir(instanceId, "Informe qual mapa da mesa deve mudar.");
   const permitidos = ["triggeredEventIds", "pendingEncounter", "gmScratch"];
-  const data = { updatedAt: serverTimestamp() };
+  const data = {};
   permitidos.forEach((campo) => { if (campo in patch) data[campo] = patch[campo]; });
-  if (Object.keys(data).length === 1) {
+  if (Object.keys(data).length === 0) {
     throw new Error("Informe o que deve mudar no painel do mestre.");
   }
-  await setDoc(gmRef(cid, iid), data, { merge: true });
+  await mesaRepo.mesclarGm(cid, iid, data);
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1290,14 +1282,16 @@ export async function reservarPendencia(campaignId, instanceId, pendencia) {
   if (!pendencia || typeof pendencia !== "object") {
     throw new Error("Não há encontro para pôr na fila do mestre.");
   }
-  const ref = gmRef(cid, iid);
 
-  return runTransaction(db, async (tx) => {
-    const snap = await tx.get(ref);
-    const atual = snap.exists() ? snap.data() : null;
-    if (atual?.pendingEncounter) return { reservada: false, motivo: "ja-ha-pendencia" };
-    tx.set(ref, { pendingEncounter: pendencia, updatedAt: serverTimestamp() }, { merge: true });
-    return { reservada: true, motivo: "" };
+  /* Alvo `"gm"`, nunca `"party"`: a pendência é o sorteio ainda não decidido, e o
+     jogador não pode sequer saber que houve sorteio. */
+  return mesaRepo.transacionar(cid, iid, "gm", (atual) => {
+    if (atual?.pendingEncounter) return { resultado: { reservada: false, motivo: "ja-ha-pendencia" } };
+    return {
+      resultado: { reservada: true, motivo: "" },
+      gravar: { pendingEncounter: pendencia },
+      carimbar: ["updatedAt"],
+    };
   });
 }
 
@@ -1325,24 +1319,28 @@ export async function resolverPendencia(campaignId, instanceId, pendenciaId, pat
   const cid = exigir(campaignId, "Informe em qual campanha o mapa está.");
   const iid = exigir(instanceId, "Informe qual mapa da mesa deve mudar.");
   const alvo = texto(pendenciaId);
-  const ref = gmRef(cid, iid);
   const permitidos = ["triggeredEventIds", "gmScratch"];
 
-  return runTransaction(db, async (tx) => {
-    const snap = await tx.get(ref);
-    const atual = snap.exists() ? snap.data() : null;
+  return mesaRepo.transacionar(cid, iid, "gm", (atual) => {
     const emCurso = atual?.pendingEncounter || null;
 
-    if (!emCurso) return { decidida: false, motivo: "ja-decidida", pendencia: null };
+    if (!emCurso) return { resultado: { decidida: false, motivo: "ja-decidida", pendencia: null } };
     const idGravado = texto(emCurso.id);
     if (alvo && idGravado && idGravado !== alvo) {
-      return { decidida: false, motivo: "outra-pendencia", pendencia: emCurso };
+      return { resultado: { decidida: false, motivo: "outra-pendencia", pendencia: emCurso } };
     }
 
-    const data = { pendingEncounter: null, updatedAt: serverTimestamp() };
-    permitidos.forEach((campo) => { if (campo in patch) data[campo] = patch[campo]; });
-    tx.set(ref, data, { merge: true });
-    return { decidida: true, motivo: "", pendencia: emCurso };
+    /* `pendingEncounter: null` e não a ausência do campo: aqui o `null` É o dado —
+       ele diz "não há nada aguardando decisão", que é o que a tela do mestre lê para
+       fechar o diálogo. Diferente do `flags` de `atualizarParty`, onde a ausência é
+       que carrega o significado. */
+    const gravar = { pendingEncounter: null };
+    permitidos.forEach((campo) => { if (campo in patch) gravar[campo] = patch[campo]; });
+    return {
+      resultado: { decidida: true, motivo: "", pendencia: emCurso },
+      gravar,
+      carimbar: ["updatedAt"],
+    };
   });
 }
 
@@ -1357,8 +1355,7 @@ export async function resolverPendencia(campaignId, instanceId, pendenciaId, pat
 export async function getFundoDaMesa(campaignId, instanceId) {
   const cid = exigir(campaignId, "Informe em qual campanha o mapa está.");
   const iid = exigir(instanceId, "Informe de qual mapa da mesa é a ilustração.");
-  const snap = await getDoc(fundoDaMesaRef(cid, iid));
-  return snap.exists() ? (snap.data()?.data || null) : null;
+  return mesaRepo.lerFundoDaMesa(cid, iid);
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1382,9 +1379,9 @@ export function useInstancias(campaignId) {
   useEffect(() => {
     if (!campaignId) { setEstado({ instancias: [], loading: false, error: null }); return undefined; }
     setEstado({ instancias: [], loading: true, error: null });
-    const unsub = onSnapshot(
-      instanciasCol(campaignId),
-      (snap) => setEstado({ instancias: snapToList(snap), loading: false, error: null }),
+    const unsub = mesaRepo.watchInstancias(
+      campaignId,
+      (instancias) => setEstado({ instancias, loading: false, error: null }),
       (err) => setEstado({ instancias: [], loading: false, error: err }),
     );
     return () => unsub();
@@ -1412,9 +1409,10 @@ export function useReveladoNaMesa(campaignId, instanceId) {
       return undefined;
     }
     setEstado({ revelado: [], loading: true, error: null });
-    const unsub = onSnapshot(
-      reveladoCol(campaignId, instanceId),
-      (snap) => setEstado({ revelado: snapToList(snap), loading: false, error: null }),
+    const unsub = mesaRepo.watchRevelado(
+      campaignId,
+      instanceId,
+      (revelado) => setEstado({ revelado, loading: false, error: null }),
       (err) => setEstado({ revelado: [], loading: false, error: err }),
     );
     return () => unsub();
@@ -1442,17 +1440,13 @@ export function useParty(campaignId, instanceId) {
   useEffect(() => {
     if (!campaignId || !instanceId) { setEstado({ party: null, loading: false, error: null }); return undefined; }
     setEstado({ party: null, loading: true, error: null });
-    const unsub = onSnapshot(
-      partyRef(campaignId, instanceId),
-      (snap) => setEstado({
-        party: snap.exists() ? { id: snap.id, ...snap.data({ serverTimestamps: "estimate" }) } : null,
-        /* Eco da própria escrita (ver `useFogDaMesa`): o Firestore entrega o
-           movimento otimista antes do servidor confirmar, e quem já animou o
-           percurso localmente não pode animá-lo de novo por causa dele. */
-        local: !!snap.metadata?.hasPendingWrites,
-        loading: false,
-        error: null,
-      }),
+    const unsub = mesaRepo.watchParty(
+      campaignId,
+      instanceId,
+      /* `local` é o eco da própria escrita (ver `useFogDaMesa`): o Firestore entrega o
+         movimento otimista antes do servidor confirmar, e quem já animou o percurso
+         localmente não pode animá-lo de novo por causa dele. */
+      ({ party, local }) => setEstado({ party, local, loading: false, error: null }),
       (err) => setEstado({ party: null, local: false, loading: false, error: err }),
     );
     return () => unsub();
@@ -1492,9 +1486,13 @@ export function useFogDaMesa(campaignId, instanceId) {
     if (!campaignId || !instanceId) { setEstado(VAZIO_DA_NEVOA); return undefined; }
     setEstado({ ...VAZIO_DA_NEVOA, loading: true });
 
-    const unsub = onSnapshot(
-      fogCol(campaignId, instanceId),
-      (snap) => {
+    /* O repositório entrega os documentos crus; DESSERIALIZAR e SOMAR é daqui — o
+       bitmap é do `model/fogMask.js`, e a soma por união é o que faz ordem de
+       chegada, repetição e delta duplicado darem sempre o mesmo resultado (AC-3). */
+    const unsub = mesaRepo.watchNevoa(
+      campaignId,
+      instanceId,
+      ({ docs, local }) => {
         let base = null;
         let bytes = 0;
         let rev = 0;
@@ -1502,14 +1500,13 @@ export function useFogDaMesa(campaignId, instanceId) {
         const deltas = [];
         const ids = [];
 
-        snap.docs.forEach((d) => {
-          const dados = d.data();
-          if (ehDelta(d.id)) {
+        docs.forEach(({ id, dados }) => {
+          if (ehDelta(id)) {
             const m = decodificarFog(dados);
-            if (m) { deltas.push(m); ids.push(d.id); }
+            if (m) { deltas.push(m); ids.push(id); }
             return;
           }
-          if (d.id !== ESTADO_DOC_ID) return;
+          if (id !== ESTADO_DOC_ID) return;
           base = decodificarFog(dados);
           bytes = Number.isFinite(dados?.bytes) ? dados.bytes : 0;
           rev = Number.isFinite(dados?.rev) ? dados.rev : 0;
@@ -1523,7 +1520,7 @@ export function useFogDaMesa(campaignId, instanceId) {
           bytes,
           rev,
           regrediu,
-          local: !!snap.metadata?.hasPendingWrites,
+          local,
           loading: false,
           error: null,
         });
@@ -1558,13 +1555,10 @@ export function useGmDaMesa(campaignId, instanceId, ehMestre) {
       return undefined;
     }
     setEstado({ gm: null, loading: true, error: null });
-    const unsub = onSnapshot(
-      gmRef(campaignId, instanceId),
-      (snap) => setEstado({
-        gm: snap.exists() ? { id: snap.id, ...snap.data({ serverTimestamps: "estimate" }) } : null,
-        loading: false,
-        error: null,
-      }),
+    const unsub = mesaRepo.watchGm(
+      campaignId,
+      instanceId,
+      (gm) => setEstado({ gm, loading: false, error: null }),
       (err) => setEstado({ gm: null, loading: false, error: err }),
     );
     return () => unsub();
@@ -1591,10 +1585,10 @@ export function useCampanhasDoMestre(uid) {
   useEffect(() => {
     if (!uid) { setEstado({ campanhas: [], loading: false, error: null }); return undefined; }
     setEstado({ campanhas: [], loading: true, error: null });
-    const unsub = onSnapshot(
-      query(collection(db, CAMPAIGNS), where("masterId", "==", uid)),
-      (snap) => {
-        const todas = snapToList(snap)
+    const unsub = mesaRepo.watchCampanhasDoMestre(
+      uid,
+      (lista) => {
+        const todas = lista
           .filter((c) => c.isActive !== false)
           .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "pt-BR"));
         setEstado({ campanhas: todas, loading: false, error: null });

@@ -1,6 +1,10 @@
 /* Biblioteca de assets do usuário (spec 0013 / ADR 0006 §4).
- * users/{uid}/assets/{assetId} = { type, name, tags[], folder, data, hash, w, h }. */
-import { collection, doc, onSnapshot, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+ * users/{uid}/assets/{assetId} = { type, name, tags[], folder, data, hash, w, h }.
+ *
+ * O acesso ao Firestore vive em `infrastructure/firestore/assetsRepo` desde a onda 1.5
+ * (spec 0030 / ADR-0010). Aqui ficam as regras do domínio da biblioteca: mapeamento
+ * tipo↔camada, filtro, tags e geração de id. */
+import * as assetsRepo from '../../../infrastructure/firestore/assetsRepo';
 
 export const ASSET_TYPES = ['map', 'prop', 'mount', 'character', 'attachment', 'note'];
 export const ASSET_TYPE_LABEL = {
@@ -43,21 +47,23 @@ export function assetTags(assets) {
 let _seq = 0;
 export const newAssetId = () => `as_${Date.now()}_${(_seq++).toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 
-/* ── Firestore ── */
+/* ── Persistência (delegada ao repositório) ──────────────────────────────────
+   O parâmetro `db` continua na assinatura das três funções, ignorado: `MapEditor/index.jsx`
+   e o `App.jsx` chamam `saveAsset(db, uid, …)` em 3 pontos, e eles pertencem a outra onda.
+   Some quando os chamadores forem migrados. */
+
 export function subscribeAssets(db, uid, cb) {
-  return onSnapshot(collection(db, 'users', uid, 'assets'),
-    (snap) => cb(snap.docs.map(d => ({ ...d.data(), id: d.id }))),
-    (e) => console.error('[assets] snapshot falhou:', e));
+  return assetsRepo.watchAll(uid, cb);
 }
 
+/* O id é gerado AQUI e não no repo: `newAssetId` é a identidade do asset na biblioteca
+   (a doca já o usa antes de qualquer ida à rede), e o repositório é burro por decisão
+   do ADR-0010. */
 export function saveAsset(db, uid, asset) {
   const id = asset.id || newAssetId();
-  return setDoc(doc(db, 'users', uid, 'assets', id),
-    { ...asset, id, updatedAt: serverTimestamp() })
-    .catch((e) => console.error('[assets] save falhou:', e));
+  return assetsRepo.save(uid, { ...asset, id });
 }
 
 export function deleteAsset(db, uid, id) {
-  return deleteDoc(doc(db, 'users', uid, 'assets', id))
-    .catch((e) => console.error('[assets] delete falhou:', e));
+  return assetsRepo.remove(uid, id);
 }

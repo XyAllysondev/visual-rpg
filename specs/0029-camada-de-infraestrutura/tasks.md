@@ -6,6 +6,43 @@ alwaysApply: false
 
 # Tasks — Camada de infraestrutura
 
+## Estado: TODAS AS 8 TASKS CONCLUÍDAS (2026-08-02)
+
+Gate final: **1848 testes / 78 suítes verdes**, `npm run build` **exit 0**.
+
+| Task | Estado | Evidência |
+|---|---|---|
+| 1 · `paths.js` + `client.js` | ✅ | `paths.test.js` |
+| 2 · `usersRepo` + `charactersRepo` | ✅ | `useAuth`/`useCharacter` migrados |
+| 3 · `campaignsRepo` | ✅ | 33 testes; `useCampaign` migrado |
+| 4 · `publicSheetsRepo` | ✅ | 6 operações; bloco `fs*` do App.jsx removido |
+| 5 · `messagesRepo` | ✅ | 31 testes; chat, typing e 2 feeds de rolagem migrados |
+| 6 · `sharedSheetsRepo` | ✅ | 24 testes, **inclui o teste dedicado ao AC-3** |
+| 7 · `bestiaryRepo` | ✅ | 14 + 11 (`domain/creature.js`) |
+| 8 · fronteira por lint | ✅ | regra **provada nos dois sentidos** (ver abaixo) |
+
+**Verificação executável do AC-1** — não retorna nada:
+`grep -rn "firebase/firestore" src/App.jsx src/hooks/`
+
+**Verificação do AC-5** — a regra não é config morta (armadilha que este projeto já registrou
+4 vezes): um arquivo temporário fora da fronteira foi criado, o ESLint acusou
+`no-restricted-imports`, `usersRepo.js` (na exceção) passou limpo, e o arquivo foi apagado.
+
+### Desvios conscientes em relação ao plano original
+1. **`messagesRepo` nasceu na Task 3**, não na 5: `useCampaign.joinCampaign` publica a mensagem
+   de sistema, e deixar essa escrita dentro do `campaignsRepo` cruzaria agregados.
+2. **`domain/campaign.js` e `domain/creature.js` foram criados** — não estavam no plano. O código
+   de convite estava DUPLICADO (useCampaign + App.jsx) e o clamp de PV é regra, não persistência.
+3. **`bestiaryRepo.create/update` devolvem booleano.** Como a política é `silent` (nunca rejeita),
+   sem isso o modal fecharia mesmo com a escrita falhando e o mestre perderia o que digitou.
+4. **`sharedSheetsRepo.updateCharacterData` tem `{fallbackName}` opcional** — o live-sync cai para
+   `"Sem nome"`, mas o painel cai para o nome que a ficha já tinha. Diferença herdada (AC-7).
+5. **`usersRepo.watchSubscribedSystems` sempre entrega array**, inclusive com o doc ausente (o
+   legado não chamava o setter nesse caso). Divergência mínima e mais segura: doc apagado não
+   deixa plano pago fantasma na tela.
+
+---
+
 > **Implementar na ordem.** Gate entre cada task:
 > `npm test -- --watchAll=false --ci` verde **e** `npm run build` exit 0.
 > Uma task só começa com a anterior verde — é o que permite saber qual passo quebrou.

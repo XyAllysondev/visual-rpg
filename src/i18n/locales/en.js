@@ -104,6 +104,7 @@ const en = {
         habilidades: "Abilities",
         rituais:     "Rituals",
         inventario:  "Inventory",
+        progressao:  "Progression",
         descricao:   "Description",
       },
       skills: {
