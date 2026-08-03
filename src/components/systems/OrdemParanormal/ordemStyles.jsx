@@ -76,8 +76,7 @@ export const OrdemSheetStyles = () => (
     .op-name-edit:hover{ text-decoration:underline; text-decoration-style:dotted; text-underline-offset:6px; text-decoration-color:var(--gold); }
     .op-name-input{ width:100%; padding:0 0 2px; border:none; border-radius:0; background:transparent;
       border-bottom:1px dashed var(--gold); color:var(--el-glow);
-      font-family:var(--font-display,'Cinzel Decorative',serif); font-size:clamp(22px,3.4vw,38px); line-height:1.05;
-      text-shadow:0 0 18px var(--el-glow); }
+      font-family:var(--font-display,'Cinzel Decorative',serif); font-size:clamp(22px,3.4vw,38px); line-height:1.05; }
     .op-name-input:focus{ border-bottom-color:var(--el-accent); }
     .op-watermark{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; z-index:2;
       font-family:var(--font-display,'Cinzel Decorative',serif); font-size:clamp(34px,9vw,90px); color:rgba(229,57,53,0.07);
@@ -94,12 +93,19 @@ export const OrdemSheetStyles = () => (
     .op-tab:hover{ color:var(--text); background:rgba(201,168,76,0.05); }
     .op-tab.active{ color:var(--el-glow); font-weight:700; }
 
-    /* ── TERMINAL DICE ── */
-    .op-terminal{ font-family:var(--font-data,'Share Tech Mono',monospace); background:#03100a; border:1px solid rgba(74,222,128,0.35); color:#7dffb0; border-radius:4px; padding:11px 12px; width:100%; letter-spacing:0.08em; box-shadow:inset 0 0 18px rgba(0,40,20,0.6); }
-    .op-terminal::placeholder{ color:rgba(125,255,176,0.4); }
-    .op-terminal:focus{ outline:none; border-color:rgba(74,222,128,0.7); box-shadow:inset 0 0 22px rgba(0,60,30,0.7),0 0 14px rgba(74,222,128,0.18); }
-    .op-rolar{ font-family:var(--font-title,'Cinzel',serif); font-size:11px; letter-spacing:0.14em; text-transform:uppercase; font-weight:700; color:#03100a;
-      background:linear-gradient(135deg,#4ade80,#22c55e,#15803d); border:none; border-radius:4px; padding:11px 18px; cursor:pointer; display:flex; align-items:center; gap:8px; box-shadow:0 4px 16px rgba(34,197,94,0.3); transition:filter 0.2s; }
+    /* ── TERMINAL DICE ──
+       O console inteiro era VERDE (#7dffb0 sobre #03100a, borda e brilho em
+       #4ade80, botão num degradê de três paradas com halo verde) — o único
+       bloco verde de uma ficha que só tem ouro, roxo e o vermelho do status.
+       Cor que não pertence a nenhuma paleta do tema lê como peça colada de
+       outro projeto, que é exatamente a sensação de "montado por IA".
+       O motivo de terminal fica: monospace, fundo afundado, brilho interno e o
+       prompt "›". Só a cor passa a ser a do elemento ativo (redesign de layout 2026-08-02). */
+    .op-terminal{ font-family:var(--font-data,'Share Tech Mono',monospace); background:#0d0a04; border:1px solid var(--el-border,rgba(201,168,76,0.34)); color:var(--el-glow,#e8c96d); border-radius:4px; padding:11px 12px; width:100%; letter-spacing:0.08em; box-shadow:inset 0 0 18px rgba(0,0,0,0.7); }
+    .op-terminal::placeholder{ color:rgba(201,168,76,0.42); }
+    .op-terminal:focus{ outline:none; border-color:var(--el-accent,#c9a84c); box-shadow:inset 0 0 22px rgba(0,0,0,0.8),0 0 14px var(--el-glow,rgba(201,168,76,0.25)); }
+    .op-rolar{ font-family:var(--font-title,'Cinzel',serif); font-size:11px; letter-spacing:0.14em; text-transform:uppercase; font-weight:700; color:#100c03;
+      background:var(--el-accent,#c9a84c); border:none; border-radius:4px; padding:11px 18px; cursor:pointer; display:flex; align-items:center; gap:8px; transition:filter 0.2s; }
     .op-rolar:hover{ filter:brightness(1.12); }
     .op-rolar:active{ animation:op-shake 0.34s; }
     @keyframes op-shake{ 0%,100%{ transform:translate(0,0) rotate(0); } 20%{ transform:translate(-3px,1px) rotate(-3deg); } 40%{ transform:translate(3px,-1px) rotate(3deg); } 60%{ transform:translate(-2px,1px) rotate(-2deg); } 80%{ transform:translate(2px,0) rotate(1deg); } }
@@ -112,6 +118,12 @@ export const OrdemSheetStyles = () => (
     .op-skill{ padding:5px 10px; border-bottom:1px solid rgba(201,168,76,0.06); font-family:Inter,'Inter var',system-ui,sans-serif; font-size:13px; transition:background 0.15s; }
     .op-skill:hover{ background:rgba(214,184,74,0.12); }
     .op-skill-head{ padding:6px 10px; border-bottom:1px solid var(--border2); background:rgba(0,0,0,0.22); flex-shrink:0; }
+    /* As 4 colunas numéricas somam 168px, mas "DADOS BÔNUS TREINO OUTROS" com o
+       letter-spacing padrão do .op-label ocupava ~200px. Os rótulos vazavam da
+       própria coluna e o cabeçalho inteiro escorregava para a esquerda: parecia
+       que os títulos não pertenciam aos números embaixo. Sem o espaçamento
+       extra cada palavra cabe na sua coluna e a tabela volta a se ler em pé. */
+    .op-skill-head .op-label{ letter-spacing:0.01em; white-space:nowrap; }
     .op-skill input{ width:100%; text-align:center; background:transparent; border:none; border-bottom:1px solid transparent; color:inherit; font-family:inherit; font-size:12px; padding:2px 0; -moz-appearance:textfield; }
     .op-skill input:focus{ outline:none; border-bottom:1px solid var(--el-accent); }
     .op-skill input::-webkit-inner-spin-button,.op-skill input::-webkit-outer-spin-button{ -webkit-appearance:none; margin:0; }

@@ -10,7 +10,168 @@ alwaysApply: true
 > todo. Diferente do **ADR** (decisão durável e imutável). Decisão estrutural → ADR; estado do
 > trabalho → aqui. Atualize ao **pausar/encerrar**; leia ao **retomar**. Use a skill `/handoff`.
 
-**Última atualização:** 2026-08-01 por Claude (SPEC 0028 — fundo do mapa-múndi decidido: base64 no Firestore, plano B; 627 testes / 40 suítes verdes)
+**Última atualização:** 2026-08-02 — DUAS SESSÕES trabalharam em paralelo neste dia: SPEC 0033
+(progressão automática de OP) e as SPECS 0029/0030/0031 (arquitetura em camadas). Ambas verdes.
+
+> **⚠ 2026-08-02: DUAS SESSÕES SIMULTÂNEAS NO MESMO WORKING TREE — leia isto antes de confiar
+> no histórico abaixo.** Uma sessão fazia a spec 0033 (ficha de OP) e outra as specs 0029/0030/
+> 0031 (camadas). Cada uma reescreveu este arquivo por cima da outra pelo menos duas vezes, e
+> uma delas chegou a apagar `specs/0030/spec.md` inteira e o `__tests__/publicSheetsRepo.test.js`.
+> **Nenhum código se perdeu** (os arquivos-fonte eram disjuntos), mas os registros se perderam e
+> foram reconstruídos. **Sintoma para detectar isso:** a contagem de testes CAI entre duas
+> execuções. Se for retomar com mais de uma sessão, dê a cada uma um worktree separado.
+
+> **2026-08-02: SPEC 0030 — ONDA 1.5 ENTREGUE. A FRONTEIRA ESTÁ FECHADA DE VERDADE.**
+> Os 7 stores de feature (3.740 linhas, **264 chamadas ao SDK**) passaram a consumir
+> repositórios. **Nenhum arquivo fora de `src/infrastructure/` importa `firebase/firestore`** —
+> verificado por grep, e a lista de exceção do ESLint foi de 7 arquivos a **ZERO**
+> (restam só `src/infrastructure/**`, `src/firebase.js` e os testes).
+> - Repositórios novos: `worldMapsRepo` (61 testes), `mesaRepo`, `fogRepo` (18),
+>   `worldsRepo` (44), `assetsRepo` (9), `mapSyncRepo` (44).
+> - **A LÓGICA FICOU NOS STORES (AC-3)**, que era o risco da onda: RLE+varint da névoa,
+>   redução de imagem em 2 estágios, dedup por hash, `seedDemoWorld`, diff de elementos,
+>   cotas por plano, validações PT-BR. Os repos só endereçam, leem e gravam.
+> - **`writeBatch` não vazou.** `worldsRepo`/`mapSyncRepo` expõem `commitBatch(ops)` com
+>   `{op,path,data}`; o `worldMapsRepo` preferiu 3 funções de alto nível
+>   (`apagarMapaEmCascata`, `apagarNoComTrilhas`, `semearGrafo`) porque uma lista genérica
+>   obrigaria o store a remontar endereços — o oposto do que o ADR-0010 quer.
+> - **`increment()` e `serverTimestamp()` também não atravessam**: viraram `{delta, absoluto}`
+>   e sentinelas traduzidos na borda (`SERVER_TIME` como Symbol no `mapSyncRepo`, para não
+>   colidir com texto de nota do usuário).
+> - **Índices compostos preservados** com teste dedicado (`where("ownerUid","==")` +
+>   `orderBy("updatedAt","desc")`).
+> - **TODAS as suítes legadas passaram SEM EDIÇÃO** — é a evidência do AC-7.
+>
+> **GANHO IMPREVISTO PARA A ONDA 3:** a perda silenciosa de dados do autosave ficou **isolada
+> num ponto só** — `mapSyncRepo.commitBatchSilent`, com o problema documentado no JSDoc. Antes
+> estava espalhada por 4 lugares. O Q4 da spec 0032 ficou muito mais simples de executar.
+
+> **2026-08-02: SPEC 0029 — CAMADA DE INFRAESTRUTURA (repositórios Firestore). ENTREGUE.**
+> O `App.jsx` tinha **63 chamadas diretas ao Firestore** e o SDK era importado em 17 arquivos.
+> - Nova camada `src/infrastructure/firestore/`: `paths.js` (único lugar com string de coleção),
+>   `client.js` (`docAt`/`colAt` + envelope `silent`) e 7 repositórios por agregado.
+> - **AC-5 — a fronteira é executável**: `no-restricted-imports` no `package.json`, **provado
+>   nos dois sentidos** (arquivo fora da fronteira → erro; arquivo isento → limpo). A armadilha
+>   "config morta" já mordeu este projeto 4 vezes.
+> - **VAZAMENTO FECHADO:** o `App.jsx` guardava `DocumentReference` cru num `useRef`
+>   (`liveSheetRefsRef`) e escrevia nele ~200 linhas depois — ref que sobrevive à desmontagem do
+>   listener. Agora atravessa `{campaignId, sheetId}` em string, com teste que asserta sobre a
+>   FORMA do payload.
+> - **Domínio extraído:** `characterKey`/`isSameCharacter`, `domain/campaign.js` (código de
+>   convite, que estava DUPLICADO) e `domain/creature.js` (`clampHp`).
+> - **3 bugs pré-existentes que quebravam o build** foram corrigidos (crase dentro de template
+>   literal de CSS; `{/* */}` em posição de expressão, 2×).
+> - **QUIRKS PRESERVADOS DE PROPÓSITO (AC-7), cada um com teste que os trava** — e que a spec
+>   0032 vai virar: contagem de campanhas assimétrica, `watchRolls` sem `orderBy`, e
+>   `hpCurrent === 0` lendo `hpMax` (`parseInt(...) || max`, e `0` é falsy).
+
+> **2026-08-02: SPEC 0031 — ONDA 2 (quebrar o App.jsx) INICIADA.**
+> `App.jsx`: **11.454 → 10.704 linhas**. Primeira feature extraída: `src/features/musica/`
+> (as 3 telas + `audioDb`, `musicaApi`, `musicaUtils`). Faltam ~63 componentes de topo; o alvo
+> do AC-1 é **< 800 linhas**. Specs 0031 e 0032 escritas e prontas para execução.
+
+> **2026-08-02: SPEC 0033 — PROGRESSÃO AUTOMÁTICA DE ORDEM PARANORMAL.** Andre pediu que a evolução
+> seja automática "de acordo com as regras do livro", para o jogador não precisar preencher tudo, e
+> apontou o PDF oficial no Desktop. **Só Ordem Paranormal** (D&D e Tormenta intocados).
+> - **Camada de texto do PDF extraída** (330 pg., pypdf, para o scratchpad — o PDF continua FORA do
+>   repo). A capa diz **v1.2** (mai/2023), embora o arquivo se chame "1.4": o registro de
+>   atualizações da pg. 8 é o da 1.2. Tabelas 1.2 a 1.5 conferidas linha a linha.
+> - **Módulo novo `progressao/`**: `tabelas.js` (transcrição pura do livro: PV/PE/SAN por classe,
+>   os 20 marcos de NEX de cada classe, pré-requisitos de poder, bônus de origem que escalam) e
+>   `motor.js` (`derivar` · `pendencias` · `aplicar` · `planoDeAvanco` · `reverterPara` ·
+>   `linhaDoTempo`). Puro, sem React e sem Firestore. **54 testes** próprios.
+> - **A ideia central:** o motor separa o que o livro DECIDE do que o livro manda ESCOLHER. O que é
+>   decidido entra sozinho; o que é escolha vira uma "pendência" com as opções já validadas — e as
+>   inválidas vêm com o motivo escrito ("Falta: NEX 30%.").
+> - **Livro-razão** (`ficha.progressao.marcos`, aditivo, Firestore é schemaless): guarda o que foi
+>   concedido em cada degrau. É ele que torna o motor **idempotente** (rodar 2× não duplica) e
+>   **reversível** (baixar o NEX desfaz só o que o motor deu). Habilidades ganham
+>   `origem:{marco,ref,motor}` — sem esse carimbo, o motor nunca toca.
+> - **UI:** `EvolucaoModal.jsx` (assistente passo a passo, modos "avanço" e "auditoria") e a aba
+>   **Progressão** — que **já existia no repo e estava ÓRFÃ** (`ProgressaoTab.jsx` não era importado
+>   por ninguém; a lista de abas da ficha nunca a incluiu). Agora é o painel de controle.
+> - **SEIS DIVERGÊNCIAS DO CÓDIGO CONTRA O LIVRO, corrigidas:** (1) Grau de Treinamento era 5+INT
+>   para as três classes; o livro dá **2+Int combatente, 5+Int especialista, 3+Int ocultista**.
+>   (2) `defaultTrainedSet` inventava 5 perícias fixas por classe; o livro faz disso uma **escolha**
+>   (só o ocultista tem 2 fixas). (3) Combate Defensivo pedia INT 1, o livro pede **Int 2**.
+>   (4) Combater com Duas Armas pedia AGI 2, o livro pede **Agi 3 + treinado em Luta ou Pontaria**.
+>   (5) Não havia checagem de poder repetido — o livro proíbe salvo indicação; **isso foi achado por
+>   um teste que escrevi esperando que já funcionasse, e falhou**. (6) Calejado (Desgarrado),
+>   Cicatrizes Psicológicas (Vítima) e Dedicação (Universitário) escalam com o NEX e **não mexiam em
+>   número nenhum** — eram texto decorativo; agora entram em `derivar`.
+> - **`nexStats` deixou de ter tabela própria** e lê `progressao/tabelas.js` (mesmos números); a
+>   ficha passou a usar `derivar()` nos dois pontos onde chamava `nexStats`, o que traz junto os
+>   bônus de origem.
+> - **ARMADILHA DO RUNNER (não é desta leva):** no modo paralelo padrão, 4 suítes falham
+>   (`mesaStore`, `f7-mesa-store`, `forja-render`, `editor-store`) com `ReferenceError: onSnapshot is
+>   not defined` vindo de `worldMapStore.js` — do refactor em andamento das specs **0030-0032** que
+>   está na árvore sem commit. Elas **passam isoladas** e o run inteiro **passa com `--runInBand`:
+>   84 suítes / 2082 testes, exit 0**. Use `--runInBand` como gate até aquilo fechar.
+> - **A REVERSÃO ACIDENTAL DESCRITA ABAIXO ME ATINGIU TAMBÉM:** a pasta `progressao/` inteira e o
+>   `progressao.test.js` foram **apagados do disco** depois de criados e testados com sucesso (os 54
+>   testes já tinham rodado verdes). Recriei os arquivos. **Confira que
+>   `src/components/systems/OrdemParanormal/progressao/` existe** antes de confiar num build.
+> - **"É VETERANO MESMO" (decisão do Andre, mesma sessão).** O grau +10 voltou a se chamar
+>   **Veterano** — nome do livro oficial. O **AC-3 da spec 0024 fica SUBSTITUÍDO** pelo AC-16 da
+>   0033 (aviso inserido na spec 0024, sem apagar o texto histórico). Trocado em `TREINO_TIERS`,
+>   no `tLabel` da ficha, no `ROTULO_GRAU` do motor, em `regras-oficiais.json`, nos textos de
+>   Competência em Perícia / Expert em Perícia / Engenhosidade e no `conteudo-0024.test.js`.
+>   **Lição:** a 0024 renomeou Veterano→Competente a partir de fonte secundária porque o livro
+>   ainda não estava disponível; com o PDF em mãos, a fonte secundária estava errada.
+> - **Pendente do Andre:** (1) validar no navegador (subir um degrau pelo assistente, conferir
+>   PV/PE/SAN e habilidades, depois "Voltar" um degrau e conferir que a anotação própria continua
+>   lá); (2) commitar/deployar.
+
+> **⚠ 2026-08-02: REVERSÃO PARCIAL ACIDENTAL DO WORKING TREE — leia antes de confiar no histórico.**
+> No meio da sessão, um conjunto de arquivos voltou a um estado anterior **sem que ninguém pedisse**.
+> O CÓDIGO migrado sobreviveu (`src/infrastructure/` inteiro e o `App.jsx` sem SDK), mas voltaram
+> atrás: a regra ESLint do `package.json`, esta entrada do STATE, a seção nova do `context-map.md`,
+> o bloco de status do `tasks.md` da 0029, a correção do `Date.now()` no `publicSheetsRepo.js` e o
+> arquivo `__tests__/publicSheetsRepo.test.js` (apagado). Tudo foi **reaplicado**. Detectado pela
+> queda na contagem de testes (78/1848 → 77/1820) — vale conferir essa contagem ao retomar.
+
+> **2026-08-02: SPEC 0029 — CAMADA DE INFRAESTRUTURA (repositórios Firestore). ENTREGUE.**
+> Andre perguntou se o back/front estavam separados com camadas de serviço. Resposta honesta era
+> "parcialmente": `domain/`, hooks e stores de feature existiam, mas o **App.jsx tinha 63 chamadas
+> diretas ao Firestore** e o SDK era importado em 17 arquivos.
+> - **Nova camada `src/infrastructure/firestore/`**: `paths.js` (único lugar com string de coleção),
+>   `client.js` (`docAt`/`colAt` + envelope `silent` da política de erro) e **7 repositórios por
+>   agregado** — users, characters, campaigns, messages, sharedSheets, bestiary, publicSheets.
+> - **AC-1 cumprido e VERIFICADO**: `grep "firebase/firestore" src/App.jsx src/hooks/` não retorna
+>   nada.
+> - **AC-5 — a fronteira agora é executável**: `no-restricted-imports` no `package.json`.
+>   **Provado nos dois sentidos** (a armadilha "config morta" já mordeu este projeto 4 vezes):
+>   arquivo temporário fora da fronteira → erro do lint; `usersRepo.js` (exceção) → limpo.
+> - **VAZAMENTO FECHADO (o motivo principal da spec):** `App.jsx` guardava `DocumentReference` cru
+>   num `useRef` (`liveSheetRefsRef`) e escrevia nele ~200 linhas depois. A ref sobrevive à
+>   desmontagem do listener que a produziu. Agora atravessa `{campaignId, sheetId}` em string, com
+>   teste dedicado que asserta sobre a FORMA do payload (docs semeados com `.ref = {__sdk:true}`).
+> - **Domínio extraído**: `characterKey`/`isSameCharacter` (a regra `id || createdAt` que mantém
+>   ficha legada acessível), `domain/campaign.js` (código de convite — estava **duplicado** em
+>   useCampaign e App.jsx —, teto de 3, `isFull`) e `domain/creature.js` (`clampHp`).
+> - **CÓDIGO MORTO REMOVIDO:** `fsGetUserPlan` e `fsGetMusicLinks` (definidos, nunca chamados).
+>
+> **TRÊS BUGS PRÉ-EXISTENTES QUE QUEBRAVAM O BUILD** — vinham de trabalho não-commitado da sessão
+> anterior (fluidez do hero de campanha), provados por `git diff` (linhas com `+`), não meus:
+> (1) comentário com **crases dentro do template literal** de CSS do `G` — a crase fecha a string;
+> (2) `{/* … */}` em posição de **expressão** (após `? (` e `return (`), onde `{}` vira objeto
+> literal — 2 ocorrências. Corrigidos, com comentário explicando a armadilha em cada ponto.
+>
+> **QUIRKS DO LEGADO PRESERVADOS DE PROPÓSITO (AC-7), cada um com teste que os trava:**
+> (a) `countActiveByMasterAndSystem` filtra `isActive` NA QUERY e `countActiveByMemberAndSystem`
+> filtra EM MEMÓRIA — campanha antiga sem o campo é invisível numa e visível na outra, então o
+> mestre fura o teto ao CRIAR e é barrado ao ENTRAR; (b) `watchRolls` limita **sem `orderBy`**, logo
+> o corte traz rolagens arbitrárias, não as mais recentes; (c) `currentHp` de criatura com
+> `hpCurrent === 0` devolve `hpMax` (o legado fazia `parseInt(...) || max`, e `0` é falsy).
+> Consertar qualquer um MUDA o que o usuário vê — foi adiado para a onda 3.
+>
+> **PARALELISMO QUE FUNCIONOU:** agentes com **arquivos exclusivos**, e o `App.jsx` reservado ao
+> orquestrador. Nenhum atropelo (contraste com a spec 0027, onde dois agentes na mesma pasta se
+> sobrescreveram). O agente de testes **encontrou uma violação real do AC-3** que passara batido:
+> `messagesRepo.send` devolvia o `DocumentReference` do `addDoc` no caminho feliz. Corrigido.
+>
+> - **PENDENTE DO ANDRE:** validar no navegador (login, ficha, campanha, chat, bestiário, ficha
+>   pública por link, elemento pelo painel do mestre) e commitar/deployar. **Nada foi commitado.**
 
 > **2026-08-01 (tarde): SPEC 0028 — FUNDO DO MAPA-MÚNDI DESTRAVADO PELO PLANO B.** O Andre decidiu:
 > *"vamos fazer no gratuito hoje, quando estivermos finalizando o desenvolvimento do projeto eu faço

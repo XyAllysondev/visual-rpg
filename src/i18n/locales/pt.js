@@ -105,6 +105,7 @@ const pt = {
         rituais:     "Rituais",
         inventario:  "Inventário",
         descricao:   "Descrição",
+        progressao:  "Progressão",
       },
       skills: {
         title:    "Relatório de Capacidades",

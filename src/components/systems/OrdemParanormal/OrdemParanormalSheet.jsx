@@ -23,11 +23,13 @@ import HabilidadesTab from "./Tabs/HabilidadesTab";
 import RituaisTab from "./Tabs/RituaisTab";
 import InventarioTab from "./Tabs/InventarioTab";
 import DescricaoTab from "./Tabs/DescricaoTab";
+import ProgressaoTab from "./Tabs/ProgressaoTab";
+import { derivar, aplicar as aplicarMotor, reverterPara, pendencias } from "./progressao/motor";
 import LicencaOP, { TEXTO_IA } from "../../LicencaOP";
 import { getActiveAvatar, isActiveAvatarAI, NORMAL_PHASE_ID } from "../../../domain/character";
 import {
   ATTR_KEYS, ATTR_LABELS, PERICIAS, PERICIA_GRUPOS, defaultTrainedSet, treinoColor,
-  nexStats, deriveStats, rollOP, rollExpr, nexLevel, NEX_LADDER, rollPayload,
+  deriveStats, rollOP, rollExpr, nexLevel, NEX_LADDER, rollPayload,
   dtRituais as dtRituaisRule,
   TIPOS_DANO, ALCANCES, PERICIAS_ATAQUE, critMargin, isCritical, combineDamage,
 } from "./rules";
@@ -162,7 +164,7 @@ function buildDiff(base, proposed) {
   });
 
   // Perícias treino
-  const tLabel = v => v === 0 || v === false ? "Destreinado" : v === 1 || v === true ? "Treinado" : v === 2 ? "Competente" : v === 3 ? "Expert" : String(v ?? "—");
+  const tLabel = v => v === 0 || v === false ? "Destreinado" : v === 1 || v === true ? "Treinado" : v === 2 ? "Veterano" : v === 3 ? "Expert" : String(v ?? "—");
   const allTreino = new Set([...Object.keys(base.skillTreino || {}), ...Object.keys(proposed.skillTreino || {})]);
   allTreino.forEach(sid => {
     const o = base.skillTreino?.[sid], n = proposed.skillTreino?.[sid];
@@ -211,7 +213,13 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
   const [deslocamentoBonus, setDeslocamentoBonus] = useState(character.deslocamentoBonus ?? 0);
   const [nex, setNex] = useState(character.nex ?? 5);
 
-  const cs0 = useMemo(() => nexStats(character.nex ?? 5, classe?.id, character.attrs || attrs), []); // eslint-disable-line
+  /* Máximos iniciais pelo motor de progressão — mesma fórmula do livro que o
+   * nexStats já usava, agora somando os poderes de origem que escalam com o
+   * NEX (Calejado, Cicatrizes Psicológicas, Dedicação). */
+  const cs0 = useMemo(() => {
+    const d = derivar(character);
+    return { pv: d.pvMax, san: d.sanMax, pe: d.peMax };
+  }, []); // eslint-disable-line
   const [pvMax, setPvMax] = useState(character.pvMax ?? cs0.pv);
   const [sanMax, setSanMax] = useState(character.sanMax ?? cs0.san);
   const [peMax, setPeMax] = useState(character.peMax ?? cs0.pe);
@@ -252,7 +260,9 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
     return 0;
   });
   const [rollHistory, setRollHistory] = useState(character.rollHistory ?? []);
-  const [trilha] = useState(character.trilha ?? null);
+  const [trilha, setTrilha] = useState(character.trilha ?? null);
+  /* Livro-razão do motor de progressão: o que foi concedido em cada NEX. */
+  const [progressao, setProgressao] = useState(character.progressao ?? null);
 
   const [defesaBonus, setDefesaBonus] = useState(character.defesaBonus ?? 0);
   const [defesaOutros, setDefesaOutros] = useState(character.defesaOutros ?? 0);
@@ -334,12 +344,12 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
   const mounted = useRef(false);
   useEffect(() => {
     if (!mounted.current) { mounted.current = true; return; }
-    const ns = nexStats(nex, classe?.id, attrs);
-    setPvMax(ns.pv); setHp((v) => Math.min(v, ns.pv));
-    setSanMax(ns.san); setSan((v) => Math.min(v, ns.san));
-    setPeMax(ns.pe); setPe((v) => Math.min(v, ns.pe));
+    const d = derivar({ ...character, nex, classe, origem, attrs });
+    setPvMax(d.pvMax); setHp((v) => Math.min(v, d.pvMax));
+    setSanMax(d.sanMax); setSan((v) => Math.min(v, d.sanMax));
+    setPeMax(d.peMax); setPe((v) => Math.min(v, d.peMax));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attrs.AGI, attrs.FOR, attrs.INT, attrs.PRE, attrs.VIG]);
+  }, [attrs.AGI, attrs.FOR, attrs.INT, attrs.PRE, attrs.VIG, nex]);
 
   /* ── element unlock at NEX 50% (non-dismissible) ── */
   useEffect(() => {
@@ -352,7 +362,7 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
     pv: hp, san, pe, pvMax, sanMax, peMax, attacks, ataques: attacks, skills, poderes, rituais, itens,
     diario, creditos, rollHistory, trilha, defesaBonus, defesaOutros, esquivaBonus, bloqueio, protecao, resistencias,
     proeficiencia, elementoAfinidade, elementoEscolhidoEm, elementoGmOverride, elementoNotas,
-    habilidades, inventario, descricao, dtRituaisBonus,
+    habilidades, inventario, descricao, dtRituaisBonus, progressao,
     dtRituais: dtRituaisRule(nex, attrs, dtRituaisBonus), // total calculado (compat de leitura)
   };
   const latest = useRef(snapshot);
@@ -376,7 +386,8 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attrs, form, skillTreino, skillOutros, pdBonus, deslocamentoBonus, nex, hp, san, pe, pvMax, sanMax, peMax, attacks, skills, poderes,
       rituais, itens, diario, creditos, defesaBonus, defesaOutros, esquivaBonus, bloqueio, protecao, resistencias,
-      proeficiencia, elementoAfinidade, elementoNotas, habilidades, inventario, descricao, dtRituaisBonus]);
+      proeficiencia, elementoAfinidade, elementoNotas, habilidades, inventario, descricao, dtRituaisBonus,
+      progressao, trilha]);
   useEffect(() => () => flushSave(), []); // flush on unmount
   const handleBack = () => { flushSave(); onBack?.(); };
 
@@ -569,6 +580,27 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
     setEditAtk(null);
   };
 
+  /* ── Motor de progressão (spec 0033) ─────────────────────────────────────
+   * O motor trabalha com a ficha inteira e devolve uma ficha inteira; aqui
+   * ela é redistribuída pelos estados da tela numa escrita só. */
+  const aplicarProgressao = (nova) => {
+    setNex(nova.nex);
+    setAttrs(nova.attrs || {});
+    setSkillTreino(nova.skillTreino || {});
+    setHabilidades(nova.habilidades || []);
+    setRituais(nova.rituais || []);
+    setTrilha(nova.trilha ?? null);
+    setProgressao(nova.progressao ?? null);
+    setPvMax(nova.pvMax); setSanMax(nova.sanMax); setPeMax(nova.peMax);
+    setHp((v) => Math.min(v, nova.pvMax));
+    setSan((v) => Math.min(v, nova.sanMax));
+    setPe((v) => Math.min(v, nova.peMax));
+    setElementoAfinidade(nova.elementoAfinidade ?? null);
+    if (nova.elementoEscolhidoEm !== undefined) setElementoEscolhidoEm(nova.elementoEscolhidoEm);
+  };
+  /* Escolhas que o livro deve a este agente e ainda não foram feitas. */
+  const pendenciasAbertas = pendencias(snapshot);
+
   const rootVars = {
     "--el-primary": theme.primary, "--el-accent": theme.accent, "--el-glow": theme.accent,
     "--el-rune": theme.primary, "--el-vital": theme.accent, "--el-deep": theme.bg,
@@ -576,7 +608,7 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
     "--crisis-vignette": theme.crisis.vignette,
   };
 
-  const TABS = [["combate", t("op.sheet.tabs.combate")], ["habilidades", t("op.sheet.tabs.habilidades")], ["rituais", t("op.sheet.tabs.rituais")], ["inventario", t("op.sheet.tabs.inventario")], ["descricao", t("op.sheet.tabs.descricao")]];
+  const TABS = [["combate", t("op.sheet.tabs.combate")], ["habilidades", t("op.sheet.tabs.habilidades")], ["rituais", t("op.sheet.tabs.rituais")], ["inventario", t("op.sheet.tabs.inventario")], ["progressao", t("op.sheet.tabs.progressao")], ["descricao", t("op.sheet.tabs.descricao")]];
   const filteredPericias = PERICIAS.filter((p) => p.base.toLowerCase().includes(skillFilter.toLowerCase()));
 
   const inputMini = { padding: "4px 7px", fontSize: 13, width: "100%" };
@@ -635,7 +667,11 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
             ) : (
               <h1 className={`op-glitch op-name-edit ${wounded ? "on" : ""}`} title="Duplo clique para editar o nome"
                 onDoubleClick={() => setEditMode(true)}
-                style={{ fontFamily: "var(--font-display,'Cinzel Decorative',serif)", fontSize: "clamp(22px,3.4vw,38px)", color: "var(--el-glow)", lineHeight: 1.05, margin: 0, textShadow: "0 0 18px var(--el-glow)" }}>
+                /* Sem `textShadow` de 18px (redesign de layout 2026-08-02): o halo dourado atrás do
+                   nome sangrava por cima da sobrancelha "Dossiê de agente" logo
+                   acima, e é o efeito que mais faz a ficha parecer arte gerada
+                   em vez de documento. A cor do elemento já carrega a identidade. */
+                style={{ fontFamily: "var(--font-display,'Cinzel Decorative',serif)", fontSize: "clamp(22px,3.4vw,38px)", color: "var(--el-glow)", lineHeight: 1.05, margin: 0 }}>
                 {charName}
               </h1>
             )}
@@ -647,7 +683,13 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
               <span className="op-data" style={{ fontSize: 11, color: theme.accent }}>{theme.name}{isMedo && elementoGmOverride ? " 🔒" : ""}</span>
             </span>
           )}
-          <span style={{ fontFamily: "var(--font-title,'Cinzel',serif)", fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--danger-text,#d85a5a)", border: "2px solid var(--danger,#8b1a1a)", borderRadius: 4, padding: "3px 9px", fontSize: 10, transform: "rotate(-7deg)", boxShadow: "0 0 6px rgba(139,26,26,0.4)" }}>{t("op.sheet.agenteAtivo")}</span>
+          {/* Selo de status — era um "carimbo" girado -7° com borda de 2px e
+              brilho vermelho, encaixado ENTRE o título e a fileira de botões.
+              Girado, ele quebrava a linha de base de toda a barra e forçava os
+              vizinhos a se desalinharem. Segue vermelho (é status), mas alinhado
+              e com o mesmo peso de borda dos botões ao lado, para a barra ler
+              como UMA linha (redesign de layout 2026-08-02). */}
+          <span style={{ fontFamily: "var(--font-title,'Cinzel',serif)", fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--danger-text,#d85a5a)", border: "1px solid var(--danger,#8b1a1a)", borderRadius: 4, padding: "4px 10px", fontSize: 10, flexShrink: 0 }}>{t("op.sheet.agenteAtivo")}</span>
           <button onClick={() => setShowShortcuts((v) => !v)} className="btn-ghost" aria-label="Atalhos de teclado" title="Atalhos">?</button>
           <button onClick={() => setShowSheetSettings(v => !v)} className="btn-ghost" title="Configurações" aria-label="Configurações"
             style={showSheetSettings ? { borderColor:"rgba(201,168,76,0.6)", color:"var(--gold2)" } : undefined}>
@@ -788,11 +830,10 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
             </div>
           </div>
 
-          {/* Aviso obrigatório — Licença da Comunidade de Ordem Paranormal (spec 0003) */}
-          <div className="op-ink" style={{ padding: "8px 10px", background: "rgba(0,0,0,0.25)" }}>
-            <LicencaOP variant="ficha" />
-            {isActiveAvatarAI(form) && <div className="op-data" style={{ fontSize: 9, color: "var(--muted)", marginTop: 6 }}>{TEXTO_IA}</div>}
-          </div>
+          {/* O aviso da Licença vive agora no FIM desta coluna (redesign de layout 2026-08-02) —
+              procure por `LicencaOP variant="ficha"` mais abaixo. Não recolocar
+              aqui: entre "Jogador" e "Atributos" ele corta o caminho do olho
+              exatamente onde o jogador procura os números da ficha. */}
 
           {/* ATTRIBUTES — pentagon constellation (no central orb) */}
           <div className="op-ink" style={{ padding: "12px 6px 6px", background: "rgba(0,0,0,0.25)" }}>
@@ -809,9 +850,22 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
           {/* NEX */}
           <div className="op-ink" style={{ padding: "10px 12px", background: "linear-gradient(135deg, rgba(74,14,110,0.22), rgba(0,0,0,0.4))" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <button onClick={() => setShowNex(true)} aria-label="Matriz de progressão NEX" style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: "inherit", textAlign: "left" }}>
-                <span className="op-label">Nível de Exposição ▸</span>
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button onClick={() => setActiveTab("progressao")} aria-label="Abrir a aba Progressão"
+                  title="Evoluir, ver o que o livro concede e resolver pendências"
+                  style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: "inherit", textAlign: "left" }}>
+                  <span className="op-label">Nível de Exposição ▸</span>
+                </button>
+                {pendenciasAbertas.length > 0 && (
+                  <button onClick={() => setActiveTab("progressao")} title="Escolhas de progressão em aberto"
+                    aria-label={`${pendenciasAbertas.length} escolhas de progressão em aberto`}
+                    style={{ background: "rgba(251,191,36,0.15)", border: "1px solid rgba(251,191,36,0.45)", color: "#fbbf24", borderRadius: 10, padding: "1px 7px", fontSize: 9, fontFamily: "var(--font-title,'Cinzel',serif)", cursor: "pointer", lineHeight: 1.6 }}>
+                    ⚠ {pendenciasAbertas.length}
+                  </button>
+                )}
+                <button onClick={() => setShowNex(true)} title="Matriz de progressão (todos os degraus)" aria-label="Matriz de progressão NEX"
+                  style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: "var(--muted)", fontSize: 11 }}>⇅</button>
+              </div>
               <span className="op-data" style={{ fontSize: 9, color: "var(--paranormal-text)" }}>{clearance}</span>
             </div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 6, margin: "2px 0 7px" }}>
@@ -941,6 +995,18 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
               </div>
             </div>
           </div>
+
+          {/* Aviso obrigatório — Licença da Comunidade de Ordem Paranormal (spec 0003).
+              MOVIDO para o fim da coluna (redesign de layout 2026-08-02): vivia entre "Jogador" e
+              "Atributos", ou seja, no meio do caminho entre a identidade do
+              agente e a ficha de jogo — o olho batia num texto jurídico bem no
+              ponto onde procurava os números. Continua na ficha (é obrigatório
+              e a ficha pode ser compartilhada/impressa fora do app), mas no
+              rodapé da coluna, que é onde crédito e licença se leem. */}
+          <div className="op-ink" style={{ padding: "8px 10px", background: "rgba(0,0,0,0.25)" }}>
+            <LicencaOP variant="ficha" />
+            {isActiveAvatarAI(form) && <div className="op-data" style={{ fontSize: 9, color: "var(--muted)", marginTop: 6 }}>{TEXTO_IA}</div>}
+          </div>
         </div>
 
         {/* ── CENTER: perícias ── */}
@@ -1018,6 +1084,10 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
 
             {activeTab === "inventario" && (
               <InventarioTab inventario={inventario} setInventario={setInventario} onRollDados={rollDados} attrs={attrs} nex={nex} />
+            )}
+
+            {activeTab === "progressao" && (
+              <ProgressaoTab ficha={snapshot} onAplicar={aplicarProgressao} readOnly={readOnly} />
             )}
 
             {activeTab === "descricao" && (
@@ -1174,7 +1244,13 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
             {NEX_LADDER.map((row) => {
               const cur = row.nex === nex; const reached = nex >= row.nex;
               return (
-                <div key={row.nex} onClick={() => editMode && setNex(row.nex)}
+                <div key={row.nex} onClick={() => {
+                  /* Atalho do mestre: pular direto para um NEX. Passa pelo motor
+                   * para os máximos, habilidades e o livro-razão acompanharem —
+                   * as escolhas do caminho viram pendências na aba Progressão. */
+                  if (!editMode) return;
+                  aplicarProgressao(row.nex >= nex ? aplicarMotor(snapshot, {}, { nex: row.nex }) : reverterPara(snapshot, row.nex));
+                }}
                   style={{ display: "grid", gridTemplateColumns: "62px 110px 1fr", gap: 10, alignItems: "center", padding: "8px 10px", borderRadius: 3, cursor: editMode ? "pointer" : "default", background: cur ? "rgba(201,168,76,0.16)" : reached ? "rgba(74,14,110,0.10)" : "transparent", border: `1px solid ${cur ? "var(--gold)" : "var(--border)"}`, opacity: reached ? 1 : 0.5 }}>
                   <span style={{ fontFamily: "var(--font-display,'Cinzel Decorative',serif)", fontSize: 18, color: reached ? "var(--gold2)" : "var(--muted)" }}>{row.nex}%</span>
                   <span className="op-data" style={{ fontSize: 9, letterSpacing: "0.1em", color: cur ? "var(--gold2)" : "var(--paranormal-text)" }}>{row.tier}</span>
@@ -1588,7 +1664,9 @@ function CombateTab({ diceRef, diceInput, setDiceInput, rollFree, attrs, rollAtt
           )}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <span className="op-data" style={{ color: "#4ade80", alignSelf: "center" }}>›</span>
+          {/* prompt do terminal: verde-terminal era o segundo resquício de uma
+              paleta que não é do tema — acompanha o botão para o ouro (redesign de layout 2026-08-02) */}
+          <span className="op-data" style={{ color: "var(--el-accent,#c9a84c)", alignSelf: "center" }}>›</span>
           <input ref={diceRef} className="op-terminal" value={diceInput} placeholder="ex: 2d6+3, 1d20, 4d4-1"
             onChange={(e) => setDiceInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && rollFree()} aria-label="Expressão de dados" />
           <button className="op-rolar" onClick={rollFree}>
@@ -1597,18 +1675,14 @@ function CombateTab({ diceRef, diceInput, setDiceInput, rollFree, attrs, rollAtt
         </div>
       </div>
 
-      {/* ── TESTES DE ATRIBUTO ── */}
-      <div>
-        <div className="op-label" style={{ marginBottom: 8 }}>{t("op.sheet.combat.attrTests")}</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 7 }}>
-          {ATTR_KEYS.map((k) => (
-            <button key={k} className="op-attr-card" onClick={() => rollAttr(k)} aria-label={`Testar ${ATTR_LABELS[k]}`} title={attrs[k] === 0 ? `${ATTR_LABELS[k]} 0 · rola 2d20 e pega o PIOR` : `${ATTR_LABELS[k]} · rola ${attrs[k]}d20 e pega o maior`}>
-              <span className="op-attr-name">{k}</span>
-              <span className="op-attr-val">{attrs[k] ?? 0}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* ── TESTES DE ATRIBUTO — REMOVIDO (redesign de layout 2026-08-02) ──
+          Eram cinco cartões AGI/FOR/INT/PRE/VIG repetindo, número por número, o
+          que a constelação em pentágono da coluna esquerda já mostra — e ela
+          fica SEMPRE visível, em qualquer aba, e também rola ao clique
+          (`AttrConstellation onRoll`). Dois controles idênticos a duas telas de
+          distância obrigavam o jogador a decidir qual é "o certo"; e o valor
+          aparecendo duas vezes é o tipo de redundância que faz a ficha parecer
+          montada por partes. A rolagem livre segue no console acima. */}
 
       {/* ── ARSENAL ── */}
       <div>

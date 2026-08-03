@@ -128,15 +128,30 @@ describe("cargaMaxima", () => {
 });
 
 describe("defaultTrainedSet", () => {
-  it("mescla perícias da origem (sem marcadores) com as da classe", () => {
+  /* Spec 0033: só entra aqui o que o livro concede SEM escolha. As perícias
+   * de classe do combatente e do especialista são escolhas do jogador (viram
+   * pendências no motor de progressão), não um conjunto fixo. */
+  it("traz as perícias da origem sem os marcadores * e +", () => {
     const s = defaultTrainedSet({ skills: ["Medicina*", "Crime*+"] }, { id: "combatente" });
-    ["Medicina", "Crime", "Luta", "Pontaria", "Iniciativa", "Atletismo", "Reflexos"]
-      .forEach((p) => expect(s.has(p)).toBe(true));
+    expect(s.has("Medicina")).toBe(true);
+    expect(s.has("Crime")).toBe(true);
   });
-  it("sem classe conhecida cai no conjunto de ocultista", () => {
-    const s = defaultTrainedSet(null, null);
+  it("combatente não ganha perícia de classe de graça — ele escolhe", () => {
+    const s = defaultTrainedSet({ skills: [] }, { id: "combatente" });
+    ["Luta", "Pontaria", "Iniciativa", "Atletismo", "Reflexos", "Fortitude"]
+      .forEach((p) => expect(s.has(p)).toBe(false));
+  });
+  it("especialista também escolhe todas as 7+Int", () => {
+    expect(defaultTrainedSet({ skills: [] }, { id: "especialista" }).size).toBe(0);
+  });
+  it("ocultista recebe Ocultismo e Vontade fixos (e é o fallback sem classe)", () => {
+    const s = defaultTrainedSet(null, { id: "ocultista" });
     expect(s.has("Ocultismo")).toBe(true);
     expect(s.has("Vontade")).toBe(true);
+    expect(s.size).toBe(2);
+    const semClasse = defaultTrainedSet(null, null);
+    expect(semClasse.has("Ocultismo")).toBe(true);
+    expect(semClasse.has("Vontade")).toBe(true);
   });
 });
 

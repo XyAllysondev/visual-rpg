@@ -650,7 +650,7 @@ export default function MasterSuite({ uid }) {
           {rail}
         </div>
       ) : (
-        /* Desktop também vira UMA faixa (spec 0029). Eram duas empilhadas —
+        /* Desktop também vira UMA faixa (redesign de layout 2026-08-02). Eram duas empilhadas —
          * um header de 52px que carregava o sigilo sozinho na ponta esquerda
          * e o seletor+botão lá na direita, com um vão morto de ~900px no meio,
          * mais o rail de abas logo abaixo. Somadas à topbar do app davam três

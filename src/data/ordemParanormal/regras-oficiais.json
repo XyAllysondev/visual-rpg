@@ -4,7 +4,7 @@
   { "id": "teste-pericia", "secao": "testes", "nome": "Teste de Perícia",
     "descricao": "Teste de atributo somado ao bônus de treinamento da perícia. Perícias marcadas como 'somente treinado' não podem ser usadas sem treino; perícias que pedem kit sofrem penalidade sem o equipamento adequado." },
   { "id": "graus-treino", "secao": "testes", "nome": "Graus de Treinamento",
-    "descricao": "Destreinado +0 · Treinado +5 · Competente +10 · Expert +15. Os graus sobem nos marcos de NEX 35% e 70% (5+INT perícias em cada marco)." },
+    "descricao": "Destreinado +0 · Treinado +5 · Veterano +10 · Expert +15. Os graus sobem nos marcos de NEX 35% e 70%; a quantidade de perícias muda por classe — 2+Int para combatente, 5+Int para especialista e 3+Int para ocultista." },
   { "id": "teste-oposto", "secao": "testes", "nome": "Teste Oposto e DT",
     "descricao": "Contra um oponente, os dois testam e o maior resultado vence. Contra obstáculos, o mestre define uma Dificuldade de Teste (DT) que o resultado precisa igualar ou superar." },
   { "id": "pe-rodada", "secao": "testes", "nome": "Limite de PE por Rodada",

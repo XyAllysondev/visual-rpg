@@ -7,6 +7,7 @@
  * ════════════════════════════════════════════════════════════════════════ */
 
 import { rollOP, rollPool } from "../../../domain/dice";
+import { CLASSES as CLASSES_TABELA } from "./progressao/tabelas";
 
 /* The five attributes, in display order. attrs object is keyed by these. */
 export const ATTR_KEYS = ["AGI", "FOR", "INT", "PRE", "VIG"];
@@ -60,26 +61,28 @@ export const PERICIAS = RAW_PERICIAS.map((p) => {
   };
 });
 
-/* Default trained perícias granted by origem + classe (matches FullSheet). */
+/* Perícias treinadas que o personagem recebe SEM escolher nada (spec 0033).
+ * O livro só concede de graça as duas da origem e as fixas da classe — e só o
+ * ocultista tem fixas (Ocultismo e Vontade). O resto é escolha do jogador:
+ * combatente escolhe uma de Luta/Pontaria, uma de Fortitude/Reflexos e 1+Int
+ * livres; especialista escolhe 7+Int; ocultista, 3+Int. Essas escolhas viram
+ * pendências no motor de progressão, não um conjunto adivinhado aqui. */
 export function defaultTrainedSet(origem, classe) {
-  const byClass =
-    classe?.id === "combatente"
-      ? ["Luta", "Pontaria", "Iniciativa", "Atletismo", "Reflexos"]
-      : classe?.id === "especialista"
-      ? ["Investigação", "Ciências", "Tecnologia", "Percepção"]
-      : ["Ocultismo", "Vontade", "Religião", "Intuição"];
+  const c = CLASSES_TABELA[classe?.id] || CLASSES_TABELA.ocultista;
   return new Set([
     ...((origem?.skills || []).map((s) => s.replace(/[*+]/g, ""))),
-    ...byClass,
+    ...c.periciasFixas,
   ]);
 }
 
-/* Training degree → bonus and tier color. 0 destreinado · 5 treinado · 10 competente · 15 expert
- * ("Competente" é o nome oficial do grau +10 no livro base — spec 0024 AC-3.) */
+/* Training degree → bonus and tier color. 0 destreinado · 5 treinado · 10 veterano · 15 expert
+ * O grau +10 chama-se VETERANO — nome do livro de regras oficial (v1.2), confirmado pelo Andre.
+ * A spec 0024 AC-3 havia renomeado para "Competente" a partir de fonte secundária; a spec 0033
+ * desfaz isso com o livro em mãos. */
 export const TREINO_TIERS = {
   0: { label: "Destreinado", color: "var(--muted)" },
   5: { label: "Treinado", color: "#4ade80" },
-  10: { label: "Competente", color: "#60a5fa" },
+  10: { label: "Veterano", color: "#60a5fa" },
   15: { label: "Expert", color: "var(--gold2)" },
 };
 export const treinoColor = (v) =>
@@ -88,23 +91,19 @@ export const treinoColor = (v) =>
 /* NEX level (5..99) → character "level" (0..19). 99% = level 19. */
 export const nexLevel = (nex) => (nex === 99 ? 19 : (nex - 5) / 5);
 
-/* Max PV / SAN / PE at a given NEX for a class (identical to App.jsx nexStats). */
+/* Max PV / SAN / PE at a given NEX for a class. Os números vêm da tabela única
+ * em `progressao/tabelas.js` (transcrita do livro) — antes viviam duplicados
+ * aqui e no App.jsx. Para a ficha completa (com os bônus de origem que escalam
+ * com o NEX), use `derivar()` do motor de progressão. */
 export function nexStats(nexVal, classId, attrs) {
-  const base = {
-    combatente: { pv: 20 + attrs.VIG, san: 12, pe: 2 + attrs.PRE },
-    especialista: { pv: 16 + attrs.VIG, san: 16, pe: 3 + attrs.PRE },
-    ocultista: { pv: 12 + attrs.VIG, san: 20, pe: 4 + attrs.PRE },
-  }[classId] ?? { pv: 12 + attrs.VIG, san: 20, pe: 4 + attrs.PRE };
-  const perNex = {
-    combatente: { pv: 4 + attrs.VIG, san: 3, pe: 2 + attrs.PRE },
-    especialista: { pv: 3 + attrs.VIG, san: 4, pe: 3 + attrs.PRE },
-    ocultista: { pv: 2 + attrs.VIG, san: 5, pe: 4 + attrs.PRE },
-  }[classId] ?? { pv: 2 + attrs.VIG, san: 5, pe: 4 + attrs.PRE };
+  const c = CLASSES_TABELA[classId] || CLASSES_TABELA.ocultista;
+  const vig = attrs?.VIG || 0;
+  const pre = attrs?.PRE || 0;
   const lvl = nexLevel(nexVal);
   return {
-    pv: base.pv + lvl * perNex.pv,
-    san: base.san + lvl * perNex.san,
-    pe: base.pe + lvl * perNex.pe,
+    pv: c.pv.base + vig + lvl * (c.pv.porNex + vig),
+    san: c.san.base + lvl * c.san.porNex,
+    pe: c.pe.base + pre + lvl * (c.pe.porNex + pre),
   };
 }
 
@@ -232,14 +231,14 @@ export const NEX_LADDER = [
   { nex: 20, tier: "OPERACIONAL", note: "Aumento de atributo." },
   { nex: 25, tier: "OPERACIONAL", note: "Marco de classe (ex.: rituais de 2º círculo para Ocultista)." },
   { nex: 30, tier: "VETERANO", note: "Poder de classe." },
-  { nex: 35, tier: "VETERANO", note: "Grau de treinamento (5+INT perícias)." },
+  { nex: 35, tier: "VETERANO", note: "Grau de treinamento (2+INT combatente · 5+INT especialista · 3+INT ocultista)." },
   { nex: 40, tier: "VETERANO", note: "Habilidade de trilha (2º poder)." },
   { nex: 45, tier: "VETERANO", note: "Poder de classe." },
   { nex: 50, tier: "ESPECIAL", note: "Aumento de atributo. Versatilidade. Afinidade elemental (escolha do elemento)." },
   { nex: 55, tier: "ESPECIAL", note: "Marco de classe (ex.: rituais de 3º círculo para Ocultista)." },
   { nex: 60, tier: "ESPECIAL", note: "Poder de classe." },
   { nex: 65, tier: "ESPECIAL", note: "Habilidade de trilha (3º poder)." },
-  { nex: 70, tier: "CRÍTICO", note: "Grau de treinamento (5+INT perícias)." },
+  { nex: 70, tier: "CRÍTICO", note: "Grau de treinamento (2+INT combatente · 5+INT especialista · 3+INT ocultista)." },
   { nex: 75, tier: "CRÍTICO", note: "Poder de classe." },
   { nex: 80, tier: "CRÍTICO", note: "Aumento de atributo." },
   { nex: 85, tier: "CRÍTICO", note: "Marco de classe (ex.: rituais de 4º círculo para Ocultista)." },
@@ -263,11 +262,11 @@ export const CLASS_POWERS = {
   combatente: [
     {id:"acuidade_arma",   name:"Acuidade com Arma",       cost:"—",    desc:"Pré: AGI 1. Com armas corpo a corpo leves ou de arremesso, você pode usar Agilidade no lugar de Força nos testes de ataque e nas rolagens de dano."},
     {id:"atq_oportunidade",name:"Ataque de Oportunidade",  cost:"1 PE (reação)", desc:"Quando um inimigo sai voluntariamente de um espaço adjacente ao seu, gaste uma reação e 1 PE para fazer um ataque corpo a corpo contra ele."},
-    {id:"comb_defensivo",  name:"Combate Defensivo",       cost:"1 PE", desc:"Pré: INT 1. Ao agredir, gaste 1 PE para receber +5 na Defesa até o seu próximo turno, sofrendo −1d nos testes de ataque."},
-    {id:"comb_duas_armas", name:"Combater com Duas Armas", cost:"2 PE", desc:"Pré: AGI 2, treinado em Luta ou Pontaria. Empunhando duas armas, gaste 2 PE para fazer um ataque com cada uma, sofrendo −1d em todos os testes de ataque."},
-    {id:"competencia_per", name:"Competência em Perícia",  cost:"—",    desc:"Pré: NEX 35%. Escolha uma perícia treinada: seu grau nela sobe para competente (+10)."},
+    {id:"comb_defensivo",  name:"Combate Defensivo",       cost:"—",    desc:"Pré: INT 2. Ao usar a ação agredir, você pode combater defensivamente: até o próximo turno recebe +5 na Defesa e sofre −1d em todos os testes de ataque."},
+    {id:"comb_duas_armas", name:"Combater com Duas Armas", cost:"—",    desc:"Pré: AGI 3, treinado em Luta ou Pontaria. Empunhando duas armas (uma delas leve), a ação agredir faz um ataque com cada arma; você sofre −1d em todos os testes de ataque até o próximo turno."},
+    {id:"competencia_per", name:"Competência em Perícia",  cost:"—",    desc:"Pré: NEX 35%. Escolha uma perícia treinada: seu grau nela sobe para veterano (+10)."},
     {id:"determinacao_fis",name:"Determinação Física",     cost:"2 PE", desc:"Uma vez por cena, gaste 2 PE para realizar uma ação de investigação adicional usando Força ou Agilidade."},
-    {id:"expert_pericia",  name:"Expert em Perícia",       cost:"—",    desc:"Pré: NEX 70%. Escolha uma perícia competente: seu grau nela sobe para expert (+15)."},
+    {id:"expert_pericia",  name:"Expert em Perícia",       cost:"—",    desc:"Pré: NEX 70%. Escolha uma perícia veterana: seu grau nela sobe para expert (+15)."},
     {id:"golpe_demolidor", name:"Golpe Demolidor",         cost:"1 PE", desc:"Pré: FOR 2, treinado em Luta. Ao atacar objetos ou quebrar estruturas, gaste 1 PE para causar dois dados extras de dano."},
     {id:"golpe_pesado",    name:"Golpe Pesado",            cost:"—",    desc:"O dano das suas armas corpo a corpo aumenta em um passo (ex.: 1d8 → 1d10)."},
     {id:"presteza_atletica",name:"Presteza Atlética",      cost:"1 PE", desc:"Gaste 1 PE para facilitar uma ação de investigação com Força ou Agilidade; um aliado ajudado recebe +1d."},
@@ -283,10 +282,10 @@ export const CLASS_POWERS = {
   especialista: [
     {id:"acuidade_arma",   name:"Acuidade com Arma",       cost:"—",    desc:"Pré: AGI 1. Com armas corpo a corpo leves ou de arremesso, você pode usar Agilidade no lugar de Força nos testes de ataque e nas rolagens de dano."},
     {id:"balistica_avancada",name:"Balística Avançada",    cost:"—",    desc:"Você recebe proficiência com armas de fogo longas."},
-    {id:"competencia_per", name:"Competência em Perícia",  cost:"—",    desc:"Pré: NEX 35%. Escolha uma perícia treinada: seu grau nela sobe para competente (+10)."},
+    {id:"competencia_per", name:"Competência em Perícia",  cost:"—",    desc:"Pré: NEX 35%. Escolha uma perícia treinada: seu grau nela sobe para veterano (+10)."},
     {id:"conhecimento_apl",name:"Conhecimento Aplicado",   cost:"2 PE", desc:"Escolha duas perícias de Intelecto: você recebe +1d em ações de investigação com elas e pode gastar 2 PE para receber +5 no próximo teste ligado a uma pista."},
     {id:"expedito_explosivos",name:"Expedito em Explosivos",cost:"—",   desc:"Você soma seu Intelecto na DT dos seus explosivos e pode excluir da área um número de alvos igual ao seu Intelecto."},
-    {id:"expert_pericia",  name:"Expert em Perícia",       cost:"—",    desc:"Pré: NEX 70%. Escolha uma perícia competente: seu grau nela sobe para expert (+15)."},
+    {id:"expert_pericia",  name:"Expert em Perícia",       cost:"—",    desc:"Pré: NEX 70%. Escolha uma perícia veterana: seu grau nela sobe para expert (+15)."},
     {id:"hacker",          name:"Hacker",                  cost:"—",    desc:"Pré: treinado em Tecnologia. Você recebe +5 em Tecnologia para invadir sistemas e o tempo da invasão cai para uma ação completa."},
     {id:"kit_aprimorado",  name:"Kit Aprimorado",          cost:"—",    desc:"Kits de perícia contam como uma categoria abaixo para você."},
     {id:"movimento_tatico",name:"Movimento Tático",        cost:"1 PE", desc:"Pré: treinado em Atletismo. Gaste 1 PE para ignorar penalidades de terreno difícil no seu deslocamento neste turno."},
@@ -299,10 +298,10 @@ export const CLASS_POWERS = {
   ],
   ocultista: [
     {id:"camuflar_ocultismo",name:"Camuflar Ocultismo",    cost:"2 PE", desc:"Ação livre para ocultar seus símbolos e marcas paranormais; gaste 2 PE para conjurar um ritual sem gestos ou palavras perceptíveis."},
-    {id:"competencia_per", name:"Competência em Perícia",  cost:"—",    desc:"Pré: NEX 35%. Escolha uma perícia treinada: seu grau nela sobe para competente (+10)."},
+    {id:"competencia_per", name:"Competência em Perícia",  cost:"—",    desc:"Pré: NEX 35%. Escolha uma perícia treinada: seu grau nela sobe para veterano (+10)."},
     {id:"envolto_misterio",name:"Envolto em Mistério",     cost:"—",    desc:"Você recebe +5 em Enganação e Intimidação contra quem não é treinado em Ocultismo."},
     {id:"especialista_elem",name:"Especialista em Elemento",cost:"—",   desc:"Escolha um elemento: a DT para resistir aos seus rituais desse elemento aumenta em +2."},
-    {id:"expert_pericia",  name:"Expert em Perícia",       cost:"—",    desc:"Pré: NEX 70%. Escolha uma perícia competente: seu grau nela sobe para expert (+15)."},
+    {id:"expert_pericia",  name:"Expert em Perícia",       cost:"—",    desc:"Pré: NEX 70%. Escolha uma perícia veterana: seu grau nela sobe para expert (+15)."},
     {id:"ferramentas_para",name:"Ferramentas Paranormais", cost:"—",    desc:"Uma vez por cena, você ativa um equipamento paranormal sem pagar o custo dele."},
     {id:"fluxo_poder",     name:"Fluxo de Poder",          cost:"—",    desc:"Pré: NEX 60%. Você pode manter dois rituais sustentados ao mesmo tempo com a mesma ação livre."},
     {id:"guiado_paranormal",name:"Guiado pelo Paranormal", cost:"2 PE", desc:"Uma vez por cena, gaste 2 PE para realizar uma ação de investigação adicional."},
@@ -445,7 +444,7 @@ export const CLASS_BASE_ABILITIES = {
     {nex:20, name:"Aumento de Atributo",cost:"—",    desc:"Aumente um atributo à sua escolha em +1 (máximo 5)."},
     {nex:25, name:"Ataque Especial ↑",  cost:"3 PE", desc:"Gaste 3 PE para receber +10 no ataque ou dano."},
     {nex:30, name:"Poder de Combatente",cost:"—",    desc:"Escolha um poder de combatente da lista."},
-    {nex:35, name:"Grau de Treinamento",cost:"—",    desc:"Escolha (5+INT) perícias treinadas; seu grau de treinamento nelas aumenta em um."},
+    {nex:35, name:"Grau de Treinamento",cost:"—",    desc:"Escolha (2+INT) perícias treinadas; seu grau de treinamento nelas aumenta em um."},
     {nex:40, name:"Habilidade de Trilha",cost:"—",  desc:"Receba o 2° poder da sua trilha de Combatente.", isTrilhaMark:true},
     {nex:45, name:"Poder de Combatente",cost:"—",    desc:"Escolha um poder de combatente da lista."},
     {nex:50, name:"Aumento de Atributo",cost:"—",    desc:"Aumente um atributo em +1 (máximo 5)."},
@@ -453,7 +452,7 @@ export const CLASS_BASE_ABILITIES = {
     {nex:55, name:"Ataque Especial ↑",  cost:"4 PE", desc:"Gaste 4 PE para receber +15 no ataque ou dano."},
     {nex:60, name:"Poder de Combatente",cost:"—",    desc:"Escolha um poder de combatente da lista."},
     {nex:65, name:"Habilidade de Trilha",cost:"—",  desc:"Receba o 3° poder da sua trilha de Combatente.", isTrilhaMark:true},
-    {nex:70, name:"Grau de Treinamento",cost:"—",    desc:"Escolha (5+INT) perícias treinadas; grau de treinamento aumenta em um."},
+    {nex:70, name:"Grau de Treinamento",cost:"—",    desc:"Escolha (2+INT) perícias treinadas; grau de treinamento aumenta em um."},
     {nex:75, name:"Poder de Combatente",cost:"—",    desc:"Escolha um poder de combatente da lista."},
     {nex:80, name:"Aumento de Atributo",cost:"—",    desc:"Aumente um atributo em +1 (máximo 5)."},
     {nex:85, name:"Ataque Especial ↑",  cost:"5 PE", desc:"Gaste 5 PE para receber +20 no ataque ou dano."},
@@ -470,7 +469,7 @@ export const CLASS_BASE_ABILITIES = {
     {nex:25, name:"Perito (1d8)",       cost:"3 PE",  desc:"Gaste 3 PE para somar +1d8 no resultado do teste."},
     {nex:30, name:"Poder de Especialista",cost:"—",  desc:"Escolha um poder de especialista da lista."},
     {nex:35, name:"Grau de Treinamento",cost:"—",    desc:"Escolha (5+INT) perícias treinadas; grau de treinamento aumenta em um."},
-    {nex:40, name:"Engenhosidade",      cost:"+2 PE", desc:"Ao usar Eclético, gaste +2 PE adicionais para receber os benefícios de competente na perícia."},
+    {nex:40, name:"Engenhosidade",      cost:"+2 PE", desc:"Ao usar Eclético, gaste +2 PE adicionais para receber os benefícios de veterano na perícia."},
     {nex:40, name:"Habilidade de Trilha",cost:"—",  desc:"Receba o 2° poder da sua trilha de Especialista.", isTrilhaMark:true},
     {nex:45, name:"Poder de Especialista",cost:"—",  desc:"Escolha um poder de especialista da lista."},
     {nex:50, name:"Aumento de Atributo",cost:"—",    desc:"Aumente um atributo em +1 (máximo 5)."},
@@ -494,7 +493,7 @@ export const CLASS_BASE_ABILITIES = {
     {nex:20, name:"Aumento de Atributo",      cost:"—", desc:"Aumente um atributo em +1 (máximo 5)."},
     {nex:25, name:"Rituais de 2° Círculo",    cost:"—", desc:"Você agora pode lançar rituais de 2° círculo."},
     {nex:30, name:"Poder de Ocultista",       cost:"—", desc:"Escolha um poder de ocultista da lista."},
-    {nex:35, name:"Grau de Treinamento",      cost:"—", desc:"Escolha (5+INT) perícias treinadas; grau de treinamento aumenta em um."},
+    {nex:35, name:"Grau de Treinamento",      cost:"—", desc:"Escolha (3+INT) perícias treinadas; grau de treinamento aumenta em um."},
     {nex:40, name:"Habilidade de Trilha",     cost:"—", desc:"Receba o 2° poder da sua trilha de Ocultista.", isTrilhaMark:true},
     {nex:45, name:"Poder de Ocultista",       cost:"—", desc:"Escolha um poder de ocultista da lista."},
     {nex:50, name:"Aumento de Atributo",      cost:"—", desc:"Aumente um atributo em +1 (máximo 5)."},
@@ -502,7 +501,7 @@ export const CLASS_BASE_ABILITIES = {
     {nex:55, name:"Rituais de 3° Círculo",    cost:"—", desc:"Você agora pode lançar rituais de 3° círculo."},
     {nex:60, name:"Poder de Ocultista",       cost:"—", desc:"Escolha um poder de ocultista da lista."},
     {nex:65, name:"Habilidade de Trilha",     cost:"—", desc:"Receba o 3° poder da sua trilha de Ocultista.", isTrilhaMark:true},
-    {nex:70, name:"Grau de Treinamento",      cost:"—", desc:"Escolha (5+INT) perícias treinadas; grau de treinamento aumenta em um."},
+    {nex:70, name:"Grau de Treinamento",      cost:"—", desc:"Escolha (3+INT) perícias treinadas; grau de treinamento aumenta em um."},
     {nex:75, name:"Poder de Ocultista",       cost:"—", desc:"Escolha um poder de ocultista da lista."},
     {nex:80, name:"Aumento de Atributo",      cost:"—", desc:"Aumente um atributo em +1 (máximo 5)."},
     {nex:85, name:"Rituais de 4° Círculo",    cost:"—", desc:"Você agora pode lançar rituais de 4° círculo."},

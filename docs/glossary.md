@@ -21,8 +21,12 @@ alwaysApply: false
 | **Ficha**          | Conjunto completo de dados de um personagem (atributos, perícias, inventário, etc.)   | DossierCard               | Ficha             |
 | **fs\***           | Prefixo das funções de Firestore em `App.jsx` (ex: `fsSaveCharacter`)                 | —                         | Infra             |
 | **Jogador**        | Usuário participante de uma campanha (não é o Mestre)                                 | Mestre, Personagem        | Campanha          |
+| **Livro-razão**    | Registro em `ficha.progressao.marcos` do que o motor concedeu em cada degrau de NEX; é o que torna a progressão idempotente e reversível | Histórico de rolagens | Progressão / OP |
+| **Marco**          | Uma concessão do livro num degrau de NEX específico (poder, trilha, atributo, grau de treinamento…) | Degrau (o NEX em si) | Progressão / OP |
 | **Mestre**         | Usuário criador da campanha; tem acesso à visão de todas as fichas dos jogadores       | Jogador                   | Campanha          |
+| **Motor de progressão** | Módulo puro que deriva os números do livro e aplica os marcos de NEX na ficha     | `rules.js` (catálogo)     | Progressão / OP   |
 | **NEX**            | Nível de Exposição ao Outro — determina progressão de atributos em Ordem Paranormal    | Nível (D&D)               | Ficha / OP        |
+| **Pendência**      | Escolha que o livro deve ao personagem e ainda não foi feita (poder, atributo, perícia, ritual, afinidade) | Marco automático | Progressão / OP |
 | **OP**             | Abreviação de Ordem Paranormal (sistema de RPG)                                        | —                         | Ficha             |
 | **Personagem**     | Entidade de jogo criada e controlada por um Jogador                                   | Jogador (usuário real)    | Ficha             |
 | **Plano**          | Nível de assinatura do usuário: `free` ou `ordem` (pago via PIX)                      | Campanha                  | Monetização       |
