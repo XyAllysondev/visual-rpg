@@ -21,6 +21,8 @@ import { audioDBSave, audioDBDelete, audioDBGetMeta } from "./audioDb";
 import { fmtDuration, localGradient, localAccent } from "./musicaUtils";
 import CenasSonoras from "./CenasSonoras";
 import { lerVinculos, gravarVinculos, vincular, desvincular } from "./cenas";
+import MesaDeEfeitos from "./MesaDeEfeitos";
+import { lerEfeitos, gravarEfeitos } from "./efeitos";
 
 export default function MusicScreen({ nowPlaying, onNowPlaying, musicTokens, onMusicTokens, ytPlayerRef }) {
   const ytToken = musicTokens.yt;
@@ -65,6 +67,10 @@ export default function MusicScreen({ nowPlaying, onNowPlaying, musicTokens, onM
   /* ── Cenas da mesa: qual playlist toca em cada momento da sessão ── */
   const [vinculosCena, setVinculosCena] = useState(() => lerVinculos());
   useEffect(() => { gravarVinculos(vinculosCena); }, [vinculosCena]);
+
+  /* ── Mesa de efeitos: disparos de um toque, por cima da trilha ── */
+  const [efeitos, setEfeitos] = useState(() => lerEfeitos());
+  useEffect(() => { gravarEfeitos(efeitos); }, [efeitos]);
 
   /* ── Load imported file metadata from IndexedDB on mount ── */
   useEffect(() => {
@@ -493,6 +499,13 @@ export default function MusicScreen({ nowPlaying, onNowPlaying, musicTokens, onM
           onVincular={(cenaId, pl) => setVinculosCena(v => vincular(v, cenaId, pl))}
           onDesvincular={(cenaId) => setVinculosCena(v => desvincular(v, cenaId))}
         />
+      )}
+
+      {/* ── Mesa de efeitos ──
+          Logo abaixo das Cenas e some junto com elas: as duas são o painel de
+          quem está narrando. Cena troca a trilha; efeito dispara por cima. */}
+      {!selectedPlaylist && (
+        <MesaDeEfeitos efeitos={efeitos} onMudar={setEfeitos} />
       )}
 
       {/* ── Playlist grid ── */}

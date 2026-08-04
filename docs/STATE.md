@@ -113,6 +113,27 @@ Gate final: **89 suítes / 2.196 testes verdes**, `npm run build` exit 0.
 > (as 3 telas + `audioDb`, `musicaApi`, `musicaUtils`). Faltam ~63 componentes de topo; o alvo
 > do AC-1 é **< 800 linhas**. Specs 0031 e 0032 escritas e prontas para execução.
 
+> **2026-08-03 (2): SPEC 0034 — MESA DE EFEITOS + PACOTE DE VOZES.** Andre pediu efeitos sonoros
+> "lá dentro" (mulher gritando, criança chorando, criança falando oi, sons de terror).
+> - **A mesa é mecanismo DIFERENTE da trilha, e isso define o módulo:** trilha substitui o que
+>   toca; efeito dispara POR CIMA. Por isso `MesaDeEfeitos.jsx` não passa pelo player — cada
+>   disparo cria seu próprio `<audio>`, toca e morre, o que também deixa dois efeitos soarem
+>   juntos. Teclas 1-9 disparam, Esc corta tudo sem encostar na música. Volume por efeito.
+> - **`efeitos.js`** puro, 21 testes. Acervo em `nx_efeitos` (localStorage) + binário no IndexedDB
+>   `nexus_audio` já usado pelas playlists.
+> - **PACOTE INICIAL EMBUTIDO** (`public/sfx/`, 8 vozes, **539 KB**): botão "Carregar vozes" puxa
+>   para o IndexedDB do mestre com um clique. **Por que ESTES podem morar no app e as TRILHAS
+>   não:** meio mega contra ~12 MB. Arquivo em `public/` não entra no bundle JS, só engorda o
+>   artefato de deploy. Doze megas seria abuso; meio não é.
+> - **AS VOZES NÃO SAÍRAM DO MINIMAX.** O MCP dele caiu no meio da sessão e a **Higgsfield está
+>   SEM CRÉDITO** (plano free — as 8 submissões voltaram "Out of credits"). Gerei pela **Morpfix
+>   (ElevenLabs multilingual)**, que tinha saldo. Português bom, mas outro motor.
+> - **NÃO EXISTE VOZ DE CRIANÇA** em provedor nenhum — usei a feminina mais jovem (Juniper). Soa
+>   como mulher jovem. Se incomodar, tentar MiniMax ou clonagem de voz.
+> - **FOLEY CONTINUA IMPOSSÍVEL** (porta, vidro, passos, estática): nenhum provedor conectado gera
+>   efeito sonoro. Não é limitação de prompt. Saída = fonte livre de direitos.
+> - Gate: **97 suítes / 2333 testes** com `--runInBand`, build compilado, 8 arquivos em `build/sfx`.
+
 > **2026-08-03: SPEC 0034 — CENAS SONORAS DA MESA.** Andre pediu trilhas e efeitos sonoros de
 > Ordem Paranormal gerados por IA. **NÃO DÁ — e o motivo está registrado na spec para ninguém
 > tentar de novo sem checar:** a ferramenta de áudio da Higgsfield só gera FALA e manda recusar

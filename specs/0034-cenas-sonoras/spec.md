@@ -65,6 +65,32 @@ motivo para ninguém tentar de novo sem checar:
 - **Dado** uma cena nunca vinculada
 - **Então** ela aparece na tira, apagada, com "sem trilha" — sumindo, ninguém descobre que existe
 
+### AC-8: efeito dispara POR CIMA da trilha
+- **Dado** uma trilha tocando e a Mesa de Efeitos com botões
+- **Quando** o mestre aciona um efeito
+- **Então** o som soa sem pausar nem trocar a música
+- **E** dois efeitos acionados juntos soam juntos, um não corta o outro
+- **E** "Parar tudo" (ou Esc) corta os efeitos sem encostar na trilha
+
+### AC-9: a mesa serve com a sessão rodando
+- **Dado** a Mesa fora do modo de edição
+- **Quando** o mestre pressiona as teclas 1 a 9
+- **Então** os nove primeiros efeitos disparam
+- **E** as teclas ficam inertes enquanto se digita em campo de texto e no modo de edição
+
+### AC-10: pacote inicial de vozes num clique
+- **Dado** uma mesa sem as vozes que o app serve em `public/sfx/`
+- **Quando** o mestre aciona "Carregar vozes"
+- **Então** as oito falas entram no IndexedDB dele e viram botões comuns
+  (renomeáveis, com volume próprio, apagáveis)
+- **E** acionar de novo não duplica nada (id fixo `pk_*`)
+
+### AC-11: volume por efeito e arquivo compartilhado
+- **Dado** dois efeitos apontando para o mesmo arquivo
+- **Quando** o mestre ajusta o volume de um
+- **Então** o outro não muda
+- **E** remover um NÃO apaga o binário enquanto o outro ainda o usa
+
 ## Casos de borda
 - Nenhuma playlist no acervo → o modo de edição explica como importar/conectar
 - Token do YouTube/Spotify expirado → mensagem pedindo reconexão, sem quebrar a reprodução atual
