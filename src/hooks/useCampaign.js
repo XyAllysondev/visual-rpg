@@ -39,7 +39,11 @@ const entrarNaCampanha = async (uid, userName, code) => {
   try {
     const camp = await campaignsRepo.findActiveByInviteCode(code);
     if (!camp) return { error: "Código inválido ou campanha não encontrada." };
-    if (camp.members.includes(uid)) return { error: "Você já é membro desta campanha." };
+    // `?.` de propósito: a validação de fronteira (spec 0032 AC-6) garante o TIPO de `members`,
+    // mas não inventa PRESENÇA — documento sem o campo continua chegando sem ele, e aqui isso
+    // dava `TypeError` no meio do fluxo de entrada. Sem membros, ninguém é membro; o
+    // `addMember` logo abaixo cria o array com `arrayUnion`.
+    if (camp.members?.includes(uid)) return { error: "Você já é membro desta campanha." };
     if (isFull(camp)) return { error: "Campanha lotada." };
 
     const system = systemOf(camp);

@@ -336,3 +336,65 @@ describe("sharedSheetsRepo.watchLiveRefsByCharacter", () => {
     expect(entregues[1]).toEqual({ c1: [{ campaignId: "camp1", sheetId: "s1" }] });
   });
 });
+
+/* ════════════════════════════════════════════════
+ *  FRONTEIRA VALIDADA — spec 0032 AC-6
+ * ════════════════════════════════════════════════ */
+
+describe("sharedSheetsRepo — validação de fronteira (AC-6)", () => {
+  const entrega = (docs) => {
+    const feitas = assinaturas();
+    let visto;
+    sharedSheetsRepo.watchByCampaign("camp1", (l) => { visto = l; });
+    feitas[0].next({ docs });
+    return visto;
+  };
+
+  it("ficha da mesa ÍNTEGRA sai idêntica, sem log", () => {
+    const aviso = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const crua = {
+      characterId: "c1", ownerId: "u1", ownerName: "Ana", characterName: "Agente Vermelho",
+      characterData: { form: { personagem: "Agente Vermelho" } }, isLive: true,
+    };
+
+    expect(entrega([docSentinela("s1", crua)])).toEqual([{ id: "s1", ...crua }]);
+    expect(aviso).not.toHaveBeenCalled();
+  });
+
+  it("`characterData` de tipo errado não chega à borda — a mesa a indexa sem guarda", () => {
+    const aviso = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    const lista = entrega([docSentinela("s1", { characterId: "c1", characterData: "Agente Vermelho" })]);
+
+    expect(lista[0].characterData).toEqual({});
+    expect(() => lista[0].characterData.form).not.toThrow();
+    expect(aviso.mock.calls[0][0]).toContain('[sharedSheetsRepo.saida] "s1".characterData');
+  });
+
+  it("`characterId` numérico vira texto — ele é comparado com `characterKey`, que é String()", () => {
+    /* Quando o `characterId` não casa com a chave da ficha do dono, o "ao vivo" simplesmente
+       para de sincronizar, SEM erro nenhum na tela. É o pior tipo de falha deste agregado. */
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+    const lista = entrega([docSentinela("s1", { characterId: 1700000000000, characterData: {} })]);
+    expect(lista[0].characterId).toBe("1700000000000");
+  });
+
+  it("ficha compartilhada LEGADA, sem `isLive` nem `permissions`, atravessa intocada", () => {
+    const aviso = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const legada = { characterId: "c1", ownerId: "u1", characterData: { form: {} } };
+
+    expect(entrega([docSentinela("s1", legada)])).toEqual([{ id: "s1", ...legada }]);
+    expect(aviso).not.toHaveBeenCalled();
+  });
+
+  it("documento com corpo não-objeto é descartado da mesa, com log de erro", () => {
+    const lista = entrega([
+      docSentinela("boa", { characterId: "c1", characterData: {} }),
+      docSentinela("fantasma", undefined),
+    ]);
+
+    expect(lista).toHaveLength(1);
+    expect(lista[0].id).toBe("boa");
+    expect(console.error.mock.calls.map((c) => c[0]).join("\n")).toContain("fantasma");
+  });
+});

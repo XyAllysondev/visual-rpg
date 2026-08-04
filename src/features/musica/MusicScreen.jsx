@@ -19,6 +19,8 @@ import {
 } from "./musicaApi";
 import { audioDBSave, audioDBDelete, audioDBGetMeta } from "./audioDb";
 import { fmtDuration, localGradient, localAccent } from "./musicaUtils";
+import CenasSonoras from "./CenasSonoras";
+import { lerVinculos, gravarVinculos, vincular, desvincular } from "./cenas";
 
 export default function MusicScreen({ nowPlaying, onNowPlaying, musicTokens, onMusicTokens, ytPlayerRef }) {
   const ytToken = musicTokens.yt;
@@ -59,6 +61,10 @@ export default function MusicScreen({ nowPlaying, onNowPlaying, musicTokens, onM
   useEffect(() => {
     localStorage.setItem("nx_local_playlists", JSON.stringify(localPlaylists));
   }, [localPlaylists]);
+
+  /* ── Cenas da mesa: qual playlist toca em cada momento da sessão ── */
+  const [vinculosCena, setVinculosCena] = useState(() => lerVinculos());
+  useEffect(() => { gravarVinculos(vinculosCena); }, [vinculosCena]);
 
   /* ── Load imported file metadata from IndexedDB on mount ── */
   useEffect(() => {
@@ -267,6 +273,45 @@ export default function MusicScreen({ nowPlaying, onNowPlaying, musicTokens, onM
     onNowPlaying({ svc: "local", playlistId: pl.id, playlistName: pl.name, startIdx: idx, tracks: allTracks, repeat: nowPlaying?.repeat || "none" });
   };
 
+  /* Toca a playlist vinculada a uma cena. É o caminho de UM clique com a mesa
+     rodando, então ele não navega nem abre nada — só troca o que está tocando.
+     Local resolve na hora; YouTube/Spotify precisam buscar as faixas antes, e
+     é por isso que o erro aqui é silencioso na tela e explícito no aviso: no
+     meio da narração, um alerta vermelho atrapalha mais que a música errada. */
+  const tocarCena = async (vinculo) => {
+    if (!vinculo) return;
+    if (vinculo.svc === "local") {
+      const pl = localPlaylists.find(p => String(p.id) === vinculo.playlistId);
+      if (pl) playLocalPlaylist(pl);
+      return;
+    }
+    const lista = vinculo.svc === "youtube" ? ytPlaylists : spPlaylists;
+    const pl = lista.find(p => String(p.id) === vinculo.playlistId);
+    if (!pl) { setErr("A playlist desta cena não está mais na conta vinculada."); return; }
+    const token = vinculo.svc === "youtube" ? ytToken : spToken;
+    if (!token) { setErr(`Reconecte o ${vinculo.svc === "youtube" ? "YouTube" : "Spotify"} para tocar esta cena.`); return; }
+    try {
+      const brutas = vinculo.svc === "youtube"
+        ? await ytFetchPlaylistItems(pl.id, token)
+        : await spFetchTracks(pl.id, token);
+      const faixas = vinculo.svc === "youtube"
+        ? brutas.map((item, i) => ({ ...item, _ytIdx: i }))
+        : brutas;
+      if (faixas.length === 0) { setErr("Esta playlist está vazia."); return; }
+      onNowPlaying({
+        svc: vinculo.svc, playlistId: pl.id,
+        playlistName: vinculo.svc === "youtube" ? pl.snippet?.title : pl.name,
+        playlistThumb: vinculo.svc === "youtube"
+          ? (pl.snippet?.thumbnails?.medium?.url || pl.snippet?.thumbnails?.default?.url)
+          : pl.images?.[0]?.url,
+        trackCount: faixas.length, startIdx: 0, tracks: faixas,
+        repeat: nowPlaying?.repeat || "none",
+      });
+    } catch (e) {
+      setErr("Não deu para tocar a trilha desta cena: " + e.message);
+    }
+  };
+
   const openEditPlaylist = (pl) => {
     setEditingPl(pl);
     setNewPlName(pl.name);
@@ -433,6 +478,21 @@ export default function MusicScreen({ nowPlaying, onNowPlaying, musicTokens, onM
             </div>
           ))}
         </div>
+      )}
+
+      {/* ── Cenas da mesa ──
+          Fica ACIMA da grade e some quando o mestre entra numa playlist: o
+          objetivo é ser a primeira coisa à mão durante a sessão, não competir
+          com a navegação do acervo. */}
+      {!selectedPlaylist && (
+        <CenasSonoras
+          vinculos={vinculosCena}
+          playlistsPorServico={{ local: localPlaylists, youtube: ytPlaylists, spotify: spPlaylists }}
+          nowPlaying={nowPlaying}
+          onTocar={tocarCena}
+          onVincular={(cenaId, pl) => setVinculosCena(v => vincular(v, cenaId, pl))}
+          onDesvincular={(cenaId) => setVinculosCena(v => desvincular(v, cenaId))}
+        />
       )}
 
       {/* ── Playlist grid ── */}

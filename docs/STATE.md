@@ -10,8 +10,51 @@ alwaysApply: true
 > todo. Diferente do **ADR** (decisão durável e imutável). Decisão estrutural → ADR; estado do
 > trabalho → aqui. Atualize ao **pausar/encerrar**; leia ao **retomar**. Use a skill `/handoff`.
 
-**Última atualização:** 2026-08-02 — DUAS SESSÕES trabalharam em paralelo neste dia: SPEC 0033
-(progressão automática de OP) e as SPECS 0029/0030/0031 (arquitetura em camadas). Ambas verdes.
+**Última atualização:** 2026-08-02 — DUAS SESSÕES em paralelo: SPEC 0033 (progressão automática
+de OP) e as SPECS 0029/0030/0031/0032 (arquitetura em camadas, **as quatro ENTREGUES**).
+Gate final: **89 suítes / 2.196 testes verdes**, `npm run build` exit 0.
+
+> **2026-08-02: AS TRÊS ONDAS DE ARQUITETURA ESTÃO FECHADAS.** Ponto de partida: `App.jsx` com
+> 11.454 linhas, 63 chamadas diretas ao Firestore e o SDK importado em 17 arquivos.
+>
+> | | Antes | Depois |
+> |---|---|---|
+> | `src/App.jsx` | 11.454 linhas | **439** |
+> | Arquivos com `firebase/firestore` fora da infraestrutura | 17 | **0** |
+> | Suítes / testes | 71 / 1.694 | **89 / 2.196** |
+>
+> - **Onda 1 (spec 0029)** — 7 repositórios por agregado, `paths.js` como única fonte de caminho,
+>   política de erro `strict`/`silent` declarada em JSDoc. Fechou o vazamento de
+>   `DocumentReference` guardado em `useRef`.
+> - **Onda 1.5 (spec 0030)** — os 7 stores de feature (264 chamadas ao SDK) atrás da fronteira.
+>   Exceção do ESLint de 7 arquivos a **zero**.
+> - **Onda 2 (spec 0031)** — `App.jsx` virou orquestrador. `src/features/` com 9 contextos,
+>   `src/ui/` com a casca, `src/lib/` com o compartilhado. **AC-1 atingido com folga (439 < 800).**
+> - **Onda 3 (spec 0032)** — os 4 quirks corrigidos, `Timestamp` fora da fronteira, validação de
+>   schema. Ver **ADR-0011**, que registra as dívidas do ADR-0010 como quitadas.
+>
+> **REGRA QUE VALE MAIS QUE O RESTO (ADR-0011):** a fronteira garante **TIPO**, nunca inventa
+> **PRESENÇA**. Campo com tipo errado é coagido; campo ausente continua ausente. Preencher
+> `system: "Genérico"` faria o `CampaignCard` (que renderiza com `{campaign.system && …}`) mostrar
+> um selo em campanha que nunca escolheu sistema. Dado inventado é indistinguível do real.
+>
+> **⚠ ORDEM DE DEPLOY OBRIGATÓRIA:** `watchRolls` agora exige índice composto
+> (`messages`: `type` ASC + `timestamp` DESC), declarado em `firestore.indexes.json`.
+> **`firebase deploy --only firestore:indexes` PRIMEIRO, o build depois** — senão o feed de
+> rolagens fica vazio.
+>
+> **BUG CRÍTICO DE 2026-07-25 FECHADO (Q4):** o autosave do mapa avançava a baseline ANTES de
+> publicar e engolia o erro do commit — alteração que falhava nunca mais entrava num diff e o
+> mestre perdia trabalho sem aviso. Agora a baseline só avança quando a escrita confirma, com
+> backoff reusando o próprio ciclo do autosave, e aviso visível após 3 falhas seguidas.
+> Cada conserto foi **provado por teste de mutação** (desfazer o conserto derruba o teste novo).
+>
+> **DÍVIDAS NOVAS, pequenas e datadas:** (a) `worldMapsRepo.observarPerfil` e
+> `mapSyncRepo.getCampaignDoc` leem agregados alheios e ainda passam data crua (sem consumidor
+> hoje); (b) `NavIco` (`src/ui/`) é **código morto** — nenhum chamador o monta, o menu usa
+> `RuneIco`; (c) a validação cobre 5 dos 13 agregados, por decisão registrada no ADR-0011.
+>
+> **PENDENTE DO ANDRE:** validar no navegador e commitar. **NADA foi commitado.**
 
 > **⚠ 2026-08-02: DUAS SESSÕES SIMULTÂNEAS NO MESMO WORKING TREE — leia isto antes de confiar
 > no histórico abaixo.** Uma sessão fazia a spec 0033 (ficha de OP) e outra as specs 0029/0030/
@@ -70,6 +113,34 @@ alwaysApply: true
 > (as 3 telas + `audioDb`, `musicaApi`, `musicaUtils`). Faltam ~63 componentes de topo; o alvo
 > do AC-1 é **< 800 linhas**. Specs 0031 e 0032 escritas e prontas para execução.
 
+> **2026-08-03: SPEC 0034 — CENAS SONORAS DA MESA.** Andre pediu trilhas e efeitos sonoros de
+> Ordem Paranormal gerados por IA. **NÃO DÁ — e o motivo está registrado na spec para ninguém
+> tentar de novo sem checar:** a ferramenta de áudio da Higgsfield só gera FALA e manda recusar
+> pedidos de música/SFX (os modelos `sonilo_music`/`mirelo_text_to_audio` são exclusivos do
+> pipeline de jogos); a Morpfix só tem TTS da ElevenLabs; e o **MiniMax não resolve** — seu
+> `music_generation` exige LETRA obrigatória (gerador de canção, não de ambiência) e ele **não tem
+> ferramenta de efeito sonoro nenhuma**. Some-se o produto: a tela de Trilhas é um AGREGADOR
+> (playlists do YouTube/Spotify do mestre + MP3 dele no IndexedDB local, que nunca sobem ao
+> Firestore) — não há onde publicar acervo gerado.
+> - **O que foi entregue no lugar, escolhido pelo Andre:** oito **cenas** de OP (Investigação,
+>   Tensão, Terror, Combate, Perseguição, Ritual, O Outro Lado, Interlúdio — os nomes seguem o
+>   vocabulário mecânico do livro), cada uma vinculada a uma playlist que ele já tem. Um clique
+>   troca a trilha durante a narração.
+> - **`cenas.js`** é lógica pura (26 testes; metade sobre entrada suja, porque o vínculo mora no
+>   localStorage, que é editável à mão). **`CenasSonoras.jsx`** é a tira. Ligado no `MusicScreen`,
+>   acima da grade, sumindo quando o mestre entra numa playlist.
+> - **Decisão de UX que vale manter:** tocar e configurar são **modos separados**. Com a mesa
+>   rodando, clicar numa cena SÓ toca; nada revincula sem entrar em "Vincular trilhas".
+> - **Vínculo órfão avisa em vez de sumir:** playlist apagada depois de vinculada deixa a cena
+>   listada, marcada indisponível, dizendo qual se perdeu.
+> - **ARMADILHA:** `globalThis` **não passa** no ESLint do preset do CRA (`no-undef`) — quebrou o
+>   build. Módulo puro que precisa de `localStorage` resolve o padrão em chamada, com guarda de
+>   `typeof window`, e aceita storage injetado (que é o que os testes usam).
+> - **`.mcp.json` ganhou o servidor `minimax`** com `${MINIMAX_API_KEY}` (padrão do
+>   `${GITHUB_TOKEN}`; nenhum segredo no arquivo). Falta a chave no ambiente + restart. Vale para
+>   **voz do mestre** (spec 0017) e nada mais — não para trilha, não para SFX.
+> - Gate: **90 suítes / 2222 testes** com `--runInBand`, build "ready to be deployed".
+
 > **2026-08-02: SPEC 0033 — PROGRESSÃO AUTOMÁTICA DE ORDEM PARANORMAL.** Andre pediu que a evolução
 > seja automática "de acordo com as regras do livro", para o jogador não precisar preencher tudo, e
 > apontou o PDF oficial no Desktop. **Só Ordem Paranormal** (D&D e Tormenta intocados).
@@ -121,6 +192,30 @@ alwaysApply: true
 > - **Pendente do Andre:** (1) validar no navegador (subir um degrau pelo assistente, conferir
 >   PV/PE/SAN e habilidades, depois "Voltar" um degrau e conferir que a anotação própria continua
 >   lá); (2) commitar/deployar.
+>
+> **MESMA SESSÃO — PAINEL (`/painel`) + MCP DO MINIMAX.** Andre pediu para usar o MiniMax da
+> assinatura dele no layout do painel. **O MiniMax não faz isso:** o MCP oficial expõe 10
+> ferramentas (`text_to_audio`, `voice_clone`, `voice_design`, `music_generation`, `text_to_image`,
+> `generate_video`…) e **nenhuma desenha layout ou escreve código**. Registrado em `.mcp.json` mesmo
+> assim, com `${MINIMAX_API_KEY}` (padrão do `${GITHUB_TOKEN}`, nenhum segredo no arquivo) — vale
+> para o que ele É bom e está parado no roadmap: **voz do mestre** (`narracao-mestre.mp3`, item
+> aberto da 0017) e **trilhas sonoras**. Precisa da chave em env + restart do Claude Code.
+> - **ACHADO — mais um número inventado sobreviveu à limpeza anterior.** O comentário do
+>   `Dashboard.jsx` dizia que sobraram "só os três que saem de estado real"; **"Sessões" não sai**.
+>   `setSessions` NUNCA é chamado no App.jsx (só o inicializador e o efeito que regrava o mesmo
+>   array vazio no localStorage) — era 0 permanente com cara de dado. Removido; a faixa agora tem
+>   DOIS números e os dois são verdadeiros. `Dashboard` deixou de receber a prop `sessions`.
+> - **`.nx-list-cards` novo:** o DossierCard tem borda e raio próprios, mas era empilhado num
+>   `.nx-list` que separa por filete e **sem gap** — dois cartões encostados somavam bordas num
+>   traço duplo. A lista de OP passa a usar a variante com respiro; a de linhas segue sem gap.
+> - **Faixa de números não empilha mais no celular** (media query 640px): três blocos empilhados
+>   custavam ~150px de altura, jogando "Seus personagens" abaixo da dobra por causa de contadores
+>   de um dígito. Agora ficam lado a lado, com tipo e padding menores.
+> - **ARMADILHA (caí nela, e ela já estava documentada nesta mesma STATE):** pus `{/* … */}` em
+>   posição de EXPRESSÃO (depois de `) : (`), onde `{}` é objeto literal e não comentário JSX — o
+>   build quebrou com "Unexpected token, expected ','". Resolvido hoistando a classe para uma const
+>   com comentário JS normal. **Se precisar comentar ali, comente ACIMA do ternário.**
+> - Gate: **89 suítes / 2196 testes** com `--runInBand`, build "ready to be deployed".
 
 > **⚠ 2026-08-02: REVERSÃO PARCIAL ACIDENTAL DO WORKING TREE — leia antes de confiar no histórico.**
 > No meio da sessão, um conjunto de arquivos voltou a um estado anterior **sem que ninguém pedisse**.

@@ -26,6 +26,9 @@ const docOf = (id, data, metadata) => ({
 });
 const snapOf = (docs) => ({ docs, size: docs.length, empty: docs.length === 0 });
 
+/** `Timestamp` do SDK como ele chega num snapshot ao vivo — objeto com `.toMillis()`. */
+const tsSdk = (ms) => ({ toMillis: () => ms, toDate: () => new Date(ms) });
+
 /** Lotes criados pelo `writeBatch` mockado, na ordem. */
 let lotes = [];
 /** Contador do id gerado no cliente por `doc(collectionRef)`. */
@@ -120,10 +123,19 @@ describe("worldsRepo — documento do mundo", () => {
     );
   });
 
-  it("getWorld devolve `{id, ...campos}` quando o mundo existe", async () => {
-    getDoc.mockResolvedValue({ exists: () => true, id: "w-1", data: () => ({ name: "Aurora" }) });
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5): a leitura avulsa também devolvia o documento cru.
+     Se só as assinaturas normalizassem, a mesma tela receberia número pelo `watch` e
+     `Timestamp` pelo `getWorld` — duas formas do mesmo campo no mesmo componente. */
+  it("getWorld devolve `{id, ...campos}` com as datas em epoch-ms", async () => {
+    getDoc.mockResolvedValue({
+      exists: () => true,
+      id: "w-1",
+      data: () => ({ name: "Aurora", createdAt: tsSdk(1000), updatedAt: tsSdk(2000) }),
+    });
 
-    await expect(worldsRepo.getWorld("w-1")).resolves.toEqual({ id: "w-1", name: "Aurora" });
+    await expect(worldsRepo.getWorld("w-1")).resolves.toEqual({
+      id: "w-1", name: "Aurora", createdAt: 1000, updatedAt: 2000,
+    });
     expect(getDoc).toHaveBeenCalledWith({ id: "w-1", path: "worlds/w-1" });
   });
 
@@ -409,10 +421,21 @@ describe("worldsRepo.watchWorldsByOwner", () => {
     );
   });
 
-  it("entrega objetos planos com o id e a pendência de escrita", () => {
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5).
+     Este teste ASSEVERAVA que o documento saía do repo exatamente como veio do `data()`.
+     Com uma data no acervo, isso significava o `Timestamp` do SDK atravessando a fronteira
+     (dívida aceita no ADR-0010) — a `MasterSuite` só não quebrava porque `entityFilters
+     .toMillis` e `ui/tokens.tempoRelativo` já aceitavam as duas formas. Agora o contrato é
+     um só: `createdAt`/`updatedAt` saem em epoch-ms NUMÉRICO. O `pendenteNoServidor` e a
+     estimativa de carimbo, que o teste sempre cobriu, continuam iguais. */
+  it("entrega objetos planos com o id, a pendência de escrita e as datas em epoch-ms", () => {
     let entregue;
-    const pendente = docOf("w-novo", { name: "Coroa de Cinzas" }, { hasPendingWrites: true });
-    const confirmado = docOf("w-velho", { name: "Aurora" }, { hasPendingWrites: false });
+    const pendente = docOf(
+      "w-novo",
+      { name: "Coroa de Cinzas", createdAt: tsSdk(1000), updatedAt: tsSdk(2000) },
+      { hasPendingWrites: true },
+    );
+    const confirmado = docOf("w-velho", { name: "Aurora", updatedAt: tsSdk(500) }, { hasPendingWrites: false });
     onSnapshot.mockImplementation((_q, next) => { next(snapOf([pendente, confirmado])); return () => {}; });
 
     worldsRepo.watchWorldsByOwner("u1", (lista) => { entregue = lista; });
@@ -421,12 +444,31 @@ describe("worldsRepo.watchWorldsByOwner", () => {
     // Sem ele, a casca escolheria sozinha um mundo que o servidor ainda não
     // conhece — e a leitura da subcoleção volta `permission-denied`.
     expect(entregue).toEqual([
-      { id: "w-novo", name: "Coroa de Cinzas", pendenteNoServidor: true },
-      { id: "w-velho", name: "Aurora", pendenteNoServidor: false },
+      { id: "w-novo", name: "Coroa de Cinzas", createdAt: 1000, updatedAt: 2000, pendenteNoServidor: true },
+      { id: "w-velho", name: "Aurora", updatedAt: 500, pendenteNoServidor: false },
     ]);
+    // Nenhuma primitiva do SDK sobrevive à borda: nada de `.toMillis`/`.toDate` do outro lado.
+    entregue.forEach((m) => expect(typeof m.updatedAt).toBe("number"));
+    // `createdAt` NÃO foi inventado no mundo que não o tinha — campo ausente continua ausente.
+    expect("createdAt" in entregue[1]).toBe(false);
     // `serverTimestamps:"estimate"` evita o `null` do carimbo ainda não confirmado,
-    // que jogaria o mundo recém-criado para o fim de "recentes".
+    // que jogaria o mundo recém-criado para o fim de "recentes". A normalização roda DEPOIS
+    // dele, sobre a estimativa — remover o `estimate` traria o `null` de volta.
     expect(pendente.data).toHaveBeenCalledWith({ serverTimestamps: "estimate" });
+  });
+
+  /* Escrita otimista: o `estimate` cobre o caso normal, mas um snapshot que ainda chegue com
+     o carimbo vazio não pode virar `0` (1970, o fim da lista) nem `Date.now()` (data
+     inventada). Sai `null`, e quem consome aplica o fallback que já aplicava. */
+  it("carimbo ainda não resolvido sai como `null`, não como 0 nem como agora", () => {
+    let entregue;
+    onSnapshot.mockImplementation((_q, next) => {
+      next(snapOf([docOf("w-1", { name: "Recém-criado", updatedAt: null })]));
+      return () => {};
+    });
+
+    worldsRepo.watchWorldsByOwner("u1", (lista) => { entregue = lista; });
+    expect(entregue).toEqual([{ id: "w-1", name: "Recém-criado", updatedAt: null, pendenteNoServidor: false }]);
   });
 
   it("mundo sem metadata não quebra a leitura", () => {
@@ -492,15 +534,18 @@ describe("worldsRepo.watchSubcollection", () => {
     );
   });
 
-  it("entrega objetos planos, sem `pendenteNoServidor`", () => {
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5): o verbete saía cru, e a `MasterSuite` ordenava a
+     wiki por `updatedAt` com um `Timestamp` do SDK na mão. Agora sai em epoch-ms — a ordenação
+     de `entityFilters.sortEntities` compara número e o resultado na tela é o mesmo. */
+  it("entrega objetos planos, sem `pendenteNoServidor` e com as datas em epoch-ms", () => {
     let entregue;
-    const d = docOf("e-1", { name: "Ada" });
+    const d = docOf("e-1", { name: "Ada", createdAt: tsSdk(10), updatedAt: tsSdk(20) });
     onSnapshot.mockImplementation((_q, next) => { next(snapOf([d])); return () => {}; });
 
     worldsRepo.watchSubcollection("w-1", "entities", { campo: "updatedAt", direcao: "desc" },
       (lista) => { entregue = lista; });
 
-    expect(entregue).toEqual([{ id: "e-1", name: "Ada" }]);
+    expect(entregue).toEqual([{ id: "e-1", name: "Ada", createdAt: 10, updatedAt: 20 }]);
     expect(d.data).toHaveBeenCalledWith({ serverTimestamps: "estimate" });
   });
 

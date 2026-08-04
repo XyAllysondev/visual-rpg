@@ -10,8 +10,22 @@
  */
 import { getDocs, setDoc, deleteDoc, query, where } from "firebase/firestore";
 import { docAt, colAt } from "./client";
+import { criarNormalizador, mapa, naoDescartado } from "./schema";
 import { charactersCol, characterDoc } from "./paths";
 import { characterKey } from "../../domain/character";
+
+/**
+ * Tipos que a fronteira garante (spec 0032 AC-6).
+ *
+ * Só `form`, e é honesto que seja só ele: a ficha inteira mora ali dentro, e é o único campo
+ * que a UI indexa sem guarda (`char.form.personagem`, `char.form.avatar`, …). Se `form` vier
+ * como string ou lista — o que acontece quando uma escrita antiga gravou a ficha achatada —,
+ * a tela quebra no primeiro acesso, longe daqui.
+ *
+ * `id`/`createdAt` NÃO entram: a identidade da ficha é `characterKey` (domínio), que já trata
+ * ficha antiga sem `id`. Duas réguas para a mesma pergunta é como o bug volta.
+ */
+const normalizar = criarNormalizador("charactersRepo.saida", { form: mapa });
 
 /**
  * Fichas do dono num sistema (`ordemParanormal`, `dungeonsAndDragons`, …).
@@ -31,9 +45,11 @@ export async function listBySystem(uid, systemId) {
     query(colAt(charactersCol(uid)), where("systemId", "==", systemId))
   );
   return snap.docs.map((d) => {
-    const { _updatedAt, ...character } = d.data();
+    const dados = normalizar(d.data(), d.id);
+    if (!dados) return null;
+    const { _updatedAt, ...character } = dados;
     return character;
-  });
+  }).filter(naoDescartado);
 }
 
 /**

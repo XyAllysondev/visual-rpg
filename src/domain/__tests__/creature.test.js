@@ -25,10 +25,27 @@ describe("creature.currentHp", () => {
     expect(currentHp({ hpMax: 18, hpCurrent: 5 })).toBe(5);
   });
 
-  it("QUIRK LEGADO PRESERVADO: hpCurrent 0 é lido como PV cheio (AC-7)", () => {
-    // `parseInt(0) || max` — o zero é falsy. Consertar muda o comportamento de quem já
-    // tem criatura caída no banco; é decisão de outra spec, não desta.
-    expect(currentHp({ hpMax: 18, hpCurrent: 0 })).toBe(18);
+  /* VIRADA DE COMPORTAMENTO — spec 0032 (Q3).
+     Este teste travava o quirk oposto: até a spec 0031, `currentHp({hpCurrent: 0})` devolvia
+     `hpMax`, porque o legado fazia `parseInt(...) || max` e `0` é falsy — a criatura abatida
+     "revivia" na próxima leitura da tela. A spec 0029 preservou o defeito de propósito (AC-7),
+     para que a refatoração fosse a comportamento constante. Agora ele foi consertado.
+     O teste não foi apagado: foi INVERTIDO, para que o histórico da decisão fique legível. */
+  it("criatura caída continua caída: hpCurrent 0 vale 0, não o PV cheio", () => {
+    expect(currentHp({ hpMax: 18, hpCurrent: 0 })).toBe(0);
+    expect(currentHp({ hpMax: "18", hpCurrent: "0" })).toBe(0);
+  });
+
+  it("hpCurrent ilegível vale 0 — mas sem ressuscitar a criatura", () => {
+    // `toInt` segue tolerante com a string livre do formulário; o que mudou é que o
+    // resultado 0 agora é respeitado em vez de cair no `hpMax`.
+    expect(currentHp({ hpMax: 18, hpCurrent: "abc" })).toBe(0);
+  });
+
+  it("a distinção é ausência, não falsidade: só sem hpCurrent a criatura está intacta", () => {
+    expect(currentHp({ hpMax: 18 })).toBe(18);
+    expect(currentHp({ hpMax: 18, hpCurrent: null })).toBe(18);
+    expect(currentHp({ hpMax: 18, hpCurrent: undefined })).toBe(18);
   });
 });
 

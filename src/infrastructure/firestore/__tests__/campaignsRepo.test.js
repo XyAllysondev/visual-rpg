@@ -90,16 +90,35 @@ describe("campaignsRepo.listByMember", () => {
 });
 
 describe("campaignsRepo.countActiveByMasterAndSystem", () => {
-  it("conta só as campanhas ativas que o usuário mestra naquele sistema", async () => {
-    getDocs.mockResolvedValue({ size: 2 });
+  /* VIRADA DE COMPORTAMENTO — spec 0032 (Q1).
+     Até a spec 0031 esta função mandava `isActive == true` NA QUERY, e este teste travava
+     isso. O efeito era uma assimetria absurda com a função irmã: campanha antiga sem o campo
+     sumia daqui e contava lá, então o MESMO mestre furava o teto ao CRIAR e era barrado ao
+     ENTRAR por convite. Agora as duas filtram em memória, com a mesma regra de domínio. */
+  it("conta campanha ANTIGA sem `isActive` — o filtro saiu da query (Q1)", async () => {
+    getDocs.mockResolvedValue({
+      docs: [
+        docOf("legada", { masterId: "u1", system: "ordemParanormal" }),                     // sem isActive
+        docOf("nova", { masterId: "u1", system: "ordemParanormal", isActive: true }),
+        docOf("arquivada", { masterId: "u1", system: "ordemParanormal", isActive: false }), // não conta
+      ],
+    });
 
     await expect(campaignsRepo.countActiveByMasterAndSystem("u1", "ordemParanormal")).resolves.toBe(2);
+  });
+
+  it("a query NÃO filtra isActive — senão a campanha legada sumiria de novo", async () => {
+    getDocs.mockResolvedValue({ docs: [] });
+    await campaignsRepo.countActiveByMasterAndSystem("u1", "ordemParanormal");
+
     expect(query).toHaveBeenCalledWith(
       { path: "campaigns" },
       "masterId == u1",
-      "system == ordemParanormal",
-      "isActive == true"
+      "system == ordemParanormal"
     );
+    // Asserção negativa de propósito: quebra se alguém "otimizar" o filtro de volta para dentro
+    // da query, que é exatamente o bug que o Q1 consertou.
+    expect(where).not.toHaveBeenCalledWith("isActive", "==", true);
   });
 
   it("sem uid, devolve 0 sem tocar a rede", async () => {
@@ -318,5 +337,81 @@ describe("campaignsRepo.setNarracao", () => {
     await expect(
       campaignsRepo.setNarracao("c1", payload, { targetIds: ["u2"] })
     ).rejects.toThrow("denied");
+  });
+});
+
+/* ════════════════════════════════════════════════
+ *  FRONTEIRA VALIDADA — spec 0032 AC-6
+ * ════════════════════════════════════════════════ */
+
+describe("campaignsRepo — validação de fronteira (AC-6)", () => {
+  it("campanha ÍNTEGRA sai idêntica, sem log nenhum", () => {
+    // Regra 1 da spec: a validação não pode mudar nada para dado bem-formado.
+    const aviso = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const doc = {
+      name: "A Ordem", system: "Ordem Paranormal", members: ["u1"],
+      memberNames: { u1: "Ana" }, admins: [], maxPlayers: 6, isActive: true,
+    };
+    let entregue;
+    onSnapshot.mockImplementation((_q, next) => { next({ docs: [docOf("c1", doc)] }); return () => {}; });
+
+    campaignsRepo.watchByMember("u1", (l) => { entregue = l; });
+
+    expect(entregue).toEqual([{ id: "c1", ...doc }]);
+    expect(aviso).not.toHaveBeenCalled();
+  });
+
+  it("`members` de tipo errado NÃO chega à borda como não-array", async () => {
+    /* É o crash concreto que o AC-6 mira: `useCampaign.entrarNaCampanha` faz
+       `camp.members.includes(uid)` SEM guarda. Com `members` gravado errado, a tela quebra
+       com "includes is not a function" num arquivo que não tem nada a ver com o dado. */
+    const aviso = jest.spyOn(console, "warn").mockImplementation(() => {});
+    getDocs.mockResolvedValue({
+      docs: [docOf("c1", { inviteCode: "ABC234", isActive: true, members: null, memberNames: "Ana" })],
+    });
+
+    const camp = await campaignsRepo.findActiveByInviteCode("ABC234");
+
+    expect(Array.isArray(camp.members)).toBe(true);
+    expect(() => camp.members.includes("u9")).not.toThrow();
+    expect(camp.memberNames).toEqual({});
+    // E o problema fica rastreável NA ORIGEM, com o id do documento (o ponto do AC-6).
+    expect(aviso.mock.calls.map((c) => c[0]).join("\n"))
+      .toContain('[campaignsRepo.saida] "c1".members');
+  });
+
+  it("`maxPlayers` gravado como string vira número — o `<input>` grava texto", async () => {
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+    getDocs.mockResolvedValue({ docs: [docOf("c1", { name: "A Ordem", maxPlayers: "8" })] });
+    const [camp] = await campaignsRepo.listByMember("u1");
+    expect(camp.maxPlayers).toBe(8);
+  });
+
+  it("campanha LEGADA sem `isActive`, sem `system` e sem `maxPlayers` atravessa intocada", async () => {
+    /* Rejeitar — ou preencher — documento legado seria PIOR que o problema: `CampaignCard`
+       esconde o selo do sistema com `{campaign.system && …}`, então inventar "Genérico" faria
+       aparecer um selo que nunca existiu. Ausente continua ausente. */
+    const aviso = jest.spyOn(console, "warn").mockImplementation(() => {});
+    getDocs.mockResolvedValue({ docs: [docOf("legada", { name: "Mesa de 2024", inviteCode: "ABC234" })] });
+
+    const [camp] = await campaignsRepo.listByMember("u1");
+
+    expect(camp).toEqual({ id: "legada", name: "Mesa de 2024", inviteCode: "ABC234" });
+    expect(aviso).not.toHaveBeenCalled();
+  });
+
+  it("documento cujo corpo não é objeto é DESCARTADO da lista, com log de erro", () => {
+    /* `d.data()` pode devolver `undefined`; `{id, ...undefined}` viraria um registro válido
+       e vazio na tela de campanhas. É o único caso inutilizável de verdade. */
+    let entregue;
+    onSnapshot.mockImplementation((_q, next) => {
+      next({ docs: [docOf("boa", { name: "A Ordem" }), docOf("fantasma", undefined)] });
+      return () => {};
+    });
+
+    campaignsRepo.watchByMember("u1", (l) => { entregue = l; });
+
+    expect(entregue).toEqual([{ id: "boa", name: "A Ordem" }]);
+    expect(console.error.mock.calls.map((c) => c[0]).join("\n")).toContain("fantasma");
   });
 });

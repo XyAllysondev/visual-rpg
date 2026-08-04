@@ -33,7 +33,7 @@ import {
   getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
   onSnapshot, query, orderBy, serverTimestamp, writeBatch, increment,
 } from "firebase/firestore";
-import { db, docAt, colAt, NOOP_UNSUBSCRIBE } from "./client";
+import { db, docAt, colAt, comDatasEmMs, NOOP_UNSUBSCRIBE } from "./client";
 import {
   userDoc,
   atelieMapsCol, atelieMapDoc,
@@ -48,13 +48,28 @@ import {
 export const BATCH_LIMIT = 500;
 
 /**
+ * Campos de data do agregado: os mesmos no molde e nas subcoleções `nodes`, `edges` e
+ * `events` — todos carimbados com `createdAt`/`updatedAt` pelas escritas deste arquivo.
+ * (`media/background` só tem `updatedAt`, e ele nunca sai daqui: `lerFundo` devolve a string.)
+ */
+const CAMPOS_DE_DATA = ["createdAt", "updatedAt"];
+
+/**
  * `serverTimestamp()` chega `null` no snapshot local (latency compensation) até o servidor
  * confirmar — o que jogaria o mapa recém-criado para o FIM da lista ordenada por
  * `updatedAt`. `serverTimestamps:"estimate"` entrega uma estimativa local no lugar do
  * `null`. Herdado do store; mudar isto muda o que a grade do ateliê mostra.
+ *
+ * DÍVIDA QUITADA (spec 0032 AC-5): a data sai daqui como epoch-ms NUMÉRICO, nunca mais como
+ * `Timestamp` do SDK. A normalização roda DEPOIS da estimativa, sobre o valor estimado — o
+ * `serverTimestamps:"estimate"` continua indispensável e não pode ser removido, senão o campo
+ * volta a ser `null` no snapshot otimista e o mapa recém-criado cai para o fim da grade.
  */
 const paraLista = (snap) =>
-  snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) }));
+  snap.docs.map((d) => ({
+    id: d.id,
+    ...comDatasEmMs(d.data({ serverTimestamps: "estimate" }), CAMPOS_DE_DATA),
+  }));
 
 /** Número finito e não-negativo, ou o padrão. Cópia da régua do store (não há segunda). */
 const comoNumero = (valor, padrao = 0) =>
@@ -145,13 +160,15 @@ export async function tocarMapa(uid, mapId) {
  * Lê um molde avulso. `null` quando não existe.
  *
  * Sem `serverTimestamps:"estimate"` de propósito: quem chama abre UM mapa, não ordena
- * uma lista — é o comportamento herdado do store (AC-7).
+ * uma lista — é o comportamento herdado do store (AC-7). As datas ainda passam pelo
+ * normalizador da spec 0032 (AC-5): sem estimativa o campo pode chegar `null`, e `null`
+ * atravessa como `null` — o que sai daqui nunca é `Timestamp` do SDK.
  * @policy strict @returns {Promise<object|null>}
  */
 export async function lerMapa(uid, mapId) {
   if (!uid || !mapId) return null;
   const snap = await getDoc(docAt(atelieMapDoc(uid, mapId)));
-  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  return snap.exists() ? { id: snap.id, ...comDatasEmMs(snap.data(), CAMPOS_DE_DATA) } : null;
 }
 
 /**
