@@ -11,7 +11,7 @@ import React, { useState, useRef, useMemo, useCallback } from "react";
 import CAMADAS from "../../../data/ordemParanormal/builder-pecas.json";
 
 const SIZE = 512;
-const OPC = "#b030d8";
+const OPC = "#a3282c";
 
 /* Onde cada camada "nasce" sobre o molde: centro (x,y em 0..1) e escala
  * (fração do canvas). Valores calibrados para os moldes chibi do pack. */
@@ -46,7 +46,7 @@ const ANEIS = [
   { id: "sangue",   nome: "Sangue",       cor: "#e04040" },
   { id: "morte",    nome: "Morte",        cor: "#a8b0b8" },
   { id: "energia",  nome: "Energia",      cor: "#57a0ff" },
-  { id: "medo",     nome: "Medo",         cor: "#b030d8" },
+  { id: "medo",     nome: "Medo",         cor: "#a3282c" },
   { id: "conhecim", nome: "Conhecimento", cor: "#f0c040" },
 ];
 

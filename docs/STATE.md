@@ -10,7 +10,80 @@ alwaysApply: true
 > todo. Diferente do **ADR** (decisão durável e imutável). Decisão estrutural → ADR; estado do
 > trabalho → aqui. Atualize ao **pausar/encerrar**; leia ao **retomar**. Use a skill `/handoff`.
 
-**Última atualização:** 2026-08-02 — DUAS SESSÕES trabalharam em paralelo neste dia: SPEC 0033
+**Última atualização:** 2026-08-06 — quicks 002 (Painel), 003 (modo demo) e 004 (**repaginação
+heráldica do app inteiro**).
+
+> **2026-08-06: REPAGINAÇÃO HERÁLDICA (quick `004-repaginacao-heraldica`).**
+> O app inteiro trocou de pele: preto forjado + ouro brunido + carmesim de brasão, com
+> material (bisel, grão, cantoneiras), ornamento e movimento. **Nenhuma regra de negócio
+> mudou** — é apresentação.
+> - **Como foi feito:** 3 camadas — tokens (`themes/index.js`), camada global nova
+>   (`themes/heraldica.jsx`, aplicada por SELETOR nas classes compartilhadas) e a folha do
+>   Painel. O JSX das telas de conteúdo NÃO foi tocado.
+> - **A regra de cor** (está no topo de `themes/index.js`, siga-a): ouro = clique/título ·
+>   carmesim = identidade/atmosfera · aço = informação fria · violeta = SÓ o Outro Lado.
+> - **SPEC_DEVIATION na spec 0017 AC-6:** a identidade de card do OP saiu do roxo arcano para
+>   o carmesim. O mecanismo do AC-6 continua valendo e testado; só a matiz mudou, por decisão
+>   do Andre. Registrada no `TASK.md` da quick e no próprio teste.
+> - **A spec 0023 barrou dois erros meus** antes de virarem tela feia: a escada de superfícies
+>   ficou fora de sincronia entre sistemas, e no primeiro corte `bg`→`card2` caiu para 1,20:1
+>   (hierarquia invisível). A escada nova é L* 2,3 / 7,4 / 11,6 / 16,2 nos três sistemas.
+> - **Gate novo:** `node scripts/checar-templates-css.mjs` — acha crase dentro de template de
+>   CSS, que quebra o build apontando a linha errada. Custou 3 ciclos de build nesta task.
+> - **⚠ Rode a suíte com `--maxWorkers=2`.** No paralelismo padrão, `forja-render`,
+>   `painel-render` e os testes do WorldMap falham por TIMEOUT sob carga, não por defeito.
+>   Suíte: **2133 verdes** + a falha herdada do `creature.test.js`.
+> - **Roxo que ficou de propósito:** 64 literais no editor de mapas — é cor de SELEÇÃO, tem
+>   que destoar da paleta. Não "esqueceram" dela.
+> - **A pele é de TODOS os sistemas, não só do OP.** A camada global não tem literal de cor:
+>   tudo deriva do registry (inclusive a liga do metal, via `--gold-mid/-deep/-face` e os
+>   degraus de alfa `--gold-veil/-wash/-sel/-cast` no `ThemeProvider`). Verificado forçando
+>   `data-nexus-system` para `dnd`/`tormenta` e fotografando: vira vermelho de taverna e verde
+>   de Arton sem sobra de ouro. **Se for escrever CSS novo na pele, use as vars** — literal ali
+>   crava o OP no que deveria ser global.
+> - **O que NÃO foi redesenhado:** a PALETA de D&D e Tormenta. Eles só tiveram a escada de
+>   superfícies realinhada (obrigatório) e mantêm o acento próprio (vermelho/verde). Quando
+>   saírem do "EM BREVE" (`available: false` no `SYSTEMS`), vale desenhar o par heráldico de
+>   cada um — hoje o carmesim de brasão só existe para o OP.
+> - **2026-08-06 — 2ª fonte da verdade fechada:** `PLAN_DEFS` (tela de Planos) tinha a própria
+>   cópia da cor de sistema — D&D **azul** `#4a6fa5` e Tormenta **laranja**, contra o vermelho
+>   e o verde do registry. É o mesmo literal que a spec 0017 já proibia na tela de SELEÇÃO;
+>   Planos nunca foi migrada junto. Agora deriva de `getCardAccent`, com **3 testes** que leem
+>   o fonte e barram a volta da cópia.
+> - **Decisão do Andre (2026-08-06):** D&D e Tormenta **continuam visíveis** ("EM BREVE" na
+>   seleção, card nos Planos) como vitrine do roadmap. A flag `hidden` fica disponível.
+> - O emblema do OP na tela de seleção é um `.webp` roxo (≠ o SVG da topbar): tratado por
+>   filtro em `.sys-emblem[data-sys="op"]`, marcado como remendo — apagar se reexportarem a arte.
+
+> **2026-08-05: MODO DEMO (quick `003-modo-demo-sem-login`).**
+> `http://localhost:3000/?demo=1` entra no app sem login e sem Firestore, com dados
+> fictícios e um selo fixo "modo demo · dados fictícios". `?demo=0` sai e limpa.
+> Atalho: `testar-nexus-demo.bat`.
+> - **A trava:** `NODE_ENV !== "production" || REACT_APP_DEMO === "1"`. No site publicado
+>   o `?demo=1` não faz nada — verificado servindo o build real, não só lendo o código.
+> - **Não cobre** a Forja (Ajudante do Mestre) nem entrar numa mesa/mapa-múndi: essas
+>   telas ainda vão ao Firestore e mostram o erro de carregamento. Falsificar o
+>   `worldsStore` e os repos do Ateliê é uma task própria.
+> - Custo aceito: ~3 KB de dados fictícios entram no bundle de produção (inertes).
+
+> **2026-08-05: PAINEL REDESENHADO (quick `002-painel-redesenho`).**
+> A tela `dashboard` saiu do `App.jsx` (−196 linhas) e virou `src/components/Painel/`, com
+> hero animado, "continuar de onde parou", "precisa de você", números com cota e o preparo do
+> mundo em anel de progresso. **Todo valor sai de estado real** — inclusive dois dados novos
+> na tela: `worldMapsRepo.contarMapas` e `worldsRepo.watchWorldsByOwner`.
+> - Gate: 16 testes novos em `src/components/Painel/__tests__/` · suíte **2133 verdes**
+>   (eram 2117) · `craco build` limpo nos arquivos novos.
+> - **Atenção ao retomar:** o Painel é **exceção** à régua `nx-*` (redesenho de 2026-08-02) —
+>   foi pedido explícito do Andre. As demais telas continuam no `nx-*`; não propague o estilo
+>   do Painel para elas sem falar com ele.
+> - **Divergência aberta com o print do Andre:** o print que originou o pedido mostrava blocos
+>   que NÃO existiam neste working tree ("Continuar em…", "Precisa de você", "1/1 Fichas",
+>   "Suas campanhas", "Preparo do mundo"). O redesenho entregou todos eles, mas **confirme com
+>   ele de onde vinha aquele print** — pode existir uma versão do app à frente deste repo.
+> - **Herdado, não resolvido:** `src/domain/__tests__/creature.test.js:31` falha desde antes
+>   (o teste cobra o quirk que `currentHp` conserta de propósito). Decisão do dono da spec.
+
+> **2026-08-02** — DUAS SESSÕES trabalharam em paralelo neste dia: SPEC 0033
 (progressão automática de OP) e as SPECS 0029/0030/0031 (arquitetura em camadas). Ambas verdes.
 
 > **⚠ 2026-08-02: DUAS SESSÕES SIMULTÂNEAS NO MESMO WORKING TREE — leia isto antes de confiar

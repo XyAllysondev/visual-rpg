@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import * as charactersRepo from "../infrastructure/firestore/charactersRepo";
 import { isSameCharacter as isSameChar } from "../domain/character";
+import { DEMO_ON } from "../demo/demoMode";
 
 // Falhas de Firestore NÃO são engolidas em silêncio (assessment-0021 grupo C): o repositório
 // é `strict` — rejeita a Promise — e o hook loga + expõe um flag para a UI avisar o usuário.
@@ -21,6 +22,9 @@ export function useCharacter(uid, systemId) {
     const key = `nexus_characters_${systemId}`;
     try { setCharacters(JSON.parse(localStorage.getItem(key) || "[]")); }
     catch { setCharacters([]); }
+    /* Demo: o localStorage acima JÁ é a fonte (semeado por `prepararDemo`).
+       Ir ao Firestore só renderia erro de permissão na tela. */
+    if (DEMO_ON) return;
     if (!uid) return;
     setCharsLoading(true);
     setLoadError(false);
@@ -51,6 +55,9 @@ export function useCharacter(uid, systemId) {
       const exists = prev.some(c => isSameChar(c, char));
       return exists ? prev.map(c => isSameChar(c, char) ? char : c) : [...prev, char];
     });
+    /* Demo: o efeito acima já persistiu no localStorage — criar e editar
+       ficha funciona de verdade e sobrevive ao F5, só não sobe para a nuvem. */
+    if (DEMO_ON) return;
     charactersRepo.save(uid, char)
       .then(() => setSaveError(null))
       .catch(e => {
@@ -61,6 +68,7 @@ export function useCharacter(uid, systemId) {
 
   const deleteCharacter = (char) => {
     setCharacters(prev => prev.filter(c => !isSameChar(c, char)));
+    if (DEMO_ON) return;
     charactersRepo.remove(uid, char).catch(e => console.error("[useCharacter] falha ao excluir ficha no Firestore:", e));
   };
 

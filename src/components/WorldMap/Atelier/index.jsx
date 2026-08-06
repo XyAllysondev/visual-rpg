@@ -70,7 +70,7 @@ function MoldeCard({ molde, onAbrir, onRenomear, onExcluir, onUsarComoBase }) {
         <div style={{
           position: "relative", height: 116, overflow: "hidden", background: fundo
             ? `center/cover no-repeat url("${fundo}")`
-            : "linear-gradient(150deg,rgba(201,168,76,0.10),rgba(176,48,216,0.08))",
+            : "linear-gradient(150deg,rgba(201,168,76,0.10),rgba(163,40,44,0.08))",
           borderBottom: `1px solid ${LINE.hair}`,
         }}>
           {/* A arte do padrão é vetorial e mora no app: o card mostra a carta de

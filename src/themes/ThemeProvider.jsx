@@ -25,14 +25,26 @@ const ThemeContext = createContext(getTheme(DEFAULT_THEME_ID));
 /** Read the currently active system theme object. */
 export const useTheme = () => useContext(ThemeContext);
 
-/* hex (#abc | #aabbcc) → rgba() with alpha */
-const rgba = (hex, a) => {
+/* hex (#abc | #aabbcc) → [r,g,b] */
+const canais = (hex) => {
   const h = String(hex).replace("#", "");
   const n = h.length === 3 ? h.split("").map((x) => x + x).join("") : h;
-  const r = parseInt(n.slice(0, 2), 16);
-  const g = parseInt(n.slice(2, 4), 16);
-  const b = parseInt(n.slice(4, 6), 16);
+  return [0, 2, 4].map((i) => parseInt(n.slice(i, i + 2), 16));
+};
+
+/* hex (#abc | #aabbcc) → rgba() with alpha */
+const rgba = (hex, a) => {
+  const [r, g, b] = canais(hex);
   return `rgba(${r},${g},${b},${a})`;
+};
+
+const hex2 = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
+/** Escurece um hex por um fator (0 = igual, 1 = preto). */
+const escurecer = (hex, f) => `#${canais(hex).map((c) => hex2(c * (1 - f))).join("")}`;
+/** Mistura dois hex (t = 0 devolve `a`, t = 1 devolve `b`). */
+const misturar = (a, b, t) => {
+  const [ar, ag, ab] = canais(a); const [br, bg, bb] = canais(b);
+  return `#${hex2(ar + (br - ar) * t)}${hex2(ag + (bg - ag) * t)}${hex2(ab + (bb - ab) * t)}`;
 };
 
 /* Flatten a theme into the global CSS custom properties the app reads. */
@@ -51,9 +63,32 @@ const toVars = (t) => {
     `--gold3:${c.accentDim}`,
     `--gold-glow:${rgba(c.accent, 0.22)}`,
     `--gold-dim:${rgba(c.accent, 0.09)}`,
+    /* Degraus de alfa e a LIGA do metal (repaginação 2026-08-05).
+       Existem porque a camada `themes/heraldica` precisa de véu de hover,
+       preenchimento, sombra projetada e as paradas do degradê da chapa — e
+       escrever esses valores como literal ali cravaria o ouro do Ordem
+       Paranormal na pele "global": trocar para D&D deixaria os hovers e os
+       botões dourados no meio de uma paleta vermelha. Derivando aqui, a
+       chapa vira latão em OP, ferro em brasa no D&D e bronze em Tormenta
+       sem ninguém tocar em CSS. */
+    `--gold-veil:${rgba(c.accent, 0.07)}`,   // véu de hover
+    `--gold-wash:${rgba(c.accent, 0.16)}`,   // preenchimento leve
+    `--gold-sel:${rgba(c.accent, 0.28)}`,    // seleção de texto
+    `--gold-cast:${rgba(c.accent, 0.8)}`,    // sombra projetada do botão
+    `--gold-mid:${misturar(c.accent, c.accentDim, 0.5)}`,   // parada média da chapa
+    `--gold-deep:${escurecer(c.accentDim, 0.28)}`,          // pé da chapa
+    `--gold-face:${misturar(c.muted2, c.text, 0.35)}`,       // base do texto gravado
     `--accent:${c.accent}`,
     `--accent2:${c.accent2}`,
     `--accent-dim:${c.accentDim}`,
+    /* Brasão: a cor de IDENTIDADE do sistema (carmesim em OP), a mesma que a
+       tela de seleção usa via `getCardAccent`. Antes só existia em JS, então
+       o CSS global não tinha como pintar atmosfera com ela — a camada
+       `themes/heraldica` precisa dela para as brasas e os selos. */
+    `--brasao:${c.cardAccent || c.accent}`,
+    `--brasao2:${c.cardAccent2 || c.accent2}`,
+    `--brasao-glow:${rgba(c.cardAccent || c.accent, 0.32)}`,
+    `--brasao-dim:${rgba(c.cardAccent || c.accent, 0.12)}`,
     `--purple:${c.secondary}`,
     `--purple2:${c.secondaryText}`,
     `--purple-glow:${rgba(c.secondary, 0.3)}`,

@@ -2,11 +2,18 @@ import { useState, useEffect, useLayoutEffect, useRef, lazy, Suspense } from "re
 import { createPortal } from "react-dom";
 import { ThemeStyles } from "./themes/ThemeProvider";
 import { SYSTEM_THEMES, getCardAccent } from "./themes";
+/* Pele global (repaginação 2026-08-05): material, ornamento e movimento em
+   TODA tela. Ver src/themes/heraldica.jsx. */
+import { HeraldicStyles, HeraldicAmbience } from "./themes/heraldica";
 import { useSlidingPill } from "./hooks/useSlidingPill";
 import SlidingTabPill from "./components/SlidingTabPill";
 import { ELEMENTOS, getElementTheme } from "./components/systems/OrdemParanormal/elementos";
 import ElementoSymbol from "./components/systems/OrdemParanormal/ElementoSymbol";
-import DossierCard from "./components/systems/OrdemParanormal/DossierCard";
+import { DEMO_ON, PLANOS_DEMO } from "./demo/demoMode";
+/* Painel (a tela "dashboard"). Saiu de dentro deste arquivo no redesenho de
+   2026-08-05 — a tela tem hero animado, retomar, pendências e preparo do mundo,
+   e não cabia mais como uma função no meio do App. */
+import Painel from "./components/Painel";
 import { auth, db } from "./firebase";
 import { useAuth } from "./hooks/useAuth";
 import { useCharacter } from "./hooks/useCharacter";
@@ -204,7 +211,7 @@ function CoverPreviewModal({ image: initialImage, onConfirm, onClose }) {
                 transform:`translate(calc(-50% + ${pos.x}px), calc(-50% + ${pos.y}px)) scale(${totalScale})`,
                 transformOrigin:"center center"}}
             />
-            <div style={{position:"absolute",inset:0,border:"2px solid rgba(176,48,216,0.4)",borderRadius:8,pointerEvents:"none"}}/>
+            <div style={{position:"absolute",inset:0,border:"2px solid rgba(163,40,44,0.4)",borderRadius:8,pointerEvents:"none"}}/>
           </div>
 
           {/* Zoom */}
@@ -272,10 +279,10 @@ const G = () => (
       --muted:#a89a7c;
       --muted2:#c8b48e;
       --danger:#8b2020;
-      --purple:#8e6dbf;
-      --purple2:#c8a8f0;
-      --purple-glow:rgba(142,109,191,0.3);
-      --purple-dim:rgba(142,109,191,0.12);
+      --purple:#5d7896;
+      --purple2:#e0c9a0;
+      --purple-glow:rgba(93,120,150,0.3);
+      --purple-dim:rgba(93,120,150,0.12);
     }
     body{background:var(--bg);font-family:'Crimson Pro',serif;overflow-x:hidden}
     ::-webkit-scrollbar{width:3px}
@@ -628,7 +635,7 @@ const G = () => (
    login/seleção/criadores rodavam numa escala de luminância diferente do resto
    do app. Fica em escopo de módulo de propósito — declarar dentro de App()
    criaria um tipo de componente novo a cada render e remontaria as <style>. */
-const Shell = () => (<><G/><ThemeStyles/></>);
+const Shell = () => (<><G/><ThemeStyles/><HeraldicStyles/></>);
 
 /* Reactive prefers-reduced-motion hook (spec 0017 AC-5). Guards JS-driven
    effects (video autoplay, tilt) that CSS @media alone can't stop. */
@@ -706,18 +713,9 @@ const NexusSigilRing = ({ size = 160, children }) => {
 };
 
 /* ─── DECORATIVE LINES ─── */
-const Deco = () => (
-  <div style={{position:"fixed",inset:0,pointerEvents:"none",zIndex:0,overflow:"hidden"}}>
-    <div style={{position:"absolute",top:0,left:"50%",width:1,height:"100%",background:"linear-gradient(to bottom,transparent,rgba(201,168,76,0.05),transparent)"}}/>
-    <div style={{position:"absolute",top:"50%",left:0,width:"100%",height:1,background:"linear-gradient(to right,transparent,rgba(201,168,76,0.04),transparent)"}}/>
-    {/* Corner ornaments */}
-    {[["top:0,left:0","0,0,20,0 0,0 0,20"],["top:0,right:0","100,0 80,0 100,0 100,20"],["bottom:0,left:0","0,100 20,100 0,100 0,80"],["bottom:0,right:0","100,100 80,100 100,100 100,80"]].map(([pos],i)=>(
-      <div key={i} style={{position:"absolute",...Object.fromEntries(pos.split(",").map(p=>p.split(":"))),width:40,height:40}}>
-        <svg width="40" height="40" viewBox="0 0 40 40"><polyline points={["0,0 20,0 0,0 0,20","40,0 20,0 40,0 40,20","0,40 20,40 0,40 0,20","40,40 20,40 40,40 40,20"][i]} fill="none" stroke="rgba(201,168,76,0.2)" strokeWidth="1"/></svg>
-      </div>
-    ))}
-  </div>
-);
+/* O <Deco/> de linhas cruzadas + cantoneiras foi substituido pelo
+   <HeraldicAmbience/> (src/themes/heraldica.jsx) na repaginacao de 2026-08-05. */
+
 
 /* ═══════════════════════════════
    LOGIN PAGE
@@ -894,7 +892,7 @@ function Login({ onLogin }) {
   return (
     <div style={{minHeight:"100vh", background:"var(--bg)", position:"relative", overflow:"hidden"}}>
       <AmbientBackdrop />
-      <Deco />
+      <HeraldicAmbience/>
 
       <div className="login-layout">
 
@@ -1337,7 +1335,7 @@ function Sidebar({ active, onNav, collapsed, setCollapsed, system, onChangeSyste
             marca a posição sem virar um segundo plano de fundo. */}
         <SlidingTabPill pill={pill} radius={4}
           background="rgba(255,255,255,0.035)"
-          boxShadow={`inset 2px 0 0 0 ${system?.accent || "var(--gold)"}`} />
+          boxShadow={"inset 2px 0 0 0 var(--gold)"} />
         {navItems.map(item => {
           const isActive = active === item.id;
           return (
@@ -1364,7 +1362,7 @@ function Sidebar({ active, onNav, collapsed, setCollapsed, system, onChangeSyste
               <span style={{
                 display:"flex", alignItems:"center", justifyContent:"center",
                 minWidth:20, flexShrink:0,
-                color: isActive ? (system?.accent || "var(--gold)") : "var(--muted2)",
+                color: isActive ? "var(--gold)" : "var(--muted2)",
                 /* sem drop-shadow: ícone com halo é brilho de UI de IA, e em
                    11px o glow só borra o traço do ícone */
                 transition:"color 0.18s",
@@ -1621,7 +1619,7 @@ function CreateCampaignModal({ onClose, onCreate }) {
     {createPortal(
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.78)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px"}}>
       <div onClick={e=>e.stopPropagation()} style={{background:"var(--surface)",border:"1px solid var(--border2)",borderRadius:12,padding:"28px",width:"100%",maxWidth:440,display:"flex",flexDirection:"column",gap:20,boxShadow:"0 24px 64px rgba(0,0,0,0.48)"}}>
-        <div style={{fontFamily:"'Cinzel Decorative',serif",fontSize:18,background:"linear-gradient(135deg,#b030d8,#c8a8f0)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
+        <div style={{fontFamily:"'Cinzel Decorative',serif",fontSize:18,background:"linear-gradient(135deg,#a3282c,#e0c9a0)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
           Nova Campanha
         </div>
         {error && <div style={{padding:"10px 14px",background:"rgba(139,32,32,0.18)",border:"1px solid rgba(139,32,32,0.4)",borderRadius:6,fontFamily:"Cinzel,serif",fontSize:11,color:"#e07070",letterSpacing:1}}>{error}</div>}
@@ -1632,9 +1630,9 @@ function CreateCampaignModal({ onClose, onCreate }) {
           onClick={()=>coverInputRef.current?.click()}
           onDragOver={e=>e.preventDefault()}
           onDrop={e=>{e.preventDefault();e.dataTransfer.files?.[0]&&handleCoverFile(e.dataTransfer.files[0]);}}
-          style={{position:"relative",width:"100%",height:140,borderRadius:10,overflow:"hidden",cursor:"pointer",border:`2px dashed ${coverImage?"transparent":"rgba(176,48,216,0.3)"}`,background:coverImage?"transparent":"rgba(176,48,216,0.04)",transition:"all 0.2s",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:6}}
-          onMouseEnter={e=>{if(!coverImage)e.currentTarget.style.borderColor="rgba(176,48,216,0.6)";}}
-          onMouseLeave={e=>{if(!coverImage)e.currentTarget.style.borderColor="rgba(176,48,216,0.3)";}}>
+          style={{position:"relative",width:"100%",height:140,borderRadius:10,overflow:"hidden",cursor:"pointer",border:`2px dashed ${coverImage?"transparent":"rgba(163,40,44,0.3)"}`,background:coverImage?"transparent":"rgba(163,40,44,0.04)",transition:"all 0.2s",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:6}}
+          onMouseEnter={e=>{if(!coverImage)e.currentTarget.style.borderColor="rgba(163,40,44,0.6)";}}
+          onMouseLeave={e=>{if(!coverImage)e.currentTarget.style.borderColor="rgba(163,40,44,0.3)";}}>
           {coverImage
             ? <>
                 <img src={coverImage} alt="capa" style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover"}}/>
@@ -1646,10 +1644,10 @@ function CreateCampaignModal({ onClose, onCreate }) {
                 </div>
               </>
             : coverLoading
-              ? <div style={{width:22,height:22,border:"2px solid rgba(176,48,216,0.3)",borderTopColor:"#b030d8",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+              ? <div style={{width:22,height:22,border:"2px solid rgba(163,40,44,0.3)",borderTopColor:"#a3282c",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
               : <>
                   <div style={{fontSize:28,opacity:0.4}}>🖼</div>
-                  <div style={{fontFamily:"Cinzel,serif",fontSize:10,color:"rgba(176,48,216,0.7)",letterSpacing:1}}>Clique ou arraste uma imagem de capa</div>
+                  <div style={{fontFamily:"Cinzel,serif",fontSize:10,color:"rgba(163,40,44,0.7)",letterSpacing:1}}>Clique ou arraste uma imagem de capa</div>
                   <div style={{fontSize:11,color:"var(--muted)"}}>JPG, PNG, WEBP</div>
                 </>
           }
@@ -1705,7 +1703,7 @@ function JoinCampaignModal({ onClose, onJoin }) {
   return createPortal(
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.78)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px"}}>
       <div onClick={e=>e.stopPropagation()} style={{background:"var(--surface)",border:"1px solid var(--border2)",borderRadius:12,padding:"28px",width:"100%",maxWidth:360,display:"flex",flexDirection:"column",gap:20,boxShadow:"0 24px 64px rgba(0,0,0,0.48)"}}>
-        <div style={{fontFamily:"'Cinzel Decorative',serif",fontSize:18,background:"linear-gradient(135deg,#b030d8,#c8a8f0)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
+        <div style={{fontFamily:"'Cinzel Decorative',serif",fontSize:18,background:"linear-gradient(135deg,#a3282c,#e0c9a0)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
           Entrar em Campanha
         </div>
         <div style={{fontFamily:"'Crimson Pro',serif",fontSize:15,color:"var(--muted2)",lineHeight:1.65}}>
@@ -1747,7 +1745,7 @@ function CampaignCard({ campaign, uid, onClick }) {
         border:"1px solid var(--border)",
         boxShadow:"0 4px 16px rgba(0,0,0,0.35)",
       }}
-        onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 12px 32px rgba(0,0,0,0.55)";e.currentTarget.style.borderColor="rgba(176,48,216,0.45)";}}
+        onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 12px 32px rgba(0,0,0,0.55)";e.currentTarget.style.borderColor="rgba(163,40,44,0.45)";}}
         onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,0.35)";e.currentTarget.style.borderColor="var(--border)";}}>
         {/* Cover image */}
         <div style={{width:"100%",height:160,position:"relative",overflow:"hidden"}}>
@@ -1760,7 +1758,7 @@ function CampaignCard({ campaign, uid, onClick }) {
             </span>
           </div>
           {isMaster && (
-            <div style={{position:"absolute",top:8,right:8,padding:"3px 8px",borderRadius:4,background:"rgba(176,48,216,0.7)",border:"1px solid rgba(176,48,216,0.5)",fontFamily:"Cinzel,serif",fontSize:8,letterSpacing:1,color:"#e8d0ff",textTransform:"uppercase"}}>
+            <div style={{position:"absolute",top:8,right:8,padding:"3px 8px",borderRadius:4,background:"rgba(163,40,44,0.7)",border:"1px solid rgba(163,40,44,0.5)",fontFamily:"Cinzel,serif",fontSize:8,letterSpacing:1,color:"#f2ddab",textTransform:"uppercase"}}>
               Mestre
             </div>
           )}
@@ -1801,15 +1799,15 @@ function CampaignCard({ campaign, uid, onClick }) {
       padding:"18px 18px 16px",cursor:"pointer",transition:"all 0.2s",
       position:"relative",overflow:"hidden",
     }}
-      onMouseEnter={e=>{e.currentTarget.style.borderColor="rgba(176,48,216,0.45)";e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 24px rgba(176,48,216,0.14)";}}
+      onMouseEnter={e=>{e.currentTarget.style.borderColor="rgba(163,40,44,0.45)";e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 24px rgba(163,40,44,0.14)";}}
       onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="none";}}>
-      <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,transparent,rgba(176,48,216,0.55),transparent)"}}/>
+      <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,transparent,rgba(163,40,44,0.55),transparent)"}}/>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
         <div style={{fontFamily:"Cinzel,serif",fontSize:15,fontWeight:700,color:"var(--text)",flex:1,lineHeight:1.3}}>
           {campaign.name}
         </div>
         {isMaster && (
-          <div style={{padding:"3px 8px",borderRadius:4,background:"rgba(176,48,216,0.15)",border:"1px solid rgba(176,48,216,0.3)",fontFamily:"Cinzel,serif",fontSize:8,letterSpacing:1,color:"#c8a8f0",textTransform:"uppercase",flexShrink:0}}>
+          <div style={{padding:"3px 8px",borderRadius:4,background:"rgba(163,40,44,0.15)",border:"1px solid rgba(163,40,44,0.3)",fontFamily:"Cinzel,serif",fontSize:8,letterSpacing:1,color:"#e0c9a0",textTransform:"uppercase",flexShrink:0}}>
             Mestre
           </div>
         )}
@@ -1841,7 +1839,7 @@ function CampaignList({ uid, userName, campaigns, loading, onOpenCampaign, onCre
 
   if (loading) return (
     <div className="fade" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:320}}>
-      <div style={{width:32,height:32,border:"2px solid rgba(176,48,216,0.3)",borderTopColor:"#b030d8",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+      <div style={{width:32,height:32,border:"2px solid rgba(163,40,44,0.3)",borderTopColor:"#a3282c",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
     </div>
   );
 
@@ -1927,8 +1925,8 @@ function ChatMessage({ msg, uid, formatTime }) {
         fontFamily:"'Crimson Pro',serif",fontSize:14,
         color:"rgba(210,190,230,0.75)",fontStyle:"italic",
         padding:"5px 18px",
-        background:"rgba(176,48,216,0.08)",
-        borderRadius:20,border:"1px solid rgba(176,48,216,0.16)"
+        background:"rgba(163,40,44,0.08)",
+        borderRadius:20,border:"1px solid rgba(163,40,44,0.16)"
       }}>
         {msg.content}
       </span>
@@ -1940,10 +1938,10 @@ function ChatMessage({ msg, uid, formatTime }) {
       <div style={{
         width:36,height:36,borderRadius:"50%",flexShrink:0,
         background: isOwn
-          ? "linear-gradient(135deg,rgba(176,48,216,0.55),rgba(110,30,180,0.45))"
+          ? "linear-gradient(135deg,rgba(163,40,44,0.55),rgba(110,30,180,0.45))"
           : "linear-gradient(135deg,rgba(255,255,255,0.14),rgba(255,255,255,0.07))",
         border: isOwn
-          ? "1.5px solid rgba(200,110,255,0.55)"
+          ? "1.5px solid rgba(224,100,90,0.55)"
           : "1.5px solid rgba(255,255,255,0.18)",
         display:msg.grouped?"block":"flex",alignItems:"center",justifyContent:"center",
         fontFamily:"Cinzel,serif",fontSize:14,fontWeight:600,color:"#e8d4ff",
@@ -1975,7 +1973,7 @@ function ChatMessage({ msg, uid, formatTime }) {
               ? "rgba(148,52,210,0.40)"
               : "rgba(255,255,255,0.10)",
           border: isRoll
-            ? "1px solid rgba(176,48,216,0.50)"
+            ? "1px solid rgba(163,40,44,0.50)"
             : isOwn
               ? "1px solid rgba(190,100,255,0.42)"
               : "1px solid rgba(255,255,255,0.14)",
@@ -1989,7 +1987,7 @@ function ChatMessage({ msg, uid, formatTime }) {
         }}>
           {isRoll ? (
             <div style={{display:"flex",flexDirection:"column",gap:4}}>
-              <span style={{fontSize:9,letterSpacing:1.5,opacity:0.65,textTransform:"uppercase",color:"#c8a8f0"}}>🎲 Rolagem</span>
+              <span style={{fontSize:9,letterSpacing:1.5,opacity:0.65,textTransform:"uppercase",color:"#e0c9a0"}}>🎲 Rolagem</span>
               <span style={{fontSize:16,color:"#ecdcff"}}>{msg.content.replace(/\*\*/g,"")}</span>
               {msg.rollData && (
                 <span style={{fontSize:12,opacity:0.65,fontFamily:"'Crimson Pro',serif",color:"#bca8dc"}}>
@@ -2113,9 +2111,9 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
       {hasMore && (
         <div style={{textAlign:"center",padding:"8px 0",flexShrink:0}}>
           <button onClick={loadMore} style={{
-            background:"rgba(176,48,216,0.10)",border:"1px solid rgba(176,48,216,0.28)",
+            background:"rgba(163,40,44,0.10)",border:"1px solid rgba(163,40,44,0.28)",
             borderRadius:20,cursor:"pointer",
-            color:"#c8a8f0",fontFamily:"Cinzel,serif",fontSize:9,letterSpacing:1,
+            color:"#e0c9a0",fontFamily:"Cinzel,serif",fontSize:9,letterSpacing:1,
             textTransform:"uppercase",padding:"6px 18px",transition:"all 0.18s",
           }}>
             ↑ Carregar mensagens anteriores
@@ -2125,11 +2123,11 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
       <div style={{
         flex:1,overflowY:"auto",padding:"14px 8px",
         display:"flex",flexDirection:"column",gap:4,minHeight:0,
-        scrollbarWidth:"thin",scrollbarColor:"rgba(176,48,216,0.25) transparent",
+        scrollbarWidth:"thin",scrollbarColor:"rgba(163,40,44,0.25) transparent",
       }}>
         {loading && (
           <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flex:1,gap:12,padding:"40px 0"}}>
-            <div style={{width:28,height:28,border:"2.5px solid rgba(176,48,216,0.2)",borderTopColor:"#b030d8",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+            <div style={{width:28,height:28,border:"2.5px solid rgba(163,40,44,0.2)",borderTopColor:"#a3282c",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
             <span style={{fontFamily:"'Crimson Pro',serif",fontSize:14,color:"rgba(200,175,225,0.5)",fontStyle:"italic"}}>Carregando mensagens…</span>
           </div>
         )}
@@ -2158,7 +2156,7 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
               {[0,1,2].map(i=>(
                 <div key={i} style={{
                   width:6,height:6,borderRadius:"50%",
-                  background:"rgba(176,48,216,0.55)",
+                  background:"rgba(163,40,44,0.55)",
                   animation:`pulse 1.2s ${i*0.2}s infinite`
                 }}/>
               ))}
@@ -2172,7 +2170,7 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
       </div>
       <div style={{
         padding:"12px 8px 10px",
-        borderTop:"1px solid rgba(176,48,216,0.18)",
+        borderTop:"1px solid rgba(163,40,44,0.18)",
         display:"flex",flexDirection:"column",gap:8,flexShrink:0,
         background:"rgba(0,0,0,0.18)",
       }}>
@@ -2186,7 +2184,7 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
               style={{
                 paddingRight:46,paddingLeft:14,height:42,
                 background:"rgba(255,255,255,0.07)",
-                border:"1px solid rgba(176,48,216,0.30)",
+                border:"1px solid rgba(163,40,44,0.30)",
                 borderRadius:10,
                 color:"#ede5f8",
                 fontFamily:"'Crimson Pro',serif",
@@ -2205,7 +2203,7 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
             border:input.trim()?"1px solid rgba(190,90,255,0.5)":"1px solid rgba(255,255,255,0.1)",
             cursor:input.trim()?"pointer":"default",
             display:"flex",alignItems:"center",justifyContent:"center",
-            color:input.trim()?"#e8d0ff":"rgba(200,175,220,0.3)",
+            color:input.trim()?"#f2ddab":"rgba(200,175,220,0.3)",
             fontSize:16,transition:"all 0.2s",
             boxShadow:input.trim()?"0 2px 10px rgba(140,40,220,0.3)":"none",
           }}>➤</button>
@@ -2248,7 +2246,7 @@ function SharedSheetCard({ sheet, uid, isMaster, onView, onRemove }) {
         </div>
       )}
       <div style={{display:"flex",gap:12,alignItems:"center"}}>
-        <div style={{width:48,height:48,borderRadius:8,background:"rgba(176,48,216,0.1)",border:"1px solid rgba(176,48,216,0.22)",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",flexShrink:0,fontSize:22}}>
+        <div style={{width:48,height:48,borderRadius:8,background:"rgba(163,40,44,0.1)",border:"1px solid rgba(163,40,44,0.22)",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",flexShrink:0,fontSize:22}}>
           {getActiveAvatar(char)?<img src={getActiveAvatar(char)} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:"🕵️"}
         </div>
         <div style={{flex:1,minWidth:0}}>
@@ -2376,8 +2374,8 @@ function SharedSheetsPanel({ campaignId, uid, userName, isMaster, characters }) 
           </div>
           <div style={{
             padding:"2px 9px",borderRadius:20,
-            background: atLimit ? "rgba(224,112,112,0.12)" : "rgba(176,48,216,0.1)",
-            border: `1px solid ${atLimit ? "rgba(224,112,112,0.3)" : "rgba(176,48,216,0.25)"}`,
+            background: atLimit ? "rgba(224,112,112,0.12)" : "rgba(163,40,44,0.1)",
+            border: `1px solid ${atLimit ? "rgba(224,112,112,0.3)" : "rgba(163,40,44,0.25)"}`,
             fontFamily:"Cinzel,serif",fontSize:9,letterSpacing:1,
             color: atLimit ? "#e07070" : "var(--purple2)",
           }}>
@@ -2407,7 +2405,7 @@ function SharedSheetsPanel({ campaignId, uid, userName, isMaster, characters }) 
 
       {/* No characters hint */}
       {!sharing && characters.length === 0 && (
-        <div style={{padding:"10px 14px",background:"rgba(176,48,216,0.06)",border:"1px solid rgba(176,48,216,0.18)",borderRadius:8,fontFamily:"'Crimson Pro',serif",fontSize:13,color:"var(--muted)",fontStyle:"italic",textAlign:"center"}}>
+        <div style={{padding:"10px 14px",background:"rgba(163,40,44,0.06)",border:"1px solid rgba(163,40,44,0.18)",borderRadius:8,fontFamily:"'Crimson Pro',serif",fontSize:13,color:"var(--muted)",fontStyle:"italic",textAlign:"center"}}>
           Crie um personagem na aba <strong style={{fontStyle:"normal",color:"var(--purple2)"}}>Fichas</strong> para poder compartilhar nesta campanha.
         </div>
       )}
@@ -2422,7 +2420,7 @@ function SharedSheetsPanel({ campaignId, uid, userName, isMaster, characters }) 
           ) : availableChars.map(c=>(
             <div key={c.id||c.createdAt} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"var(--card2)",borderRadius:6,border:"1px solid var(--border)",flexWrap:"wrap",gap:8}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:36,height:36,borderRadius:6,background:"rgba(176,48,216,0.1)",border:"1px solid rgba(176,48,216,0.22)",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",fontSize:18}}>
+                <div style={{width:36,height:36,borderRadius:6,background:"rgba(163,40,44,0.1)",border:"1px solid rgba(163,40,44,0.22)",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",fontSize:18}}>
                   {getActiveAvatar(c)?<img src={getActiveAvatar(c)} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:"🕵️"}
                 </div>
                 <div>
@@ -2442,7 +2440,7 @@ function SharedSheetsPanel({ campaignId, uid, userName, isMaster, characters }) 
 
       {loading && (
         <div style={{display:"flex",justifyContent:"center",padding:"40px 0"}}>
-          <div style={{width:24,height:24,border:"2px solid rgba(176,48,216,0.3)",borderTopColor:"#b030d8",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+          <div style={{width:24,height:24,border:"2px solid rgba(163,40,44,0.3)",borderTopColor:"#a3282c",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
         </div>
       )}
 
@@ -2502,10 +2500,10 @@ function MembersPanel({ campaign, uid, isMaster }) {
        olho não fechava a associação. Isso não é espaço, é dispersão. */
     <div style={{overflowY:"auto",minHeight:0,padding:"16px 4px 28px",maxWidth:880,width:"100%",display:"flex",flexDirection:"column",gap:12}}>
       {isMaster && (
-        <div style={{padding:"14px 16px",background:"var(--card)",border:"1px solid rgba(176,48,216,0.3)",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+        <div style={{padding:"14px 16px",background:"var(--card)",border:"1px solid rgba(163,40,44,0.3)",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
           <div>
             <div style={{fontFamily:"Cinzel,serif",fontSize:9,letterSpacing:2,color:"var(--muted)",textTransform:"uppercase",marginBottom:4}}>Código de Convite</div>
-            <div style={{fontFamily:"Cinzel,serif",fontSize:24,letterSpacing:10,color:"#c8a8f0",userSelect:"all"}}>{campaign.inviteCode}</div>
+            <div style={{fontFamily:"Cinzel,serif",fontSize:24,letterSpacing:10,color:"#e0c9a0",userSelect:"all"}}>{campaign.inviteCode}</div>
           </div>
           <button onClick={copyCode} className="btn-ghost" style={{padding:"7px 16px",fontSize:9}}>
             {copied?"✓ Copiado":"Copiar Código"}
@@ -2522,7 +2520,7 @@ function MembersPanel({ campaign, uid, isMaster }) {
         const name          = memberNames[memberId]||"Agente";
         return (
           <div key={memberId} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",background:"var(--card)",borderRadius:8,border:"1px solid var(--border)"}}>
-            <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,rgba(176,48,216,0.28),rgba(176,48,216,0.08))",border:"1px solid rgba(176,48,216,0.22)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Cinzel,serif",fontSize:14,color:"#c8a8f0",flexShrink:0}}>
+            <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,rgba(163,40,44,0.28),rgba(163,40,44,0.08))",border:"1px solid rgba(163,40,44,0.22)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Cinzel,serif",fontSize:14,color:"#e0c9a0",flexShrink:0}}>
               {name.charAt(0).toUpperCase()}
             </div>
             <div style={{flex:1,minWidth:0}}>
@@ -2530,7 +2528,7 @@ function MembersPanel({ campaign, uid, isMaster }) {
                 {name}{isSelf&&" (você)"}
               </div>
               <div style={{display:"flex",gap:6,marginTop:2}}>
-                {isMasterMember && <span style={{fontFamily:"Cinzel,serif",fontSize:8,letterSpacing:1,color:"#c8a8f0",textTransform:"uppercase"}}>◉ Mestre</span>}
+                {isMasterMember && <span style={{fontFamily:"Cinzel,serif",fontSize:8,letterSpacing:1,color:"#e0c9a0",textTransform:"uppercase"}}>◉ Mestre</span>}
                 {isAdminMember && !isMasterMember && <span style={{fontFamily:"Cinzel,serif",fontSize:8,letterSpacing:1,color:"#c9a84c",textTransform:"uppercase"}}>★ Admin</span>}
               </div>
             </div>
@@ -2632,7 +2630,7 @@ function MasterSettings({ campaign, onBack, isMaster=true }) {
             onClick={()=>coverInputRef.current?.click()}
             onDragOver={e=>e.preventDefault()}
             onDrop={e=>{e.preventDefault();e.dataTransfer.files?.[0]&&handleCoverFile(e.dataTransfer.files[0]);}}
-            style={{position:"relative",width:"100%",height:120,borderRadius:8,overflow:"hidden",cursor:"pointer",border:`2px dashed ${coverImage?"transparent":"rgba(176,48,216,0.3)"}`,background:coverImage?"transparent":"rgba(176,48,216,0.04)",transition:"all 0.2s",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:4}}>
+            style={{position:"relative",width:"100%",height:120,borderRadius:8,overflow:"hidden",cursor:"pointer",border:`2px dashed ${coverImage?"transparent":"rgba(163,40,44,0.3)"}`,background:coverImage?"transparent":"rgba(163,40,44,0.04)",transition:"all 0.2s",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:4}}>
             {coverImage
               ? <>
                   <img src={coverImage} alt="capa" style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover"}}/>
@@ -2644,10 +2642,10 @@ function MasterSettings({ campaign, onBack, isMaster=true }) {
                   </div>
                 </>
               : coverLoading
-                ? <div style={{width:20,height:20,border:"2px solid rgba(176,48,216,0.3)",borderTopColor:"#b030d8",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+                ? <div style={{width:20,height:20,border:"2px solid rgba(163,40,44,0.3)",borderTopColor:"#a3282c",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
                 : <>
                     <span style={{fontSize:24,opacity:0.4}}>🖼</span>
-                    <span style={{fontFamily:"Cinzel,serif",fontSize:9,color:"rgba(176,48,216,0.7)",letterSpacing:1}}>Clique ou arraste uma imagem</span>
+                    <span style={{fontFamily:"Cinzel,serif",fontSize:9,color:"rgba(163,40,44,0.7)",letterSpacing:1}}>Clique ou arraste uma imagem</span>
                   </>
             }
           </div>
@@ -2771,8 +2769,8 @@ function RollFeed({ campaignId, uid }) {
           <button key={v} onClick={()=>setFilter(v)} style={{
             padding:"5px 16px",borderRadius:6,border:"1px solid",cursor:"pointer",
             fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:1,transition:"all 0.18s",
-            background:filter===v?"#7c3aed":"transparent",
-            borderColor:filter===v?"#7c3aed":"rgba(255,255,255,0.12)",
+            background:filter===v?"#a3282c":"transparent",
+            borderColor:filter===v?"#a3282c":"rgba(255,255,255,0.12)",
             color:filter===v?"#fff":"rgba(255,255,255,0.5)",
           }}>{l}</button>
         ))}
@@ -2794,10 +2792,10 @@ function RollFeed({ campaignId, uid }) {
           const total = rd.total ?? "?";
           const sides = rd.sides || 20;
           return (
-            <div key={r.id} style={{border:"1px solid rgba(124,58,237,0.35)",borderRadius:8,padding:"11px 13px",background:"rgba(124,58,237,0.06)"}}>
+            <div key={r.id} style={{border:"1px solid rgba(163,40,44,0.35)",borderRadius:8,padding:"11px 13px",background:"rgba(163,40,44,0.06)"}}>
               <div style={{fontFamily:"Cinzel,serif",fontSize:11,color:"rgba(255,255,255,0.85)",marginBottom:8,fontWeight:600}}>{r.userName}</div>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:38,height:38,background:"#7c3aed",borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                <div style={{width:38,height:38,background:"#a3282c",borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
                   <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.5"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/></svg>
                 </div>
                 <div style={{flex:1,minWidth:0}}>
@@ -3033,7 +3031,7 @@ function MapaScreen({ uid, plan = 'free', onBack }) {
 
         {aba === 'mesas' && (
           <div style={{ display:'flex', gap:14, flexWrap:'wrap' }}>
-            <Card icone="🗺️" titulo="Mesa Tática" cor="#b030d8" onClick={()=>setMesaAberta(true)}
+            <Card icone="🗺️" titulo="Mesa Tática" cor="#a3282c" onClick={()=>setMesaAberta(true)}
               texto="Monte o mapa com imagens, tokens, camadas de névoa e grade — tudo sincronizado com a mesa." />
           </div>
         )}
@@ -3155,7 +3153,7 @@ function CampaignMapTab({ campaignId, uid, isMaster }) {
             {[
               { id:'mesa',  onClick:()=>setMesaAberta(true),  emoji:'🗺️', titulo:'Mesa tática',
                 linha:'Imagens, tokens, camadas e névoa, ao vivo para a mesa.',
-                cor:'rgba(176,48,216,0.5)', texto:'#e0c8ff' },
+                cor:'rgba(163,40,44,0.5)', texto:'#e0c8ff' },
               { id:'mundi', onClick:()=>setMundoAberto(true), emoji:'🧭', titulo:'Mapa-múndi',
                 linha:'A viagem entre lugares, com relógio, suprimentos e névoa.',
                 cor:'rgba(201,168,76,0.5)', texto:'var(--gold2)' },
@@ -3212,7 +3210,7 @@ const EMPTY_OP_CREATURE = {
 const OP_CONDICOES = [
   { nome:'Abalado', cor:'#e09050', descricao:'-2 em testes de perícia. Se ficar abalado novamente, fica Apavorado.' },
   { nome:'Agarrado', cor:'#e09050', descricao:'Fica desprevenido e imóvel, sofre -2 em testes de ataque e só pode atacar com armas leves.' },
-  { nome:'Alquebrado', cor:'#b030d8', descricao:'O custo em PE das habilidades e rituais aumenta em +1.' },
+  { nome:'Alquebrado', cor:'#a3282c', descricao:'O custo em PE das habilidades e rituais aumenta em +1.' },
   { nome:'Apavorado', cor:'#e07070', descricao:'-5 em testes de perícia e deve fugir da fonte do medo. Se não puder fugir, pode agir, mas não pode se aproximar dela voluntariamente.' },
   { nome:'Atordoado', cor:'#e07070', descricao:'Fica desprevenido e não pode fazer ações.' },
   { nome:'Caído', cor:'#e09050', descricao:'Deitado. -5 em ataques corpo a corpo; deslocamento 1,5m. Ataques CaC contra você recebem +5; à distância, -5. Levantar custa metade do deslocamento.' },
@@ -3231,7 +3229,7 @@ const OP_CONDICOES = [
   { nome:'Morrendo', cor:'#e07070', descricao:'PV em 0. Se iniciar 3 turnos morrendo na mesma cena, morre. Encerrado por Medicina DT 20 ou efeito específico.' },
   { nome:'Paralisado', cor:'#e07070', descricao:'Fica imóvel e indefeso; só pode realizar ações puramente mentais.' },
   { nome:'Pasmo', cor:'#e09050', descricao:'Perde a próxima ação padrão. [homebrew]' },
-  { nome:'Perturbado', cor:'#b030d8', descricao:'SAN abaixo da metade. Alucinações e percepção distorcida. [homebrew]' },
+  { nome:'Perturbado', cor:'#a3282c', descricao:'SAN abaixo da metade. Alucinações e percepção distorcida. [homebrew]' },
   { nome:'Petrificado', cor:'#e07070', descricao:'Fica inconsciente e recebe resistência a dano 10.' },
   { nome:'Sangrando', cor:'#e07070', descricao:'No início do turno, faça um teste de Vigor (DT 15): se falhar, perde 1d6 PV e continua sangrando; se passar, remove a condição.' },
   { nome:'Enlouquecendo', cor:'#e07070', descricao:'SAN chegou a 0. Removido da cena; pode se tornar criatura paranormal a critério do mestre. [homebrew]' },
@@ -3250,7 +3248,7 @@ const OP_CONDICOES = [
 const TOKEN_FX = {
   Conhecimento: { c:'#f0c040', glyphs:['✦','◈','⟡','ᚱ','ᛟ','ᚨ'], mode:'rise' },
   Energia:      { c:'#57a0ff', glyphs:['✦','•','•'],             mode:'rise', flicker:true },
-  Medo:         { c:'#b030d8', glyphs:['•','•'],                 mode:'rise', fog:true },
+  Medo:         { c:'#a3282c', glyphs:['•','•'],                 mode:'rise', fog:true },
   Morte:        { c:'#a8b0b8', glyphs:['•','•','•'],             mode:'rise' },
   Sangue:       { c:'#e04040', glyphs:['●','•','•'],             mode:'fall', beat:true },
   Extras:       { c:'#c9a84c', glyphs:['✦','•'],                 mode:'rise' },
@@ -3354,8 +3352,8 @@ function BestiaryTab({ campaignId }) {
   const [tokenVariant, setTokenVariant]= useState(0);      // variante de token selecionada
   const [tokenTab,     setTokenTab]    = useState('tokens'); // 'tokens' | 'moldes' (variantes MOLDE separadas)
 
-  const SYS_COLORS = { 'Genérico':'#8888aa', 'Ordem Paranormal':'#b030d8', 'Tormenta 20':'#d4621e', 'D&D 5e':'#4a6fa5' };
-  const OPC = '#b030d8';
+  const SYS_COLORS = { 'Genérico':'#8888aa', 'Ordem Paranormal':'#a3282c', 'Tormenta 20':'#d4621e', 'D&D 5e':'#4a6fa5' };
+  const OPC = '#a3282c';
   const isOP = sys => sys === 'Ordem Paranormal';
 
   useEffect(() => {
@@ -3481,7 +3479,7 @@ function BestiaryTab({ campaignId }) {
   );
   const SecH  = ({children}) => <div style={{ fontFamily:'Cinzel Decorative,serif', fontSize:14, color:'var(--text)', margin:'14px 0 7px' }}>{children}</div>;
   const InfoL = ({children}) => <div style={{ fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1, color:'rgba(255,255,255,0.65)', textTransform:'uppercase', marginBottom:3 }}>{children}</div>;
-  const SecF  = ({children}) => <div style={{ fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:2, textTransform:'uppercase', color:OPC, borderBottom:`1px solid rgba(176,48,216,0.3)`, paddingBottom:5, marginBottom:8, marginTop:6 }}>{children}</div>;
+  const SecF  = ({children}) => <div style={{ fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:2, textTransform:'uppercase', color:OPC, borderBottom:`1px solid rgba(163,40,44,0.3)`, paddingBottom:5, marginBottom:8, marginTop:6 }}>{children}</div>;
 
   const vc = viewCreature;
   const vcHpMax = vc ? parseInt(vc.hpMax)||0 : 0;
@@ -3490,7 +3488,7 @@ function BestiaryTab({ campaignId }) {
   const OP_PERICIAS = [['PERCEPÇÃO','perPercepcao'],['INICIATIVA','perIniciativa'],['FORTITUDE','perFortitude'],['REFLEXOS','perReflexos'],['VONTADE','perVontade']];
   const OP_ATTRS    = [['AGI','agi'],['FOR','atFor'],['INT','atInt'],['PRE','pre'],['VIG','vig']];
 
-  const ELEM_COLORS = { Conhecimento:'#f0c040', Energia:'#4080e0', Morte:'#808080', Sangue:'#e04040', Medo:'#b030d8' };
+  const ELEM_COLORS = { Conhecimento:'#f0c040', Energia:'#4080e0', Morte:'#808080', Sangue:'#e04040', Medo:'#a3282c' };
   /* Biblioteca consome os MESMOS dados oficiais da ficha (spec 0025 — fonte única). */
   const CUSTO_CIRCULO = { 1:1, 2:3, 3:6, 4:10 };
   const capElem = s => s ? s.charAt(0).toUpperCase()+s.slice(1) : s;
@@ -3718,7 +3716,7 @@ function BestiaryTab({ campaignId }) {
             {[...new Set(creatures.map(c=>c.system).filter(Boolean))].map(s=><option key={s}>{s}</option>)}
           </select>
           <button onClick={openNew}
-            style={{ padding:'7px 16px', borderRadius:6, border:`1px solid rgba(176,48,216,0.5)`, background:'rgba(176,48,216,0.15)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1, whiteSpace:'nowrap' }}>
+            style={{ padding:'7px 16px', borderRadius:6, border:`1px solid rgba(163,40,44,0.5)`, background:'rgba(163,40,44,0.15)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1, whiteSpace:'nowrap' }}>
             + Adicionar Criatura
           </button>
         </div>
@@ -3735,7 +3733,7 @@ function BestiaryTab({ campaignId }) {
             const hpColor = hpC<=hpM*0.25?'#e07070':hpC<=hpM*0.5?'#e0a050':'#70c870';
             return (
               <div key={c.id} style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:8, overflow:'hidden', flexShrink:0, transition:'border-color .15s' }}
-                onMouseEnter={e=>e.currentTarget.style.borderColor='rgba(176,48,216,0.3)'}
+                onMouseEnter={e=>e.currentTarget.style.borderColor='rgba(163,40,44,0.3)'}
                 onMouseLeave={e=>e.currentTarget.style.borderColor='var(--border)'}>
                 <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', cursor: isOP(c.system)?'pointer':'default' }}
                   onClick={()=>{ if(isOP(c.system)){ setOpTab('STATUS'); setOpCombTab('AÇÕES'); setOpExpAcao(null); setViewCreature(c); } }}>
@@ -4212,7 +4210,7 @@ function BestiaryTab({ campaignId }) {
                   {fld('Presença Perturbadora','presencaPerturbadora',{textarea:true,rows:2,placeholder:'ex: DT 45 - 10d8 mental'})}
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                     <span style={sL}>AÇÕES</span>
-                    <button onClick={opAddAcao} style={{ padding:'3px 10px', borderRadius:5, border:`1px solid rgba(176,48,216,0.4)`, background:'rgba(176,48,216,0.12)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1 }}>+ Ação</button>
+                    <button onClick={opAddAcao} style={{ padding:'3px 10px', borderRadius:5, border:`1px solid rgba(163,40,44,0.4)`, background:'rgba(163,40,44,0.12)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1 }}>+ Ação</button>
                   </div>
                   {(form.acoes||[]).map((acao,i)=>(
                     <div key={i} style={{ background:'var(--card2)', border:'1px solid var(--border)', borderRadius:8, padding:10 }}>
@@ -4262,7 +4260,7 @@ function BestiaryTab({ campaignId }) {
                   ))}
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:4 }}>
                     <span style={sL}>PODERES</span>
-                    <button onClick={opAddPod} style={{ padding:'3px 10px', borderRadius:5, border:`1px solid rgba(176,48,216,0.4)`, background:'rgba(176,48,216,0.12)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1 }}>+ Poder</button>
+                    <button onClick={opAddPod} style={{ padding:'3px 10px', borderRadius:5, border:`1px solid rgba(163,40,44,0.4)`, background:'rgba(163,40,44,0.12)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1 }}>+ Poder</button>
                   </div>
                   {(form.poderes||[]).map((p,i)=>(
                     <div key={i} style={{ background:'var(--card2)', border:'1px solid var(--border)', borderRadius:8, padding:10 }}>
@@ -4277,7 +4275,7 @@ function BestiaryTab({ campaignId }) {
                   {fld('Texto de Lore','descricaoTexto',{textarea:true,rows:5})}
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                     <span style={sL}>SEÇÕES / ENIGMAS</span>
-                    <button onClick={opAddEni} style={{ padding:'3px 10px', borderRadius:5, border:`1px solid rgba(176,48,216,0.4)`, background:'rgba(176,48,216,0.12)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1 }}>+ Seção</button>
+                    <button onClick={opAddEni} style={{ padding:'3px 10px', borderRadius:5, border:`1px solid rgba(163,40,44,0.4)`, background:'rgba(163,40,44,0.12)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1 }}>+ Seção</button>
                   </div>
                   {(form.enigmas||[]).map((e,i)=>(
                     <div key={i} style={{ background:'var(--card2)', border:'1px solid var(--border)', borderRadius:8, padding:10 }}>
@@ -4321,7 +4319,7 @@ function BestiaryTab({ campaignId }) {
             <div style={{ display:'flex', gap:8, justifyContent:'flex-end', flexShrink:0, marginTop:4 }}>
               <button onClick={()=>setModal(null)} style={{ padding:'7px 16px', borderRadius:6, border:'1px solid var(--border)', background:'transparent', color:'var(--muted)', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11 }}>Cancelar</button>
               <button onClick={saveCreature} disabled={saving||!form.name.trim()}
-                style={{ padding:'7px 16px', borderRadius:6, border:`1px solid rgba(176,48,216,0.5)`, background:'rgba(176,48,216,0.2)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, opacity:saving||!form.name.trim()?0.5:1 }}>
+                style={{ padding:'7px 16px', borderRadius:6, border:`1px solid rgba(163,40,44,0.5)`, background:'rgba(163,40,44,0.2)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, opacity:saving||!form.name.trim()?0.5:1 }}>
                 {saving?'Salvando…':'Salvar'}
               </button>
             </div>
@@ -4569,7 +4567,7 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
       <div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <span style={lbl}>Agentes nesta campanha ({sheets.length})</span>
-          <span style={{ ...lbl, color: "rgba(176,48,216,0.8)" }}>Código: {campaign.inviteCode}</span>
+          <span style={{ ...lbl, color: "rgba(163,40,44,0.8)" }}>Código: {campaign.inviteCode}</span>
         </div>
         {sheets.length === 0 ? (
           <div style={{ ...card, color: "rgba(255,255,255,0.5)", fontFamily: "'Crimson Pro',serif" }}>Nenhuma ficha compartilhada ainda. Peça aos jogadores para compartilhar suas fichas na aba Agentes.</div>
@@ -4583,7 +4581,7 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
               return (
                 <div key={s.id} style={card}>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                    <div style={{ width: 40, height: 40, borderRadius: "50%", overflow: "hidden", background: "rgba(176,48,216,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: "50%", overflow: "hidden", background: "rgba(163,40,44,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                       {getActiveAvatar(cd) ? <img src={getActiveAvatar(cd)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "#c89bff" }}>◈</span>}
                     </div>
                     <div style={{ flex: 1, minWidth: 140 }}>
@@ -4602,7 +4600,7 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
                         </span>
                       ) : <span style={{ fontFamily: "'Crimson Pro',serif", fontStyle: "italic", fontSize: 12, color: "rgba(255,255,255,0.35)" }}>Não definido</span>}
                       <button onClick={() => setEditing(editing === s.id ? null : s.id)}
-                        style={{ background: "rgba(176,48,216,0.15)", border: "1px solid rgba(176,48,216,0.4)", borderRadius: 5, color: "#d8a8ff", padding: "5px 9px", fontFamily: "'Cinzel',serif", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                        style={{ background: "rgba(163,40,44,0.15)", border: "1px solid rgba(163,40,44,0.4)", borderRadius: 5, color: "#d8a8ff", padding: "5px 9px", fontFamily: "'Cinzel',serif", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
                         Elemento ▾
                       </button>
                     </div>
@@ -4629,10 +4627,10 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
 
         {/* ── Dados do Mestre ── */}
-        <div style={{ background:"linear-gradient(135deg,rgba(30,10,50,0.7),rgba(10,5,20,0.9))", border:"1px solid rgba(176,48,216,0.2)", borderRadius:12, padding:16, display:"flex", flexDirection:"column", gap:10 }}>
+        <div style={{ background:"linear-gradient(135deg,rgba(30,10,50,0.7),rgba(10,5,20,0.9))", border:"1px solid rgba(163,40,44,0.2)", borderRadius:12, padding:16, display:"flex", flexDirection:"column", gap:10 }}>
           <div style={{ display:"flex", alignItems:"center", gap:8, paddingBottom:10, borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(176,48,216,0.8)" strokeWidth="1.8"><polygon points="12 2 19 7 19 17 12 22 5 17 5 7 12 2"/><path d="M5 7l7 5 7-5M12 12v10" opacity="0.5"/></svg>
-            <span style={{ fontFamily:"Cinzel,serif", fontSize:10, letterSpacing:"0.14em", textTransform:"uppercase", color:"rgba(176,48,216,0.9)" }}>Dados do Mestre</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(163,40,44,0.8)" strokeWidth="1.8"><polygon points="12 2 19 7 19 17 12 22 5 17 5 7 12 2"/><path d="M5 7l7 5 7-5M12 12v10" opacity="0.5"/></svg>
+            <span style={{ fontFamily:"Cinzel,serif", fontSize:10, letterSpacing:"0.14em", textTransform:"uppercase", color:"rgba(163,40,44,0.9)" }}>Dados do Mestre</span>
           </div>
           <div style={{ display:"flex", gap:6 }}>
             <input value={dice} onChange={e => setDice(e.target.value)} onKeyDown={e => e.key==="Enter" && doRoll(false)}
@@ -4641,7 +4639,7 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
           </div>
           <div style={{ display:"flex", gap:6 }}>
             <button onClick={() => doRoll(false)} style={{ flex:1, padding:"7px", borderRadius:7, border:"1px solid rgba(255,255,255,0.14)", background:"rgba(255,255,255,0.05)", color:"rgba(255,255,255,0.6)", fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1, textTransform:"uppercase", cursor:"pointer" }}>🔒 Privado</button>
-            <button onClick={() => doRoll(true)} style={{ flex:1, padding:"7px", borderRadius:7, border:"1px solid rgba(176,48,216,0.55)", background:"rgba(176,48,216,0.2)", color:"#d8a8ff", fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1, textTransform:"uppercase", cursor:"pointer" }}>📢 Revelar</button>
+            <button onClick={() => doRoll(true)} style={{ flex:1, padding:"7px", borderRadius:7, border:"1px solid rgba(163,40,44,0.55)", background:"rgba(163,40,44,0.2)", color:"#d8a8ff", fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1, textTransform:"uppercase", cursor:"pointer" }}>📢 Revelar</button>
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:4, maxHeight:130, overflowY:"auto" }}>
             {gmLog.length === 0 && <div style={{ fontFamily:"'Crimson Pro',serif", fontSize:12, color:"rgba(255,255,255,0.25)", textAlign:"center", padding:"8px 0" }}>Nenhuma rolagem ainda</div>}
@@ -4655,17 +4653,17 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
         </div>
 
         {/* ── Narração Global ── */}
-        <div style={{ background:"linear-gradient(135deg,rgba(20,5,35,0.8),rgba(8,4,18,0.95))", border:"1px solid rgba(176,48,216,0.25)", borderRadius:12, padding:16, display:"flex", flexDirection:"column", gap:10 }}>
+        <div style={{ background:"linear-gradient(135deg,rgba(20,5,35,0.8),rgba(8,4,18,0.95))", border:"1px solid rgba(163,40,44,0.25)", borderRadius:12, padding:16, display:"flex", flexDirection:"column", gap:10 }}>
           <div style={{ display:"flex", alignItems:"center", gap:8, paddingBottom:10, borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(176,48,216,0.8)" strokeWidth="1.8"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
-            <span style={{ fontFamily:"Cinzel,serif", fontSize:10, letterSpacing:"0.14em", textTransform:"uppercase", color:"rgba(176,48,216,0.9)" }}>Narração Global</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(163,40,44,0.8)" strokeWidth="1.8"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+            <span style={{ fontFamily:"Cinzel,serif", fontSize:10, letterSpacing:"0.14em", textTransform:"uppercase", color:"rgba(163,40,44,0.9)" }}>Narração Global</span>
           </div>
 
           {/* Destino */}
           <div style={{ display:"flex", background:"rgba(0,0,0,0.3)", borderRadius:8, padding:3, gap:3 }}>
             {[["all","🌐 Todos"],["specific","👤 Específicos"]].map(([v,l]) => (
               <button key={v} onClick={() => setNarrTarget(v)}
-                style={{ flex:1, padding:"6px", borderRadius:6, border:"none", background: narrTarget===v?"rgba(176,48,216,0.35)":"transparent",
+                style={{ flex:1, padding:"6px", borderRadius:6, border:"none", background: narrTarget===v?"rgba(163,40,44,0.35)":"transparent",
                   color: narrTarget===v?"#e8c8ff":"rgba(255,255,255,0.4)", fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1,
                   textTransform:"uppercase", cursor:"pointer", transition:"all 0.2s" }}>{l}</button>
             ))}
@@ -4684,15 +4682,15 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
                   return (
                     <label key={id} onClick={() => toggleNarrTarget(id)}
                       style={{ display:"flex", alignItems:"center", gap:7, cursor:"pointer", padding:"5px 10px 5px 6px",
-                        borderRadius:20, border:`1px solid ${sel?"rgba(176,48,216,0.7)":"rgba(255,255,255,0.1)"}`,
-                        background: sel?"rgba(176,48,216,0.18)":"rgba(255,255,255,0.03)", transition:"all 0.18s" }}>
+                        borderRadius:20, border:`1px solid ${sel?"rgba(163,40,44,0.7)":"rgba(255,255,255,0.1)"}`,
+                        background: sel?"rgba(163,40,44,0.18)":"rgba(255,255,255,0.03)", transition:"all 0.18s" }}>
                       <div style={{ width:22, height:22, borderRadius:"50%", overflow:"hidden", flexShrink:0,
-                        border:`1.5px solid ${sel?"rgba(176,48,216,0.8)":"rgba(255,255,255,0.2)"}`,
-                        background:"rgba(176,48,216,0.1)", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                        border:`1.5px solid ${sel?"rgba(163,40,44,0.8)":"rgba(255,255,255,0.2)"}`,
+                        background:"rgba(163,40,44,0.1)", display:"flex", alignItems:"center", justifyContent:"center" }}>
                         {char?.avatar ? <img src={char.avatar} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }}/> : <span style={{ fontSize:10 }}>👤</span>}
                       </div>
                       <span style={{ fontFamily:"Cinzel,serif", fontSize:9, color: sel?"#e8c8ff":"rgba(255,255,255,0.55)", whiteSpace:"nowrap" }}>{name}</span>
-                      {sel && <span style={{ fontSize:9, color:"#b030d8" }}>✓</span>}
+                      {sel && <span style={{ fontSize:9, color:"#a3282c" }}>✓</span>}
                     </label>
                   );
                 })}
@@ -4727,7 +4725,7 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
           {narrImage && (
             <img src={narrImage} alt="preview"
               style={{ maxWidth:"100%", maxHeight:110, borderRadius:7, objectFit:"contain",
-                border:"1px solid rgba(176,48,216,0.25)", background:"rgba(0,0,0,0.3)" }}/>
+                border:"1px solid rgba(163,40,44,0.25)", background:"rgba(0,0,0,0.3)" }}/>
           )}
 
           {/* Botões */}
@@ -4743,12 +4741,12 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
             </button>
             <button onClick={() => sendNarr(false)} disabled={!narr.trim() && !narrImage}
               style={{ flex:2, padding:"9px", borderRadius:8,
-                border:`1px solid ${(narr.trim()||narrImage)?"rgba(176,48,216,0.6)":"rgba(255,255,255,0.07)"}`,
-                background:(narr.trim()||narrImage)?"linear-gradient(135deg,rgba(120,20,180,0.4),rgba(176,48,216,0.25))":"rgba(255,255,255,0.02)",
+                border:`1px solid ${(narr.trim()||narrImage)?"rgba(163,40,44,0.6)":"rgba(255,255,255,0.07)"}`,
+                background:(narr.trim()||narrImage)?"linear-gradient(135deg,rgba(120,20,180,0.4),rgba(163,40,44,0.25))":"rgba(255,255,255,0.02)",
                 color:(narr.trim()||narrImage)?"#e8c8ff":"rgba(255,255,255,0.25)",
                 fontFamily:"Cinzel,serif", fontSize:10, letterSpacing:1, textTransform:"uppercase",
                 cursor:(narr.trim()||narrImage)?"pointer":"default",
-                boxShadow:(narr.trim()||narrImage)?"0 0 12px rgba(176,48,216,0.2)":"none" }}>
+                boxShadow:(narr.trim()||narrImage)?"0 0 12px rgba(163,40,44,0.2)":"none" }}>
               {narrSent ? "✓ Transmitido" : "📡 Transmitir"}
             </button>
           </div>
@@ -4830,15 +4828,15 @@ function NarracaoOverlay({ campaign, uid, isMaster }) {
         </div>
       )}
       <svg width="44" height="44" viewBox="0 0 64 64" fill="none" style={{ marginBottom:image?14:24, opacity:0.8 }}>
-        <path d="M3 32c8-14 18-20 29-20s21 6 29 20c-8 14-18 20-29 20S11 46 3 32z" stroke="#b030d8" strokeWidth="1.6"/>
-        <circle cx="32" cy="32" r="9" stroke="#b030d8" strokeWidth="1.6"/>
-        <circle cx="32" cy="32" r="3.5" fill="#b030d8"/>
+        <path d="M3 32c8-14 18-20 29-20s21 6 29 20c-8 14-18 20-29 20S11 46 3 32z" stroke="#a3282c" strokeWidth="1.6"/>
+        <circle cx="32" cy="32" r="9" stroke="#a3282c" strokeWidth="1.6"/>
+        <circle cx="32" cy="32" r="3.5" fill="#a3282c"/>
       </svg>
       {image && (
-        <img src={image} alt="" style={{ maxWidth:"min(680px,88vw)", maxHeight:"38vh", objectFit:"contain", borderRadius:8, marginBottom:20, boxShadow:"0 0 40px rgba(176,48,216,0.3)" }}/>
+        <img src={image} alt="" style={{ maxWidth:"min(680px,88vw)", maxHeight:"38vh", objectFit:"contain", borderRadius:8, marginBottom:20, boxShadow:"0 0 40px rgba(163,40,44,0.3)" }}/>
       )}
       {text && (
-        <div style={{ fontFamily:"'Crimson Pro',serif", fontSize:"clamp(18px,3.2vw,30px)", color:"#e8e0f0", textAlign:"center", maxWidth:760, lineHeight:1.6, textShadow:"0 0 24px rgba(176,48,216,0.4)", minHeight:40 }}>
+        <div style={{ fontFamily:"'Crimson Pro',serif", fontSize:"clamp(18px,3.2vw,30px)", color:"#e8e0f0", textAlign:"center", maxWidth:760, lineHeight:1.6, textShadow:"0 0 24px rgba(163,40,44,0.4)", minHeight:40 }}>
           {typed}<span style={{ opacity:0.6 }}>▌</span>
         </div>
       )}
@@ -5026,8 +5024,8 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
         style={{position:"relative",width:"100%",height:alturaHero,borderRadius:12,overflow:"hidden",flexShrink:0,
         display:heroCompacto?"flex":"block",alignItems:"center",gap:8,padding:heroCompacto?"0 12px":0,
         transition:"height .22s cubic-bezier(.22,1,.36,1)",
-        border:"1px solid rgba(176,48,216,0.18)",
-        background:campaign.coverImage?"transparent":"radial-gradient(120% 160% at 20% 0%,rgba(176,48,216,0.22),rgba(176,48,216,0.03) 60%),linear-gradient(180deg,rgba(20,14,26,0.9),rgba(10,8,14,0.95))"}}>
+        border:"1px solid rgba(163,40,44,0.18)",
+        background:campaign.coverImage?"transparent":"radial-gradient(120% 160% at 20% 0%,rgba(163,40,44,0.22),rgba(163,40,44,0.03) 60%),linear-gradient(180deg,rgba(20,14,26,0.9),rgba(10,8,14,0.95))"}}>
         {campaign.coverImage && <img className="camp-hero-img" src={campaign.coverImage} alt=""
           style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",display:"block",
             opacity:heroCompacto?0.4:1,transition:"opacity .22s ease"}}/>}
@@ -5092,7 +5090,7 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
               </span>
               {isMaster&&(
                 <span style={{fontFamily:"Cinzel,serif",fontSize:8.5,letterSpacing:1.2,color:"#e0c8ff",textTransform:"uppercase",
-                  padding:"3px 9px",background:"rgba(176,48,216,0.4)",border:"1px solid rgba(200,140,255,0.4)",borderRadius:20,backdropFilter:"blur(4px)"}}>
+                  padding:"3px 9px",background:"rgba(163,40,44,0.4)",border:"1px solid rgba(200,140,255,0.4)",borderRadius:20,backdropFilter:"blur(4px)"}}>
                   ✦ Mestre
                 </span>
               )}
@@ -5103,7 +5101,7 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
           <button onClick={()=>setShowInvite(v=>!v)}
             title={`Mostrar o código de convite · ${campaign.members?.length||1}/${campaign.maxPlayers||6} jogadores`}
             style={{display:"flex",alignItems:"center",gap:7,flexShrink:0,
-              background:showInvite?"rgba(176,48,216,0.5)":"linear-gradient(135deg,rgba(176,48,216,0.55),rgba(120,30,180,0.55))",
+              background:showInvite?"rgba(163,40,44,0.5)":"linear-gradient(135deg,rgba(163,40,44,0.55),rgba(120,30,180,0.55))",
               border:"1px solid rgba(200,140,255,0.5)",borderRadius:9,cursor:"pointer",
               color:"#f0e4ff",padding:"8px 16px",fontFamily:"Cinzel,serif",fontSize:10,
               letterSpacing:"0.08em",textTransform:"uppercase",backdropFilter:"blur(6px)",
@@ -5118,20 +5116,20 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
       {/* ── Painel código de convite ── */}
       {showInvite && (
         <div className="fade" style={{padding:"14px 18px",marginTop:10,
-          background:"linear-gradient(135deg,rgba(176,48,216,0.10),rgba(176,48,216,0.03))",
-          border:"1px solid rgba(176,48,216,0.28)",borderRadius:10,
+          background:"linear-gradient(135deg,rgba(163,40,44,0.10),rgba(163,40,44,0.03))",
+          border:"1px solid rgba(163,40,44,0.28)",borderRadius:10,
           display:"flex",alignItems:"center",gap:16,flexShrink:0,flexWrap:"wrap"}}>
           <div>
             <div style={{fontFamily:"Cinzel,serif",fontSize:9,color:"var(--muted)",letterSpacing:1.5,textTransform:"uppercase",marginBottom:5}}>
               Código de convite · compartilhe com seus jogadores
             </div>
-            <div style={{fontFamily:"Cinzel,serif",fontSize:24,letterSpacing:9,color:"#d4b0ff",fontWeight:700,textShadow:"0 0 18px rgba(176,48,216,0.4)"}}>
+            <div style={{fontFamily:"Cinzel,serif",fontSize:24,letterSpacing:9,color:"#d4b0ff",fontWeight:700,textShadow:"0 0 18px rgba(163,40,44,0.4)"}}>
               {campaign.inviteCode||"------"}
             </div>
           </div>
           <button onClick={copyInviteCode} style={{
-            marginLeft:"auto",padding:"9px 20px",background:inviteCopied?"rgba(106,170,122,0.18)":"rgba(176,48,216,0.18)",
-            border:`1px solid ${inviteCopied?"rgba(106,170,122,0.45)":"rgba(176,48,216,0.45)"}`,
+            marginLeft:"auto",padding:"9px 20px",background:inviteCopied?"rgba(106,170,122,0.18)":"rgba(163,40,44,0.18)",
+            border:`1px solid ${inviteCopied?"rgba(106,170,122,0.45)":"rgba(163,40,44,0.45)"}`,
             borderRadius:8,cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:1,
             color:inviteCopied?"#7bc48b":"#d4b0ff",transition:"all 0.2s",textTransform:"uppercase",
           }}>{inviteCopied?"✓ Copiado!":"⧉ Copiar código"}</button>
@@ -5149,7 +5147,7 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
           maskImage:"linear-gradient(to right,#000 0,#000 calc(100% - 28px),transparent 100%)",
           WebkitMaskImage:"linear-gradient(to right,#000 0,#000 calc(100% - 28px),transparent 100%)",
         } : {})}}>
-        <SlidingTabPill pill={tabsPill.pill} radius={8} background="rgba(176,48,216,0.14)" underline="#b030d8"/>
+        <SlidingTabPill pill={tabsPill.pill} radius={8} background="rgba(163,40,44,0.14)" underline="#a3282c"/>
         {tabs.map(tab=>{
           const active = activeTab===tab.id;
           return (
@@ -5197,8 +5195,6 @@ const PLAN_DEFS = [
     systemId: "op",
     planName: "Agente da Ordem",
     system: "Ordem Paranormal",
-    accent: "#b030d8",
-    accentGlow: "rgba(176,48,216,0.25)",
     catarseUrl: "https://www.catarse.com.br/nexus-ordem",  // ← atualizar após criar página no Catarse
     features: ["5 fichas de Agente", "Ajudante do Mestre completo", "Campanhas multiplayer", "Trilhas sonoras"],
     badge: "TERROR • INVESTIGAÇÃO",
@@ -5207,8 +5203,6 @@ const PLAN_DEFS = [
     systemId: "tormenta",
     planName: "Aventureiro de Arton",
     system: "Tormenta 20",
-    accent: "#d4621e",
-    accentGlow: "rgba(212,98,30,0.25)",
     catarseUrl: "https://www.catarse.com.br/nexus-tormenta",
     features: ["5 fichas de Personagem", "Ajudante do Mestre completo", "Campanhas multiplayer", "Trilhas sonoras"],
     badge: "FANTASIA • ÉPICO",
@@ -5217,13 +5211,21 @@ const PLAN_DEFS = [
     systemId: "dnd",
     planName: "Herói Lendário",
     system: "D&D 5ª Edição",
-    accent: "#4a6fa5",
-    accentGlow: "rgba(74,111,165,0.25)",
     catarseUrl: "https://www.catarse.com.br/nexus-dnd",
     features: ["5 fichas de Personagem", "Ajudante do Mestre completo", "Campanhas multiplayer", "Trilhas sonoras"],
     badge: "FANTASIA • COMBATE",
   },
-];
+]
+  /* A COR sai do registry de temas, igual à tela de seleção (spec 0017 AC-6).
+   *
+   * Antes cada plano trazia o próprio `accent` escrito à mão, e esta tela era
+   * uma SEGUNDA fonte da verdade que ninguém migrou junto com a 0017: o D&D
+   * aparecia AZUL (#4a6fa5 — exatamente o literal que o teste da AC-6 cita
+   * como "the old hardcoded blue" já corrigido lá) e o Tormenta LARANJA,
+   * enquanto o mesmo sistema é vermelho e verde em todo o resto do app.
+   * A repaginação de 2026-08-05 tornou a divergência gritante; o conserto é
+   * apagar a cópia, não repintá-la. */
+  .map((p) => ({ ...p, ...getCardAccent(p.systemId) }));
 
 function PlansScreen({ userPlans = [], currentUser }) {
   const [hov, setHov] = useState(null);
@@ -5377,202 +5379,6 @@ function UpgradeModal({ onClose, onGoToPlans }) {
 }
 
 /* ═══════════════════════════════
-   DASHBOARD
-═══════════════════════════════ */
-function Dashboard({ system, onCreateChar, characters, sessions, onSelectChar, onNav, userPlans = [], onShowUpgrade, campaignCount = 0 }) {
-  const locale = useLocale();
-  const sT = locale.t;
-  const accent = system?.accent || "var(--gold)";
-  const isSubscribed = userPlans.includes(system?.id);
-  const charLimit = isSubscribed ? 5 : 1;
-
-  const sysChars = characters.filter(c =>
-    c.systemId === system?.id || (!c.systemId && system?.id === 'op')
-  );
-
-  const atLimit = sysChars.length >= charLimit;
-
-  /* ── Faixa de números ──
-     Antes eram três cards com ícone colorido dentro de um quadrado colorido:
-     "Fichas criadas", "Mapas: 0" e "Horas jogadas: 0h". Os dois últimos eram
-     literais fixos no código — nunca contaram nada. Número inventado em painel
-     é o cheiro mais forte de tela feita por IA: parece dado, não é. Ficaram só
-     os três que saem de estado real, e viraram blocos chapados separados por
-     filete, sem quadradinho de ícone e sem uma cor por card. */
-  const stats = [
-    { label:"Fichas",    val: String(sysChars.length),  nav:"sheet", hint:"Ver todas as fichas" },
-    { label:"Campanhas", val: String(campaignCount),    nav:"party", hint:"Ver campanhas" },
-    { label:"Sessões",   val: String(sessions?.length ?? 0), nav:"party", hint:"Ver campanhas" },
-  ];
-
-  /* Trilho da direita: o painel terminava por volta dos 600px e deixava um
-     terço da tela vazio. Estes blocos ocupam a coluna estreita com contexto
-     real (limite do plano, atalhos das ferramentas) em vez de esticar os
-     cards de cima para preencher o buraco. */
-  const atalhos = [
-    { id:"master", t:"Ajudante do Mestre", d:"Wiki, grafo e diário do seu mundo" },
-    { id:"map",    t:"Mapas",              d:"Mesas táticas e mapas-múndi" },
-    { id:"music",  t:"Trilhas Sonoras",    d:"Ambientação para cada cena" },
-  ];
-
-  return (
-    <div className="fade nx-page">
-
-      {/* ── Cabeçalho ──
-          Era um "herói" de 100px: caixa com borda de acento, brilho radial no
-          fundo, quadrado com ícone e sombra, título em degradê roxo→dourado,
-          selo de plano e um botão. Cinco tratamentos visuais para dizer o nome
-          do sistema — que a barra lateral e a topbar JÁ diziam. Vira o mesmo
-          cabeçalho de todas as outras telas: sobrancelha, título, subtítulo,
-          filete. A identidade do sistema vive na migalha da topbar. */}
-      <div className="nx-head">
-        <div className="nx-head-txt">
-          <div className="nx-eyebrow">{sT("dashboard.welcome")}</div>
-          <h1 className="nx-h1">Painel</h1>
-          {system?.desc && <p className="nx-sub">{system.desc}</p>}
-        </div>
-        <div className="nx-head-actions">
-          {/* Selo de plano: informação, não enfeite — vira texto ao lado do
-              botão em vez de uma pílula com degradê e sombra dourada. */}
-          <span title={isSubscribed ? "Assinante deste sistema" : "Plano gratuito"}
-            style={{fontFamily:"Cinzel,serif", fontSize:9.5, letterSpacing:"0.14em",
-              textTransform:"uppercase", color: isSubscribed ? "var(--gold)" : "var(--muted)"}}>
-            {isSubscribed ? "✦ Pro" : "Livre"}
-          </span>
-          {/* Três estados, e só UM deles é beco sem saída:
-              · abaixo da cota           → "+ Nova ficha", ativo
-              · cota cheia SEM assinar   → "Ver planos", ATIVO — é a saída, não
-                                            pode parecer desabilitado
-              · cota cheia JÁ assinando  → não há para onde ir: aí sim inerte
-              Antes os dois últimos compartilhavam opacity 0.45 + not-allowed, ou
-              seja, o caminho para destravar a conta era pintado como bloqueado. */}
-          {(() => {
-            const inerte = atLimit && isSubscribed;
-            return (
-              <button
-                className="btn-gold"
-                disabled={inerte}
-                style={{opacity: inerte ? 0.45 : 1, cursor: inerte ? "not-allowed" : "pointer"}}
-                onClick={() => { if (inerte) return; if (atLimit) onShowUpgrade?.(); else onCreateChar(); }}
-                title={atLimit
-                  ? (isSubscribed ? `Limite de ${charLimit} fichas atingido` : "Assine este sistema para criar mais fichas")
-                  : ""}
-              >
-                {atLimit ? (isSubscribed ? `Limite ${charLimit}/${charLimit}` : "Ver planos") : "+ Nova ficha"}
-              </button>
-            );
-          })()}
-        </div>
-      </div>
-
-      {/* Números — chapados, separados por filete vertical */}
-      <div className="nx-stats">
-        {stats.map((s)=>(
-          <button key={s.label} className="nx-stat" title={s.hint} onClick={()=>onNav && onNav(s.nav)}>
-            <span className="nx-stat-num">{s.val}</span>
-            <span className="nx-stat-cap">{s.label}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Corpo 2/1 — a lista à esquerda, contexto à direita. */}
-      <div className="nx-split">
-
-        {/* ── Coluna principal: personagens ── */}
-        <div>
-          <div className="nx-sec">
-            <span className="nx-sec-t">Seus personagens</span>
-            {sysChars.length > 0 && (
-              <button className="nx-sec-a" onClick={()=>onNav && onNav("sheet")}>Ver todas →</button>
-            )}
-          </div>
-
-          {sysChars.length === 0 ? (
-            /* Vazio alinhado à esquerda, com UM caminho. O anterior era um
-               pôster centralizado com ícone de 52px e um segundo botão dourado
-               que disputava com o "+ Nova ficha" do cabeçalho — dois CTAs
-               primários idênticos na mesma tela. */
-            <div className="nx-empty">
-              <div className="nx-empty-t">Nenhum agente ainda</div>
-              <p className="nx-empty-d">
-                A ficha é o ponto de partida: atributos, perícias, inventário e rituais
-                ficam todos nela. Use o botão <em>Nova ficha</em> acima para criar a primeira.
-              </p>
-              <button className="nx-btn" onClick={onCreateChar}>Criar primeiro agente</button>
-            </div>
-          ) : (
-            <div className="nx-list">
-              {sysChars.map((c,i)=> system?.id === "op"
-                ? <DossierCard key={i} character={c} systemAccent={system?.accent} onClick={()=>onSelectChar && onSelectChar(c)} />
-                : (
-                <button key={i} className="nx-row" onClick={()=>onSelectChar && onSelectChar(c)}>
-                  <div style={{
-                    width:44, height:44, borderRadius:4, flexShrink:0,
-                    background:"rgba(255,255,255,0.04)", border:"1px solid var(--border)",
-                    display:"flex", alignItems:"center", justifyContent:"center", fontSize:19,
-                    overflow:"hidden",
-                  }}>
-                    {getActiveAvatar(c)
-                      ? <img src={getActiveAvatar(c)} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
-                      : "🕵️"}
-                  </div>
-                  <div style={{flex:1, minWidth:0}}>
-                    <div className="nx-row-t">{c.form?.personagem || "Sem nome"}</div>
-                    <div className="nx-row-m">{c.classe?.name || "—"} · {c.origem?.name || "—"}</div>
-                  </div>
-                  <div style={{display:"flex", flexDirection:"column", gap:6, width:104, flexShrink:0}}>
-                    <span style={{fontFamily:"'IBM Plex Mono',monospace", fontSize:10.5, color:"var(--muted)", letterSpacing:"0.04em"}}>
-                      NEX {c.nex ?? 5}%
-                    </span>
-                    {/* filete chapado no lugar do degradê de duas paradas */}
-                    <div style={{height:2, background:"rgba(255,255,255,0.07)"}}>
-                      <div style={{height:"100%", width:`${c.nex ?? 5}%`, background:accent}}/>
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* ── Trilho de contexto ── */}
-        <aside className="nx-rail">
-          <div>
-            <div className="nx-sec"><span className="nx-sec-t">Ferramentas</span></div>
-            <div className="nx-list">
-              {atalhos.map(a=>(
-                <button key={a.id} className="nx-row" style={{padding:"12px 8px"}} onClick={()=>onNav && onNav(a.id)}>
-                  <div style={{flex:1, minWidth:0}}>
-                    <div className="nx-row-t" style={{fontSize:13.5}}>{a.t}</div>
-                    <div className="nx-row-m" style={{fontSize:12, whiteSpace:"normal"}}>{a.d}</div>
-                  </div>
-                  <span aria-hidden="true" style={{color:"var(--muted)", fontSize:13, flexShrink:0}}>→</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <div className="nx-sec"><span className="nx-sec-t">Seu plano</span></div>
-            <div className="nx-note">
-              <span className="nx-note-k">FICHAS {sysChars.length}/{charLimit}</span>
-              <span>{isSubscribed
-                ? "Assinatura ativa neste sistema."
-                : "O plano livre permite uma ficha por sistema."}</span>
-            </div>
-            {!isSubscribed && (
-              <button className="nx-sec-a" style={{marginTop:12, padding:0}} onClick={()=>onNav && onNav("planos")}>
-                Ver planos →
-              </button>
-            )}
-          </div>
-        </aside>
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════
    SHEET LIST — Agent Grid
 ═══════════════════════════════ */
 function SheetList({ characters, system, onCreateChar, onSelectChar, onDeleteChar, onUpdateChar }) {
@@ -5658,7 +5464,7 @@ function SheetList({ characters, system, onCreateChar, onSelectChar, onDeleteCha
               position:"relative", overflow:"hidden",
               transition:"border-color 0.22s, transform 0.22s, box-shadow 0.22s",
             }}
-              onMouseEnter={e=>{e.currentTarget.style.borderColor="rgba(124,58,237,0.5)"; e.currentTarget.style.transform="translateY(-3px)"; e.currentTarget.style.boxShadow="0 12px 40px rgba(124,58,237,0.18)"}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor="rgba(163,40,44,0.5)"; e.currentTarget.style.transform="translateY(-3px)"; e.currentTarget.style.boxShadow="0 12px 40px rgba(163,40,44,0.18)"}}
               onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255,255,255,0.07)"; e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="none"}}>
 
               {/* Gear + menu */}
@@ -5683,7 +5489,7 @@ function SheetList({ characters, system, onCreateChar, onSelectChar, onDeleteCha
               {/* Avatar (full-width top) */}
               <div style={{
                 width:"100%", height:180,
-                background:"rgba(124,58,237,0.10)",
+                background:"rgba(163,40,44,0.10)",
                 borderBottom:"1px solid rgba(255,255,255,0.06)",
                 display:"flex", alignItems:"center", justifyContent:"center",
                 fontSize:56, overflow:"hidden", position:"relative",
@@ -5714,7 +5520,7 @@ function SheetList({ characters, system, onCreateChar, onSelectChar, onDeleteCha
                         const key = c.id||c.createdAt;
                         setCharAdjust(prev => ({...prev, [key]: +e.target.value}));
                       }}
-                      style={{width:"72%", accentColor:"#7c3aed", cursor:"pointer"}}
+                      style={{width:"72%", accentColor:"#a3282c", cursor:"pointer"}}
                     />
                     <div style={{display:"flex", gap:8}}>
                       <button onClick={e => {
@@ -5723,7 +5529,7 @@ function SheetList({ characters, system, onCreateChar, onSelectChar, onDeleteCha
                         const newY = charAdjust[key] ?? c.form?.avatarPosY ?? 50;
                         onUpdateChar?.({ ...c, form: { ...c.form, avatarPosY: newY } });
                         setAdjustCard(null); setHoverCard(null);
-                      }} style={{background:"#7c3aed", border:"none", color:"#fff", borderRadius:5, padding:"5px 14px", fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1, cursor:"pointer"}}>Salvar</button>
+                      }} style={{background:"#a3282c", border:"none", color:"#fff", borderRadius:5, padding:"5px 14px", fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1, cursor:"pointer"}}>Salvar</button>
                       <button onClick={e => {
                         e.stopPropagation();
                         const key = c.id||c.createdAt;
@@ -5756,7 +5562,7 @@ function SheetList({ characters, system, onCreateChar, onSelectChar, onDeleteCha
                 </div>
               </div>
 
-              {/* Footer — o botão era um bloco roxo #7c3aed preenchido, largura
+              {/* Footer — o botão era um bloco roxo #a3282c preenchido, largura
                   total: um segundo botão primário POR CARD. Com cinco fichas na
                   grade eram cinco blocos roxos gritando ao mesmo tempo, e nenhum
                   deles usava a linguagem de botão do resto do app. Vira o botão
@@ -6288,7 +6094,7 @@ function Topbar({ screen, system, onChangeSystem, onLogout }) {
                   onMouseLeave={e=>{ if(selectedNews?.id!==item.id) e.currentTarget.style.background="none"; }}
                 >
                   <span style={{
-                    fontFamily:"Cinzel,serif", fontSize:11, color: selectedNews?.id===item.id ? "#c8a8f0" : "rgba(255,255,255,0.7)",
+                    fontFamily:"Cinzel,serif", fontSize:11, color: selectedNews?.id===item.id ? "#e0c9a0" : "rgba(255,255,255,0.7)",
                     lineHeight:1.4, flex:1,
                   }}>{item.title}</span>
                   {item.isNew && <span style={{width:8, height:8, borderRadius:"50%", background:"#e05555", flexShrink:0}}/>}
@@ -6423,18 +6229,22 @@ function Topbar({ screen, system, onChangeSystem, onLogout }) {
 }
 
 /* ─── ORDEM PARANORMAL — ÍCONE DE ENERGIA ─── */
+/* Repaginacao 2026-08-05: o emblema saiu do roxo do Outro Lado para o par
+   heraldico (ouro de vela + carmesim de brasao). A ESTRUTURA de luz e a
+   mesma — so a liga mudou. Ele aparece na topbar e na tela de selecao, e
+   ficando roxo era o unico ponto da interface que nao acompanhou a troca. */
 const OPEnergyIcon = ({ size = 48, glow = false }) => (
   <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg"
-    style={{ display:"block", filter: glow ? "drop-shadow(0 0 8px rgba(180,60,220,0.9)) drop-shadow(0 0 20px rgba(140,30,200,0.5))" : "drop-shadow(0 0 4px rgba(180,60,220,0.5))" }}>
+    style={{ display:"block", filter: glow ? "drop-shadow(0 0 8px rgba(198,164,92,0.9)) drop-shadow(0 0 20px rgba(163,40,44,0.5))" : "drop-shadow(0 0 4px rgba(198,164,92,0.5))" }}>
     <defs>
       <radialGradient id="opGrad" cx="50%" cy="45%" r="55%">
-        <stop offset="0%" stopColor="#e060f0" />
-        <stop offset="50%" stopColor="#b030d8" />
-        <stop offset="100%" stopColor="#6010a0" />
+        <stop offset="0%" stopColor="#f2ddab" />
+        <stop offset="50%" stopColor="#a3282c" />
+        <stop offset="100%" stopColor="#3d0c10" />
       </radialGradient>
       <radialGradient id="opGlow" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stopColor="#c040e8" stopOpacity="0.3" />
-        <stop offset="100%" stopColor="#8020c0" stopOpacity="0" />
+        <stop offset="0%" stopColor="#c6a45c" stopOpacity="0.3" />
+        <stop offset="100%" stopColor="#6a1418" stopOpacity="0" />
       </radialGradient>
       <filter id="opBlur">
         <feGaussianBlur stdDeviation="1.2" result="b"/>
@@ -6454,15 +6264,15 @@ const OPEnergyIcon = ({ size = 48, glow = false }) => (
     <path d="M50 76 Q42 72 35 72" stroke="url(#opGrad)" strokeWidth="1" strokeLinecap="round" opacity="0.4"/>
     <path d="M50 76 Q58 72 65 72" stroke="url(#opGrad)" strokeWidth="1" strokeLinecap="round" opacity="0.4"/>
     {/* Pétalas esquerda */}
-    <ellipse cx="35" cy="68" rx="5" ry="3" fill="none" stroke="#b030d8" strokeWidth="1" opacity="0.6" transform="rotate(-30,35,68)"/>
-    <ellipse cx="38" cy="65" rx="4" ry="2.5" fill="none" stroke="#c040e8" strokeWidth="0.8" opacity="0.5" transform="rotate(20,38,65)"/>
+    <ellipse cx="35" cy="68" rx="5" ry="3" fill="none" stroke="#a3282c" strokeWidth="1" opacity="0.6" transform="rotate(-30,35,68)"/>
+    <ellipse cx="38" cy="65" rx="4" ry="2.5" fill="none" stroke="#c6a45c" strokeWidth="0.8" opacity="0.5" transform="rotate(20,38,65)"/>
     {/* Pétalas direita */}
-    <ellipse cx="65" cy="68" rx="5" ry="3" fill="none" stroke="#b030d8" strokeWidth="1" opacity="0.6" transform="rotate(30,65,68)"/>
-    <ellipse cx="62" cy="65" rx="4" ry="2.5" fill="none" stroke="#c040e8" strokeWidth="0.8" opacity="0.5" transform="rotate(-20,62,65)"/>
+    <ellipse cx="65" cy="68" rx="5" ry="3" fill="none" stroke="#a3282c" strokeWidth="1" opacity="0.6" transform="rotate(30,65,68)"/>
+    <ellipse cx="62" cy="65" rx="4" ry="2.5" fill="none" stroke="#c6a45c" strokeWidth="0.8" opacity="0.5" transform="rotate(-20,62,65)"/>
     {/* Botão floral central base */}
-    <circle cx="50" cy="88" r="2.5" fill="#b030d8" opacity="0.7" filter="url(#opBlur)"/>
-    <circle cx="38" cy="70" r="2" fill="#9020c0" opacity="0.6"/>
-    <circle cx="62" cy="70" r="2" fill="#9020c0" opacity="0.6"/>
+    <circle cx="50" cy="88" r="2.5" fill="#a3282c" opacity="0.7" filter="url(#opBlur)"/>
+    <circle cx="38" cy="70" r="2" fill="#7d1d22" opacity="0.6"/>
+    <circle cx="62" cy="70" r="2" fill="#7d1d22" opacity="0.6"/>
 
     {/* Raios de energia — as chamas serpenteantes */}
     {/* Raio esquerdo */}
@@ -6473,7 +6283,7 @@ const OPEnergyIcon = ({ size = 48, glow = false }) => (
       stroke="url(#opGrad)" strokeWidth="1.5" strokeLinecap="round" fill="none" opacity="0.55" filter="url(#opBlur)"/>
     {/* Raio central secundário */}
     <path d="M50 60 Q46 48 50 36 Q54 26 48 16"
-      stroke="#c040e8" strokeWidth="1" strokeLinecap="round" fill="none" opacity="0.35" filter="url(#opBlur)"/>
+      stroke="#c6a45c" strokeWidth="1" strokeLinecap="round" fill="none" opacity="0.35" filter="url(#opBlur)"/>
 
     {/* ── Símbolo principal — forma geométrica angular (V+seta+chama) ── */}
     {/* Flecha/chama central superior */}
@@ -6483,21 +6293,21 @@ const OPEnergyIcon = ({ size = 48, glow = false }) => (
     <path d="M38 34 L50 54 L62 34"
       stroke="url(#opGrad)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" filter="url(#opBlur)"/>
     {/* Traço horizontal/asa esquerda */}
-    <path d="M32 40 L44 40" stroke="#d050f0" strokeWidth="2" strokeLinecap="round" opacity="0.8" filter="url(#opBlur)"/>
+    <path d="M32 40 L44 40" stroke="#e0a44a" strokeWidth="2" strokeLinecap="round" opacity="0.8" filter="url(#opBlur)"/>
     {/* Traço horizontal/asa direita */}
-    <path d="M56 40 L68 40" stroke="#d050f0" strokeWidth="2" strokeLinecap="round" opacity="0.8" filter="url(#opBlur)"/>
+    <path d="M56 40 L68 40" stroke="#e0a44a" strokeWidth="2" strokeLinecap="round" opacity="0.8" filter="url(#opBlur)"/>
     {/* Gancho esquerdo */}
-    <path d="M32 40 Q28 46 32 52" stroke="#b030d8" strokeWidth="1.5" strokeLinecap="round" fill="none" opacity="0.7"/>
+    <path d="M32 40 Q28 46 32 52" stroke="#a3282c" strokeWidth="1.5" strokeLinecap="round" fill="none" opacity="0.7"/>
     {/* Gancho direito */}
-    <path d="M68 40 Q72 46 68 52" stroke="#b030d8" strokeWidth="1.5" strokeLinecap="round" fill="none" opacity="0.7"/>
+    <path d="M68 40 Q72 46 68 52" stroke="#a3282c" strokeWidth="1.5" strokeLinecap="round" fill="none" opacity="0.7"/>
 
     {/* Ponto central brilhante */}
-    <circle cx="50" cy="54" r="3" fill="#e060f0" filter="url(#opBlur)"/>
+    <circle cx="50" cy="54" r="3" fill="#f2ddab" filter="url(#opBlur)"/>
     <circle cx="50" cy="54" r="1.5" fill="#ffffff" opacity="0.8"/>
 
     {/* Micro partículas */}
     {[[40,20],[60,18],[34,30],[66,28],[43,50],[57,50]].map(([x,y],i)=>(
-      <circle key={i} cx={x} cy={y} r="1" fill="#d050f0" opacity={0.4 + (i%3)*0.15} filter="url(#opBlur)"/>
+      <circle key={i} cx={x} cy={y} r="1" fill="#e0a44a" opacity={0.4 + (i%3)*0.15} filter="url(#opBlur)"/>
     ))}
   </svg>
 );
@@ -6748,7 +6558,7 @@ function SystemSelect({ onSelect, onLogout }) {
   return (
     <div style={{minHeight:"100vh", background:"var(--bg)", display:"flex", flexDirection:"column", position:"relative", overflow:"hidden"}}>
       <AmbientBackdrop />
-      <Deco/>
+      <HeraldicAmbience/>
 
       {/* Ambient glow */}
       <div style={{
@@ -6880,19 +6690,19 @@ function SystemSelect({ onSelect, onLogout }) {
                       <div style={{
                         width:48, height:48, borderRadius:10, flexShrink:0,
                         background: sys.svgIcon ? "rgba(80,0,120,0.2)" : `${sys.accent}18`,
-                        border:`1px solid ${sys.svgIcon ? "rgba(180,60,220,0.35)" : sys.accent+"40"}`,
+                        border:`1px solid ${sys.svgIcon ? "rgba(198,164,92,0.35)" : sys.accent+"40"}`,
                         display:"flex", alignItems:"center", justifyContent:"center",
                         fontSize:24, overflow:"hidden",
                         boxShadow: isHov && sys.available
                           ? sys.svgIcon
-                            ? "0 0 20px rgba(180,60,220,0.5), 0 0 40px rgba(140,30,200,0.25)"
+                            ? "0 0 20px rgba(198,164,92,0.5), 0 0 40px rgba(163,40,44,0.25)"
                             : `0 0 16px ${sys.accentGlow}`
                           : "none",
                         transition:"box-shadow 0.25s", position:"relative",
                       }}>
                         {sys.emblem ? (
                           <>
-                            <img src={sys.emblem} alt="" style={{width:"100%", height:"100%", objectFit:"contain"}} />
+                            <img src={sys.emblem} alt="" className="sys-emblem" data-sys={sys.id} style={{width:"100%", height:"100%", objectFit:"contain"}} />
                             {isHov && sys.available && sys.idle && !reduced && (
                               <video className="card-idle-vid" autoPlay muted loop playsInline preload="none">
                                 <source src={sys.idle + ".webm"} type="video/webm" />
@@ -7916,7 +7726,7 @@ function CharacterCreator({ onFinish, onCancel }) {
         <NexusLogo size={28}/>
         <div style={{fontFamily:"Cinzel,serif", fontSize:13, color:"var(--gold2)", letterSpacing:1}}>Nova Ficha de Agente</div>
         <div style={{height:1, flex:1, background:"var(--border2)"}}/>
-        <span style={{fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:2, color:"#d870f8", textTransform:"uppercase", textShadow:"0 0 10px rgba(180,50,220,0.7)"}}>
+        <span style={{fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:2, color:"#e0645a", textTransform:"uppercase", textShadow:"0 0 10px rgba(180,50,220,0.7)"}}>
           🌀 Ordem Paranormal · 2ª Ed.
         </span>
         <button onClick={onCancel} style={{background:"none", border:"1px solid var(--border2)", borderRadius:4, color:"var(--muted2)", cursor:"pointer", fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:2, textTransform:"uppercase", padding:"6px 14px", transition:"all 0.2s"}}
@@ -8680,8 +8490,8 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
             <div style={{display:"flex",justifyContent:"flex-end",gap:12,padding:"16px 24px",borderTop:"1px solid #222"}}>
               <button onClick={()=>setShowSkillModal(false)} style={{padding:"10px 24px",background:"none",border:"1px solid var(--border2)",borderRadius:8,cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:11,letterSpacing:1,color:"#888",transition:"all 0.2s"}}
                 onMouseEnter={e=>e.currentTarget.style.borderColor="#555"} onMouseLeave={e=>e.currentTarget.style.borderColor="#333"}>Cancelar</button>
-              <button onClick={confirmSkill} style={{padding:"10px 28px",background:"#7c3aed",border:"none",borderRadius:8,cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:11,letterSpacing:1,color:"#fff",transition:"all 0.2s"}}
-                onMouseEnter={e=>e.currentTarget.style.background="#6d28d9"} onMouseLeave={e=>e.currentTarget.style.background="#7c3aed"}>Adicionar</button>
+              <button onClick={confirmSkill} style={{padding:"10px 28px",background:"#a3282c",border:"none",borderRadius:8,cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:11,letterSpacing:1,color:"#fff",transition:"all 0.2s"}}
+                onMouseEnter={e=>e.currentTarget.style.background="#6d28d9"} onMouseLeave={e=>e.currentTarget.style.background="#a3282c"}>Adicionar</button>
             </div>
           </div>
         </div>
@@ -8777,12 +8587,12 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
                     <span style={{fontFamily:"Cinzel,serif",fontSize:13,color:"#e0e0e0"}}>Dano extra:</span>
                     <button onClick={()=>setD(x=>({...x,extraDmg:[...(x.extraDmg||[]),{dmg:"1d6",type:"Balístico"}]}))}
-                      style={{background:"#7c3aed",border:"none",borderRadius:4,color:"#fff",fontFamily:"Cinzel,serif",fontSize:10,padding:"5px 12px",cursor:"pointer"}}>
+                      style={{background:"#a3282c",border:"none",borderRadius:4,color:"#fff",fontFamily:"Cinzel,serif",fontSize:10,padding:"5px 12px",cursor:"pointer"}}>
                       Adicionar
                     </button>
                   </div>
                   {(d.extraDmg||[]).map((ex,ei)=>(
-                    <div key={ei} style={{display:"flex",gap:10,alignItems:"center",marginBottom:8,padding:"10px 12px",borderLeft:"3px solid #7c3aed",background:"rgba(124,58,237,0.05)",borderRadius:"0 4px 4px 0"}}>
+                    <div key={ei} style={{display:"flex",gap:10,alignItems:"center",marginBottom:8,padding:"10px 12px",borderLeft:"3px solid #a3282c",background:"rgba(163,40,44,0.05)",borderRadius:"0 4px 4px 0"}}>
                       <div style={{flex:1}}>
                         <label style={labelStyle}>Dano*</label>
                         <input value={ex.dmg} onChange={e=>setD(x=>({...x,extraDmg:x.extraDmg.map((v,j)=>j===ei?{...v,dmg:e.target.value}:v)}))} style={inputStyle}/>
@@ -8794,7 +8604,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                         </select>
                       </div>
                       <button onClick={()=>setD(x=>({...x,extraDmg:x.extraDmg.filter((_,j)=>j!==ei)}))}
-                        style={{background:"#7c3aed",border:"none",borderRadius:4,color:"#fff",fontFamily:"Cinzel,serif",fontSize:10,padding:"5px 10px",cursor:"pointer",alignSelf:"flex-end",marginBottom:0}}>
+                        style={{background:"#a3282c",border:"none",borderRadius:4,color:"#fff",fontFamily:"Cinzel,serif",fontSize:10,padding:"5px 10px",cursor:"pointer",alignSelf:"flex-end",marginBottom:0}}>
                         Remover
                       </button>
                     </div>
@@ -8869,7 +8679,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
               {/* Footer */}
               <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:10,padding:"14px 22px",borderTop:"1px solid #1e1e1e"}}>
                 <button onClick={()=>setAtkModal(null)} style={{background:"none",border:"none",color:"rgba(255,255,255,0.5)",fontFamily:"Cinzel,serif",fontSize:12,cursor:"pointer",padding:"8px 16px"}}>Cancelar</button>
-                <button onClick={save} style={{background:"#7c3aed",border:"none",borderRadius:4,color:"#fff",fontFamily:"Cinzel,serif",fontSize:12,padding:"8px 20px",cursor:"pointer"}}>
+                <button onClick={save} style={{background:"#a3282c",border:"none",borderRadius:4,color:"#fff",fontFamily:"Cinzel,serif",fontSize:12,padding:"8px 20px",cursor:"pointer"}}>
                   {atkModal.mode==="create"?"Adicionar":"Salvar"}
                 </button>
               </div>
@@ -9302,11 +9112,11 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
             })()}
             {onTogglePanel && (
               <button onClick={onTogglePanel} title={showPanel ? "Fechar histórico de dados" : "Histórico de dados da campanha"}
-                style={{flexShrink:0,background:showPanel?"rgba(124,58,237,0.18)":"none",
-                  border:showPanel?"1px solid rgba(124,58,237,0.5)":"1px solid transparent",
+                style={{flexShrink:0,background:showPanel?"rgba(163,40,44,0.18)":"none",
+                  border:showPanel?"1px solid rgba(163,40,44,0.5)":"1px solid transparent",
                   borderRadius:6,cursor:"pointer",
                   padding:"5px 8px",color:showPanel?"#a78bfa":"var(--muted2)",display:"flex",alignItems:"center",transition:"all 0.2s",margin:"4px 0 4px 4px"}}
-                onMouseEnter={e=>{ if(!showPanel){ e.currentTarget.style.color="#a78bfa"; e.currentTarget.style.background="rgba(124,58,237,0.1)"; }}}
+                onMouseEnter={e=>{ if(!showPanel){ e.currentTarget.style.color="#a78bfa"; e.currentTarget.style.background="rgba(163,40,44,0.1)"; }}}
                 onMouseLeave={e=>{ if(!showPanel){ e.currentTarget.style.color="var(--muted2)"; e.currentTarget.style.background="none"; }}}
               >
                 <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -9619,10 +9429,10 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                     style={{flex:1,fontSize:12,padding:"7px 10px"}}
                   />
                   <button onClick={openSkillModal}
-                    style={{padding:"7px 16px",background:"#7c3aed",border:"1px solid #7c3aed",borderRadius:6,cursor:"pointer",
+                    style={{padding:"7px 16px",background:"#a3282c",border:"1px solid #a3282c",borderRadius:6,cursor:"pointer",
                       fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:1,color:"#fff",whiteSpace:"nowrap",transition:"all 0.2s"}}
                     onMouseEnter={e=>e.currentTarget.style.background="#6d28d9"}
-                    onMouseLeave={e=>e.currentTarget.style.background="#7c3aed"}>
+                    onMouseLeave={e=>e.currentTarget.style.background="#a3282c"}>
                     + Adicionar
                   </button>
                 </div>
@@ -9642,7 +9452,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                         {/* Row header */}
                         <div onClick={()=>setOpenSkillId(open ? null : skill.id)}
                           style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px",cursor:"pointer",userSelect:"none"}}>
-                          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="#a3282c" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
                             style={{transition:"transform 0.2s",transform:open?"rotate(0deg)":"rotate(-90deg)",flexShrink:0}}>
                             <polyline points="6 9 12 15 18 9"/>
                           </svg>
@@ -9732,7 +9542,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                               <div key={r.id} style={{background:"var(--card2)",border:"1px solid rgba(122,95,212,0.2)",borderRadius:6,overflow:"hidden",marginBottom:3}}>
                                 <div onClick={()=>setOpenSkillId(open?null:`ritual_${r.id}`)}
                                   style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",cursor:"pointer",userSelect:"none"}}>
-                                  <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                                  <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="#a3282c" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
                                     style={{transition:"transform 0.2s",transform:open?"rotate(0deg)":"rotate(-90deg)",flexShrink:0}}>
                                     <polyline points="6 9 12 15 18 9"/>
                                   </svg>
@@ -9864,14 +9674,14 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
 ═══════════════════════════════ */
 const ROADMAP_STATUS = {
   done:    { dot:"#4caf50", badge:"Pronto",    bg:"rgba(76,175,80,0.1)",    color:"#7ecb82", border:"rgba(76,175,80,0.28)" },
-  planned: { dot:"#8e6dbf", badge:"Planejado", bg:"rgba(142,109,191,0.1)", color:"#c8a8f0", border:"rgba(142,109,191,0.28)" },
+  planned: { dot:"#5d7896", badge:"Planejado", bg:"rgba(93,120,150,0.1)", color:"#e0c9a0", border:"rgba(93,120,150,0.28)" },
   backlog: { dot:"#3d3554", badge:"Backlog",   bg:"rgba(50,45,70,0.5)",    color:"#6b6488", border:"rgba(80,72,108,0.3)" },
 };
 
 const PHASE_STATUS = {
   done:    { label:"Concluído",    color:"#7ecb82", bg:"rgba(76,175,80,0.08)",    border:"rgba(76,175,80,0.28)",    pulse:false },
   current: { label:"Em andamento", color:"#c9a84c", bg:"rgba(201,168,76,0.08)",  border:"rgba(201,168,76,0.35)",   pulse:true  },
-  future:  { label:"Futuro",       color:"#c8a8f0", bg:"rgba(142,109,191,0.08)", border:"rgba(142,109,191,0.28)",  pulse:false },
+  future:  { label:"Futuro",       color:"#e0c9a0", bg:"rgba(93,120,150,0.08)", border:"rgba(93,120,150,0.28)",  pulse:false },
 };
 
 function RoadmapItem({ item }) {
@@ -10039,7 +9849,7 @@ function RoadmapScreen() {
                 <div style={{
                   padding:"18px 24px 14px",
                   borderBottom:"1px solid var(--border)",
-                  background: fase.status === "done" ? "rgba(76,175,80,0.03)" : fase.status === "current" ? "rgba(201,168,76,0.03)" : "rgba(142,109,191,0.03)",
+                  background: fase.status === "done" ? "rgba(76,175,80,0.03)" : fase.status === "current" ? "rgba(201,168,76,0.03)" : "rgba(93,120,150,0.03)",
                 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:7 }}>
                     <span style={{ fontFamily:"Cinzel,serif", fontSize:8, letterSpacing:"0.18em", color:"var(--muted)", textTransform:"uppercase" }}>FASE {fase.fase}</span>
@@ -10331,7 +10141,13 @@ export default function App() {
       const saved = s ? JSON.parse(s) : null;
       // Um sistema que saiu do ar não pode ser retomado pelo cache — senão quem já
       // tinha entrado em D&D/Tormenta voltaria direto para lá, furando o "EM BREVE".
-      return saved && SYSTEMS.some(x => x.id === saved.id && x.available) ? saved : null;
+      const vivo = saved && SYSTEMS.find(x => x.id === saved.id && x.available);
+      /* O cache guarda o OBJETO do sistema, cores inclusive. Devolvê-lo cru fazia
+         a definição em código perder para uma cópia velha no navegador: na
+         repaginação de 2026-08-05 quem já tinha usado o app continuaria vendo o
+         acento roxo antigo, para sempre. A definição do repositório vence — só
+         o `id` vem do cache. */
+      return vivo ? { ...saved, ...vivo } : null;
     } catch { return null; }
   });
   const [screen, setScreen] = useState(() => localStorage.getItem('nexus_screen') || "dashboard");
@@ -10378,6 +10194,7 @@ export default function App() {
   useEffect(() => {
     // O repo não emite nada quando não há uid/campanha, então zerar é responsabilidade daqui.
     if (!currentUser?.uid) { liveSheetRefsRef.current = {}; return; }
+    if (DEMO_ON) { liveSheetRefsRef.current = {}; return; }   // demo: sem Firestore
     const camps = campaignsRef.current;
     if (!camps.length) return;
     return sharedSheetsRepo.watchLiveRefsByCharacter(
@@ -10391,6 +10208,10 @@ export default function App() {
   // Escuta plano em tempo real — ativa automaticamente após PIX pago
   useEffect(() => {
     if (!currentUser) { setUserPlans([]); return; }
+    /* Demo: o plano vem do módulo de demonstração. Assinante de propósito —
+       o ambiente de teste existe para percorrer o app, não para esbarrar na
+       cota do plano livre a cada clique. */
+    if (DEMO_ON) { setUserPlans(PLANOS_DEMO); return; }
     return usersRepo.watchSubscribedSystems(currentUser.uid, setUserPlans);
   }, [currentUser?.uid]);
 
@@ -10610,7 +10431,10 @@ export default function App() {
       );
     }
     switch(screen){
-      case "dashboard": return <Dashboard system={activeSystem} onCreateChar={()=>setCreatingChar(true)} characters={characters} sessions={sessions} onSelectChar={c=>{ setCreatedChar(c); setScreen("sheet"); }} onNav={setScreen} userPlans={userPlans} onShowUpgrade={()=>setScreen("planos")} campaignCount={campaigns.length}/>;
+      /* O Painel recebe as campanhas INTEIRAS (não só a contagem): ele mostra
+         capa, lotação e vagas abertas, e precisa do `uid` para saber em quais
+         mesas você é mestre e para contar mapas/mundos do preparo. */
+      case "dashboard": return <Painel system={activeSystem} uid={currentUser?.uid || ""} onCreateChar={()=>setCreatingChar(true)} characters={characters} sessions={sessions} campaigns={campaigns} onSelectChar={c=>{ setCreatedChar(c); setScreen("sheet"); }} onOpenCampaign={c=>{ setSelectedCampaign(c); setScreen("party"); }} onNav={setScreen} userPlans={userPlans} onShowUpgrade={()=>setScreen("planos")}/>;
       case "sheet":     return <SheetList characters={characters} system={activeSystem} onCreateChar={()=>setCreatingChar(true)} onSelectChar={c=>{ setCreatedChar(c); }} onDeleteChar={(c)=>{ deleteCharacter(c); if (createdChar && ((createdChar.id && createdChar.id===c.id) || (!createdChar.id && createdChar.createdAt===c.createdAt))) setCreatedChar(null); }} onUpdateChar={(c)=>saveCharacter(c)}/>;
       /* `plan` vem do MESMO mecanismo que o resto do app usa para cota:
          `userPlans` é o array `subscribedSystems` do doc do usuário, escutado
@@ -10649,7 +10473,7 @@ export default function App() {
           </>
         );
       }
-      default: return <Dashboard system={activeSystem} onCreateChar={()=>setCreatingChar(true)} characters={characters} sessions={sessions} onNav={setScreen} userPlans={userPlans} onShowUpgrade={()=>setScreen("planos")} campaignCount={campaigns.length}/>;
+      default: return <Painel system={activeSystem} uid={currentUser?.uid || ""} onCreateChar={()=>setCreatingChar(true)} characters={characters} sessions={sessions} campaigns={campaigns} onSelectChar={c=>{ setCreatedChar(c); setScreen("sheet"); }} onOpenCampaign={c=>{ setSelectedCampaign(c); setScreen("party"); }} onNav={setScreen} userPlans={userPlans} onShowUpgrade={()=>setScreen("planos")}/>;
     }
   };
 
@@ -10685,7 +10509,7 @@ export default function App() {
   return (
     <>
       <Shell/>
-      <Deco/>
+      <HeraldicAmbience/>
       {saveError && (
         <div role="alert" style={{position:"fixed", bottom:20, left:"50%", transform:"translateX(-50%)", zIndex:9000, background:"#2a1414", border:"1px solid rgba(224,112,112,0.5)", color:"#f0b0b0", borderRadius:8, padding:"10px 16px 10px 18px", fontSize:13, maxWidth:"90%", display:"flex", alignItems:"center", gap:12, boxShadow:"0 8px 30px rgba(0,0,0,0.42)"}}>
           <span>⚠ {saveError}</span>
