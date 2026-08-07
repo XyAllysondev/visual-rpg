@@ -230,10 +230,15 @@ export function pintarRastro(ctx, opcoes = {}) {
     return { pintou: false, faixas: 0 };
   }
 
+  /* A tinta do rastro é o dourado, salvo quando quem chama manda outra — é o
+     que a rota bicolor da 0035 faz para o trecho percorrido sair no acento do
+     tema. Sem `rgb`, nada muda para quem já chamava. */
+  const rgb = typeof opcoes.rgb === "string" && opcoes.rgb.trim() ? opcoes.rgb : RASTRO_RGB;
+
   /* 1 · O caminho inteiro, apagado: a memória de onde o grupo veio. */
   pintarPercurso(ctx, {
     pontos, pan: opcoes.pan, scale: opcoes.scale,
-    cor: `rgba(${RASTRO_RGB},${ALFA_DA_MEMORIA})`,
+    cor: `rgba(${rgb},${ALFA_DA_MEMORIA})`,
   });
 
   /* 2 · A cauda, em faixas que acendem até o marcador. */
@@ -262,7 +267,7 @@ export function pintarRastro(ctx, opcoes = {}) {
     const ate = Math.min(cauda.length - 1, Math.round((f + 1) * porFaixa));
     if (ate <= de) continue;
 
-    ctx.strokeStyle = `rgba(${RASTRO_RGB},${alfa.toFixed(3)})`;
+    ctx.strokeStyle = `rgba(${rgb},${alfa.toFixed(3)})`;
     ctx.lineWidth = largura * (0.72 + 0.28 * t);
     ctx.beginPath();
     ctx.moveTo(cauda[de].x * s + px, cauda[de].y * s + py);
@@ -274,6 +279,102 @@ export function pintarRastro(ctx, opcoes = {}) {
   ctx.restore?.();
 
   return { pintou: true, faixas };
+}
+
+/* ════════════════════════════════════════════════════════════════════
+ *  A ROTA BICOLOR  (spec 0035 · F1 · AC-1)
+ *  --------------------------------------------------------------------
+ *  Durante a viagem a trilha deixa de ser um traço só: o que o grupo já andou
+ *  sai no acento do tema, o que falta sai no dourado da trilha. O marcador
+ *  fica na junção, e por isso a rota responde de relance a duas perguntas que
+ *  antes exigiam contar o rastro — "de onde eu vim" e "quanto falta".
+ *
+ *  As duas metades vêm de `partirNoProgresso` (`model/curves.js`), que corta
+ *  por comprimento de arco e devolve o ponto de corte nas DUAS listas. Não
+ *  há dois cortes a divergir, e por isso não existe vão sob o marcador.
+ *
+ *  A ORDEM DA PINTURA IMPORTA: o restante primeiro, o percorrido por cima.
+ *  Elas se encostam no ponto de corte, e a que chega depois manda no pixel
+ *  compartilhado — que é onde o marcador está.
+ * ══════════════════════════════════════════════════════════════════ */
+
+/** Dourado do trecho que falta andar — o mesmo da trilha normal do editor. */
+export const COR_DA_ROTA_RESTANTE = "rgba(214,196,150,0.72)";
+
+/** Acento de reserva, quando o tema não puder ser lido (SSR, teste, canvas solto). */
+export const RGB_DO_PERCORRIDO_RESERVA = "176,48,216";
+
+/**
+ * Os três canais de uma cor CSS, no formato `"r,g,b"` que o rastro espera.
+ *
+ * O canvas 2D não resolve `var(--…)`, então o acento chega aqui já resolvido
+ * pelo `getComputedStyle` — mas resolvido pode ser `#c9a84c` ou
+ * `rgb(201, 168, 76)`, dependendo do navegador. Os dois entram; o que não for
+ * reconhecido cai na reserva, porque uma trilha invisível é pior que uma
+ * trilha da cor errada.
+ *
+ * @param {string} cor
+ * @returns {string} `"r,g,b"`
+ */
+export function rgbDeCor(cor) {
+  const texto = typeof cor === "string" ? cor.trim() : "";
+  if (!texto) return RGB_DO_PERCORRIDO_RESERVA;
+
+  const hex = texto.replace(/^#/, "");
+  if (/^[0-9a-f]{3}$/i.test(hex)) {
+    const [r, g, b] = hex.split("");
+    return `${parseInt(r + r, 16)},${parseInt(g + g, 16)},${parseInt(b + b, 16)}`;
+  }
+  if (/^[0-9a-f]{6}$/i.test(hex)) {
+    return `${parseInt(hex.slice(0, 2), 16)},${parseInt(hex.slice(2, 4), 16)},${parseInt(hex.slice(4, 6), 16)}`;
+  }
+
+  const m = texto.match(/rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i);
+  if (m) return `${Math.round(+m[1])},${Math.round(+m[2])},${Math.round(+m[3])}`;
+
+  return RGB_DO_PERCORRIDO_RESERVA;
+}
+
+/**
+ * Pinta a rota da viagem em duas cores.
+ *
+ * Delega o trecho percorrido a `pintarRastro` — não repete a matemática das
+ * faixas —, só trocando a tinta pelo acento. O desvanecimento continua ali:
+ * memória fraca atrás, ponta acesa junto do marcador.
+ *
+ * @param {CanvasRenderingContext2D|null} ctx `null` é no-op (jsdom).
+ * @param {object} opcoes
+ * @param {Array<{x:number,y:number}>} [opcoes.percorrido]
+ * @param {Array<{x:number,y:number}>} [opcoes.restante]
+ * @param {{x:number,y:number}} [opcoes.pan]
+ * @param {number} [opcoes.scale]
+ * @param {string} [opcoes.corDoPercorrido] acento do tema, já resolvido.
+ * @returns {{pintou:boolean, pintouRestante:boolean, pintouPercorrido:boolean}}
+ *   o que o teste inspeciona sem precisar de pixels.
+ */
+export function pintarRotaBicolor(ctx, opcoes = {}) {
+  const percorrido = lista(opcoes.percorrido).filter(ehPonto);
+  const restante = lista(opcoes.restante).filter(ehPonto);
+  const nada = { pintou: false, pintouRestante: false, pintouPercorrido: false };
+  if (!ctx || typeof ctx.beginPath !== "function") return nada;
+
+  /* 1 · O que falta, no dourado da trilha. Vai primeiro: o percorrido cobre
+     o pixel do corte, e o corte é onde o marcador está. */
+  const pintouRestante = restante.length >= 2 && pintarPercurso(ctx, {
+    pontos: restante, pan: opcoes.pan, scale: opcoes.scale, cor: COR_DA_ROTA_RESTANTE,
+  }).pintou;
+
+  /* 2 · O que já foi andado, no acento — com o desvanecimento do movimento 4. */
+  const pintouPercorrido = pintarRastro(ctx, {
+    pontos: percorrido, pan: opcoes.pan, scale: opcoes.scale,
+    rgb: rgbDeCor(opcoes.corDoPercorrido),
+  }).pintou;
+
+  return {
+    pintou: !!pintouRestante || !!pintouPercorrido,
+    pintouRestante: !!pintouRestante,
+    pintouPercorrido: !!pintouPercorrido,
+  };
 }
 
 /* O dourado cheio continua sendo o de `mesaUi` — reexportado para quem só

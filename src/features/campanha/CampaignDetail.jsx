@@ -105,9 +105,15 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
 
   /* ── Live-sync: always push character changes to sharedSheets regardless of active tab ── */
   const liveSheetsRef = useRef([]);
+  /* A lista INTEIRA, para o mapa-múndi tirar dela a melhor Furtividade da mesa
+     (spec 0035 · M6 · ADR-0012). O `liveSheetsRef` acima não serve: ele já vem
+     filtrado pelo dono, e a esquiva é do GRUPO. Uma assinatura só alimenta as
+     duas coisas — abrir uma segunda seria pagar duas vezes pelo mesmo snapshot. */
+  const [fichasDaCampanha, setFichasDaCampanha] = useState([]);
   useEffect(() => {
     return sharedSheetsRepo.watchByCampaign(campaign.id, list => {
       liveSheetsRef.current = list.filter(s => s.ownerId === uid && s.isLive);
+      setFichasDaCampanha(Array.isArray(list) ? list : []);
     });
   }, [campaign.id, uid]);
 
@@ -344,7 +350,7 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
         {activeTab==="sheets"   && <SharedSheetsPanel campaignId={campaign.id} uid={uid} userName={userName} isMaster={isMaster} characters={characters}/>}
         {activeTab==="rolls"    && <RollFeed campaignId={campaign.id} uid={uid}/>}
         {activeTab==="members"  && <MembersPanel campaign={campaign} uid={uid} isMaster={isMaster}/>}
-        {activeTab==="map"      && <CampaignMapTab campaignId={campaign.id} uid={uid} isMaster={isMaster}/>}
+        {activeTab==="map"      && <CampaignMapTab campaignId={campaign.id} uid={uid} isMaster={isMaster} fichasCompartilhadas={fichasDaCampanha}/>}
         {activeTab==="mestre"   && isMaster && <MestrePanel campaign={campaign} uid={uid} userName={userName} userPhoto={userPhoto}/>}
         {activeTab==="bestiary" && isMaster && <BestiaryTab campaignId={campaign.id}/>}
         {activeTab==="settings" && (isMaster||isAdmin) && <MasterSettings campaign={campaign} onBack={onBack} isMaster={isMaster}/>}

@@ -80,6 +80,75 @@ export function MesaStyles() {
                 text-shadow:0 1px 3px rgba(0,0,0,.92), 0 0 8px rgba(0,0,0,.75); }
 
   /* ════════════════════════════════════════════════════════════════════
+   *  A MOLDURA DO ARTEFATO  (spec 0035 · F1 · M7)
+   *  ------------------------------------------------------------------
+   *  O mapa da referência não é uma tela: é um objeto sobre a mesa, com
+   *  borda e sombra própria. Duas camadas dão isso quase de graça:
+   *
+   *   a) a VINHETA — escurece as quatro bordas por dentro, empurrando o
+   *      olho para o meio. É o que faz o palco parecer iluminado por
+   *      lampião em vez de por retroiluminação;
+   *   b) o FILETE — uma linha dourada fina rente à borda, que dá o
+   *      acabamento de peça encadernada.
+   *
+   *  Ambas vivem num ::after do palco, com pointer-events:none, ACIMA de
+   *  tudo e sem tocar em nada. Não entram na conta de contraste do rótulo
+   *  (que já tem a própria placa) porque só ESCURECEM, nunca clareiam.
+   *
+   *  Sem animação nenhuma aqui, de propósito: moldura que respira vira
+   *  distração numa tela que o mestre olha por horas.
+   * ════════════════════════════════════════════════════════════════════ */
+  .wmm-palco::after {
+    content:""; position:absolute; inset:0; pointer-events:none; z-index:6;
+    box-shadow:
+      inset 0 0 0 1px rgba(201,168,76,.20),
+      inset 0 0 2px 1px rgba(0,0,0,.55),
+      inset 0 0 90px 26px rgba(6,5,12,.62),
+      inset 0 0 190px 62px rgba(6,5,12,.42);
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+   *  A BARRA DO CARTÓGRAFO  (spec 0035 · F2 · M4)
+   *  ------------------------------------------------------------------
+   *  Lugar à esquerda, mostrador de dia/noite no meio, relógio à direita.
+   *  Fica ACIMA da vinheta (z-index 7) porque é informação, não cenário:
+   *  escurecer o texto do topo seria escurecer justamente o que se lê de
+   *  relance. E não mora na camada da câmera — não some com o zoom.
+   * ════════════════════════════════════════════════════════════════════ */
+  .wmm-cartografo {
+    position:absolute; top:0; left:0; right:0; z-index:7;
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    padding:7px 14px; pointer-events:none;
+    color:#efe6cf;
+    background:linear-gradient(180deg, rgba(10,9,16,.86) 0%, rgba(10,9,16,.58) 62%, rgba(10,9,16,0) 100%);
+    text-shadow:0 1px 3px rgba(0,0,0,.9);
+  }
+  .wmm-cartografo-lugar { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .wmm-cartografo-hora  { color:#d8cba6; white-space:nowrap; }
+
+  /* O mostrador: um disco com o astro girando pela hora do dia. O corpo fica
+     no topo do disco e o giro vem do contêiner — um transform só resolve as
+     24 horas. */
+  .wmm-mostrador {
+    position:relative; flex:none; width:26px; height:26px; border-radius:50%;
+    border:1px solid rgba(201,168,76,.34);
+    background:radial-gradient(circle at 50% 62%, rgba(30,26,48,.9), rgba(9,8,16,.92));
+    box-shadow:inset 0 0 8px rgba(0,0,0,.7);
+  }
+  .wmm-astro { position:absolute; inset:0; transform-origin:50% 50%; }
+  .wmm-astro[data-anima="sim"] { transition:transform 900ms cubic-bezier(.4,0,.2,1); }
+  .wmm-astro-corpo {
+    position:absolute; top:2.5px; left:50%; width:7px; height:7px;
+    margin-left:-3.5px; border-radius:50%;
+  }
+  .wmm-mostrador[data-astro="sol"] .wmm-astro-corpo {
+    background:#f2c85c; box-shadow:0 0 7px 2px rgba(242,200,92,.55);
+  }
+  .wmm-mostrador[data-astro="lua"] .wmm-astro-corpo {
+    background:#cdd6ee; box-shadow:0 0 7px 2px rgba(205,214,238,.42);
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
    *  MOVIMENTO 2 · A REVELAÇÃO  (~600 ms, ease-out)
    *  ------------------------------------------------------------------
    *  *"É o momento de recompensa da mecânica inteira — é aqui que vale
@@ -193,6 +262,32 @@ export function MesaStyles() {
   .wmm-painel { animation:wmm-painel-in 200ms cubic-bezier(.16,1,.3,1) both; }
   @keyframes wmm-painel-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
 
+  /* ════════════════════════════════════════════════════════════════════
+   *  O CARTÃO DE PERGAMINHO  (spec 0035 · F3 · M5)
+   *  ------------------------------------------------------------------
+   *  O cartão é um PORTAL em 'document.body' — fora do '.wmm-palco'. O
+   *  interruptor dos cinco movimentos não o alcança por descendência, e o
+   *  corte de movimento tem de vir por DOIS caminhos:
+   *
+   *   a) 'data-anima="nao"' NO PRÓPRIO cartão, encaminhado pela mesa a
+   *      partir do mesmo 'useAnimacaoAtiva' que governa o palco;
+   *   b) o '@media(prefers-reduced-motion:reduce)' lá embaixo, que pega o
+   *      caso de a preferência mudar com o cartão já aberto.
+   *
+   *  A entrada é curta e sem deslocamento lateral: papel que desliza pela
+   *  tela vira truque de apresentação. Ele ASSENTA, só isso.
+   * ════════════════════════════════════════════════════════════════════ */
+  @keyframes wmm-assentar { from{opacity:0;transform:translateY(10px) scale(.985)} to{opacity:1;transform:none} }
+  .wmm-pergaminho { animation:wmm-assentar 240ms cubic-bezier(.16,1,.3,1) both; }
+  .wmm-pergaminho[data-anima="nao"] { animation:none; }
+
+  /* O botão do cartão é um SELO, não um botão de app: o hover FECHA a tinta
+     em vez de clarear — clarear sobre pergaminho apaga o texto. */
+  .wmm-selo { transition:background .15s ease, border-color .15s ease; touch-action:manipulation; }
+  .wmm-selo:hover:not(:disabled) { background:rgba(138,111,60,.30); }
+  .wmm-selo:focus-visible { outline:2px solid rgba(61,47,24,.92); outline-offset:2px; }
+  .wmm-selo:disabled { opacity:.45; cursor:not-allowed; }
+
   /* ── A COLUNA DO PAINEL ROLA SOZINHA ─────────────────────────────────
      O scroll saiu do pai comum (que levava o mapa embora ao rolar) e veio
      para cá. A barra é fina e discreta — mas EXISTE: sem ela o mestre não
@@ -230,6 +325,9 @@ export function MesaStyles() {
     /* AC-11: 'prefers-reduced-motion' corta a deriva, o respiro E A TINTA. */
     .wmm-tinta { display:none; }
     .wmm-painel { animation:none; }
+    /* O cartão de pergaminho é portal: só a media query o alcança daqui. */
+    .wmm-pergaminho { animation:none; }
+    .wmm-selo { transition:none; }
   }
     `}</style>
   );

@@ -10,9 +10,133 @@ alwaysApply: true
 > todo. Diferente do **ADR** (decisão durável e imutável). Decisão estrutural → ADR; estado do
 > trabalho → aqui. Atualize ao **pausar/encerrar**; leia ao **retomar**. Use a skill `/handoff`.
 
-**Última atualização:** 2026-08-02 — DUAS SESSÕES em paralelo: SPEC 0033 (progressão automática
-de OP) e as SPECS 0029/0030/0031/0032 (arquitetura em camadas, **as quatro ENTREGUES**).
-Gate final: **89 suítes / 2.196 testes verdes**, `npm run build` exit 0.
+**Última atualização:** 2026-08-05 — **SPEC 0035 (Cartografia Viva) FECHADA: F1, F2 e F3.**
+Gate final: **103 suítes / 2.460 testes verdes** com `--runInBand`, `npm run build` exit 0,
+`git diff src/components/MapEditor/` vazio. **Nada foi commitado.**
+
+> **2026-08-05 (3): SPEC 0035 — M8 (fecha a F2) + F3 INTEIRA (M5 e M6).**
+> Partida em 100 suítes / 2.399 testes; chegada em **103 / 2.460** (+3 suítes, +61 testes).
+> **Nenhuma suíte legada foi editada** — o AC-9 chama isso de regressão, não de progresso.
+>
+> - **M8 · A carta ganhou mão.** `model/CartografiaPadrao.jsx` foi de 23,7 KB para **39,8 KB**
+>   (teto do AC-11: 60 KB, medido por `fs.statSync` no gate). Três hachuras com **gramáticas
+>   diferentes de propósito** — relevo perpendicular à crista e caindo pelo lado que desce, mata em
+>   pares inclinados sob as copas, água em fiadas horizontais interrompidas. Iguais, o olho leria
+>   "textura de preenchimento"; diferentes, ele lê "relevo, mata, água". A rosa dos ventos chapada
+>   virou pipas partidas ao meio (um lado em tinta cheia, o outro num `<pattern>` de trama), com 32
+>   rumos e **N/L/S/O** — Leste com E seria anglicismo dentro de um objeto de ficção em português.
+>   E cinco anotações em cursiva nas margens, na mão de quem USOU a carta, nunca sobre o miolo onde
+>   os doze nós moram (x 300–2130, y 200–1330) — ali brigariam com os rótulos dos lugares.
+> - **M5 · O cartão de pergaminho.** Casca única (`Mesa/CartaoDePergaminho.jsx`) com portal,
+>   armadilha de foco, Esc, título em versalete, filete duplo e UM botão. Dois consumidores: o
+>   cartão de descoberta e o `PainelDeEncontro`, cujo **comportamento não mudou uma vírgula** (os
+>   `data-testid` legados e a regra "Esc adia, nunca decide" seguem intactos; as quatro suítes que o
+>   exercitam passaram sem edição).
+> - **⚠ O CARTÃO PROJETA MESMO RECEBENDO PROJEÇÃO.** No cliente do jogador `grafoVisivel` já é a
+>   projeção; no do MESTRE ele pode carregar o nó do MOLDE, com `gmNotes`. Passar por `projecaoDoNo`
+>   é o que garante que nenhum campo de mestre chegue ao DOM — e o gate entrega um nó com todos os
+>   `CAMPOS_VENENOSOS` preenchidos com valores procuráveis e varre o DOM serializado **incluindo
+>   `document.body`**, senão o portal escaparia da varredura e o verde seria falso.
+> - **⚠ O TESTE DE CONTRASTE PEGOU UM DEFEITO MEU, E DEPOIS UMA PREMISSA MINHA.** Primeiro: o título
+>   estava mais CLARO que o corpo e caía a 4,42:1 — além de reprovar no piso, estava errado de
+>   desenho, porque num impresso o cabeçalho é onde a pena carrega mais. Depois: exigir 4,5:1 com as
+>   quatro tintas do dia compostas sobre o papel é **impossível por construção** (a tinta da
+>   madrugada é escura, e escurecer o fundo o aproxima do texto — nenhum ajuste de cor resolve). A
+>   premissa é que estava errada: o cartão é portal em `document.body`, `position:fixed`, z-index
+>   430 — acima da vinheta (6) e da barra do cartógrafo (7), **fora do palco** onde `.wmm-tinta`
+>   vive. O teste passou a travar a PREMISSA em vez de medir uma composição que não acontece.
+> - **M6 · A esquiva.** `model/esquiva.js` é clone estrutural de `descoberta.js`: **não rola dado**
+>   (o motor é `src/domain/dice.js`, AC-9 literal) e a saída do fracasso é idêntica caractere a
+>   caractere à de uma rolagem que não veio. `DT_POR_PERIGO` é tabela explícita (12/15/19/22/25),
+>   não fórmula: entre perigo 2 e 3 está a fronteira "estrada ruim → lugar errado", e uma fórmula
+>   esconderia essa intenção atrás de dois números. **O sucesso sai por `return`**, exatamente como
+>   "não houve sorteio" — sem pendência, sem pausa, sem documento. Marca de encontro que não
+>   aconteceu é oráculo.
+> - **⚠ ISTO EXIGIU UM ADR, E O BRIEFING MANDAVA PARAR ANTES DE CODAR.** O mapa-múndi só tocava
+>   `fogRepo`, `mesaRepo` e `worldMapsRepo`; ler Furtividade é **acoplamento novo entre agregados**.
+>   Virou o **[ADR-0012](architecture/adr/0012-mapa-mundi-le-fichas-compartilhadas.md)**: a leitura
+>   continua no repositório (`sharedSheetsRepo`), o mapa **não** abre listener de ficha (elas entram
+>   por prop), e a conta mora numa porta pura — `melhorFurtividade(fichas) → number|null`.
+> - **A fórmula da perícia foi LIDA, não inventada:** `skillTreino[p] + skillOutros[p]`
+>   (`OrdemParanormalSheet.jsx:429-435`). O atributo **não** entra — em OP ele decide quantos d20 o
+>   `rollOP` lança, não um modificador plano; somá-lo contaria o atributo duas vezes.
+> - **Sem ficha compartilhada, nada mudou** (AC-13): `melhorFurtividade` devolve `null`, e `null` é
+>   a instrução para o campo manual continuar na tela. Não é modo degradado — é o mesmo caminho de
+>   antes. E zero **não** é ausência: destreinado é um bônus legítimo, e confundir os dois faria uma
+>   campanha sem ficha parecer uma campanha com um personagem péssimo.
+> - **⚠ `CI=true npm run build` REPROVA, e não é por causa desta spec.** Com `CI=true` os avisos
+>   viram erro, e há avisos **pré-existentes** em `App.jsx`, `DungeonsAndDragonsSheet.jsx`,
+>   `OrdemParanormalSheet.jsx`, `Editor/CamadaDeNevoa.jsx` e `model/viagem.js`. `npm run build` sai
+>   0, e **nenhum arquivo tocado aqui produz aviso**. Limpar os outros é escopo de outra spec.
+> - **A casca do app ficou ligada, com UMA assinatura.** O `CampaignDetail` já observava
+>   `sharedSheetsRepo.watchByCampaign` para o live-sync, mas guardava o resultado num ref **filtrado
+>   pelo dono** — e a esquiva é do GRUPO. A lista inteira passou a cair também num `useState`, que
+>   desce por `CampaignMapTab` até a mesa. Abrir uma segunda assinatura seria pagar duas vezes pelo
+>   mesmo snapshot; o caminho do live-sync ficou intocado.
+> - **PRÓXIMO PASSO — PENDENTE DO ANDRE:** validar no navegador e **commitar**. Nada foi commitado
+>   em nenhuma das três sessões desta spec — são ~10 arquivos novos e ~10 tocados.
+
+> **2026-08-05 (2): SPEC 0035 — F2 (runas autorais + barra do cartógrafo).**
+> - **M3 · As runas.** `model/marcadores.jsx` novo: seis runas SVG (vila, masmorra, marco,
+>   acampamento, missão, segredo) em traço, no dialeto do `RuneIco` — **sem importar o `RuneIco`**,
+>   que mora na casca do app (`src/ui/`) e está fora da fronteira do mapa-múndi. Emoji saiu do
+>   padrão dos dois palcos (ateliê e mesa).
+>   **`ICONES_POR_TIPO` e `iconeDoNo` ficaram INTOCADOS de propósito:** `editor-modelo.test.js:337-340`
+>   trava `iconeDoNo({type:"town"})` com `.toBe("🏘️")`, e o AC-9 proíbe editar suíte legada. A runa
+>   entrou como camada nova por cima — o ícone que o MESTRE escolhe continua mandando, e o nó
+>   `rumored` continua mostrando só "?" (se ganhasse runa, o desenho entregaria o tipo do lugar que
+>   o jogador não pode conhecer).
+> - **M4 · Barra do cartógrafo.** `Mesa/BarraDoCartografo.jsx` novo: lugar à esquerda, mostrador de
+>   dia/noite girando pela hora ao centro, relógio à direita. Fica FORA da camada da câmera (não
+>   encolhe com o zoom) e ACIMA da vinheta (informação, não cenário).
+> - **⚠ O PLANO DIZIA "DATA GREGORIANA EM PT-BR". O DADO DESMENTIU O PLANO, E O DADO GANHOU.**
+>   `party.inGameDatetime` é `{dia,hora,minuto}` ou número de horas corridas — **contador de dias de
+>   campanha, não data de calendário**. Formatar como "05/08/2026" seria inventar ficção que o Nexus
+>   não tem. Reusei `formatarRelogio` ("Dia 3 · 14:05") e `periodoDoDia`, que já existiam — uma fonte
+>   só, sem tabela paralela de limites de hora. Sem relógio (`null`), a barra esconde mostrador e
+>   hora em vez de inventar data (ADR-0011).
+> - **ARMADILHA:** não existe `src/setupTests.js` neste projeto — **cada suíte de render importa
+>   `@testing-library/jest-dom` por conta própria**. Sem isso, `toHaveTextContent` e
+>   `toHaveAttribute` falham com "is not a function", que foi como 8 testes meus caíram.
+> - **M8 NÃO FOI FEITO** — a `CartografiaPadrao.jsx` (hachura de terreno, rosa dos ventos em tinta,
+>   anotações manuscritas) segue como escopo aberto da F2, junto da F3 inteira (cartão de
+>   pergaminho e esquiva do encontro por teste de Furtividade).
+> - **PENDENTE DO ANDRE:** validar no navegador e commitar. **NADA foi commitado** nas duas fases.
+
+> **2026-08-05: SPEC 0035 — CARTOGRAFIA VIVA, F1 (rota bicolor + franja de tinta + moldura).**
+> Andre gravou 48 s de *Pathfinder: WotR* e pediu o mapa-múndi "nesse nível". Achado que definiu o
+> escopo: **a spec 0028 JÁ declarava o WotR como referência** (`0028/spec.md:11`) e a mecânica toda
+> está entregue — viagem em velocidade constante na curva, relógio que avança, encontro por
+> `dangerLevel` com peso por período, névoa em cápsula, acampamento. **A distância era quase toda de
+> direção de arte.** Das 11 diferenças levantadas frame a frame, 9 são arte e 2 são mecânica.
+> - **M1 · Rota bicolor.** `partirNoProgresso(pontos, t)` novo em `model/curves.js` (corte por
+>   comprimento de arco, ponto **interpolado** dentro do segmento) e `trechoRestante` em
+>   `model/viagem.js`, irmão de `trechoPercorrido`. **As duas metades compartilham o ponto de corte**
+>   — é o que evita vão de meio pixel bem embaixo do marcador, que é onde o olho está.
+>   `pintarRotaBicolor` em `Mesa/animacaoUi.js` pinta o restante em dourado e **delega o percorrido
+>   ao `pintarRastro`**, só trocando a tinta pelo acento (parâmetro `rgb` novo, opcional) — sem
+>   reimplementar as faixas de desvanecimento e sem deixar código morto.
+> - **M2 · Franja de tinta.** `model/franja.js` novo: `contornoDaMascara` devolve só a casca
+>   (4-vizinhança; **o lado de fora da grade conta como coberto**, senão a névoa na margem terminaria
+>   sem contorno) e `tracosDaFranja` gera os riscos de pena. **A semente sai da POSIÇÃO da célula, não
+>   do índice na lista** — sem isso a franja inteira se redesenharia a cada revelação e a borda antiga
+>   piscaria. Cache por `mascara.revisao` no `CamadaDeNevoa`: varrer 240 000 células por quadro
+>   derrubaria a mesa. `celulaAcesa` foi promovida a export do `fogMask` para o layout do bit
+>   (`cy*colunas+cx`) continuar morando num lugar só.
+> - **M7 · Moldura.** Vinheta + filete dourado em `.wmm-palco::after`. Só escurece, nunca clareia —
+>   por isso não mexe nas medições de contraste do `f7-anim-tinta`.
+> - **UM TESTE MEU PEGOU UMA IMPRECISÃO MINHA:** a asserção do desvio lateral media a distância crua
+>   do meio do traço ao centro da célula, misturando o desvio lateral com a assimetria deliberada do
+>   traço (0,35 para dentro, 0,65 para fora — pena que marca fronteira morde para fora). Corrigida
+>   para projetar na perpendicular, e ganhou uma irmã que trava a assimetria.
+> - **ARMADILHA CONFIRMADA:** o canvas 2D não resolve `var(--…)`. O acento chega resolvido por
+>   `getComputedStyle`, mas resolvido pode ser `#c9a84c` **ou** `rgb(201, 168, 76)` conforme o
+>   navegador — daí `rgbDeCor` aceitar os dois e cair numa reserva em vez de devolver cor inválida.
+> - **PENDENTE DO ANDRE:** validar no navegador (viajar por uma trilha longa e conferir a rota
+>   bicolor e a franja acompanhando a névoa) e commitar. **NADA foi commitado.**
+> - **F2 e F3 NÃO foram iniciadas** — placas de local, runas autorais, barra do cartógrafo,
+>   cartão de pergaminho e esquiva do encontro por Furtividade seguem como escopo aberto na
+>   `specs/0035-cartografia-viva/tasks.md`.
 
 > **2026-08-02: AS TRÊS ONDAS DE ARQUITETURA ESTÃO FECHADAS.** Ponto de partida: `App.jsx` com
 > 11.454 linhas, 63 chamadas diretas ao Firestore e o SDK importado em 17 arquivos.

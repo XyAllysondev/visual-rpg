@@ -41,8 +41,10 @@ import { ICONES_POR_TIPO, ZOOM_PARA_ROTULO } from "../Editor/TelaDoMapa";
 import CamadaDeNevoa, { COR_DA_NEVOA } from "../Editor/CamadaDeNevoa";
 import { useAnimacaoAtiva } from "../Editor/animacao";
 import { nomeNaMesa, rotuloNaMesa } from "./mesaUi";
-import { inclinacaoDoMarcador, pintarRastro } from "./animacaoUi";
+import { inclinacaoDoMarcador, pintarRotaBicolor } from "./animacaoUi";
 import TintaDoDia from "./TintaDoDia";
+import BarraDoCartografo from "./BarraDoCartografo";
+import RunaDoLugar from "../model/marcadores";
 import { FF, FS, FW, R, SP, T } from "../Atelier/ui";
 
 /** Diâmetro do disco do nó em px de TELA — não encolhe com o zoom. */
@@ -93,6 +95,14 @@ function LugarNaMesa({ no, escala, aqui, destino, selecionado, recemRevelado, an
      gastar: com `prefers-reduced-motion`, ou fora do viewport, o lugar
      simplesmente aparece — o "corte seco" que o AC-11 pede. */
   const celebrar = recemRevelado && anima;
+
+  /* A marca do lugar (spec 0035 · M3). O ícone ESCOLHIDO pelo mestre continua
+     mandando, e o rumor continua sendo "?" — os dois saem de `iconeNaMesa`,
+     como sempre. Só o padrão de cada tipo deixou de ser emoji e virou runa. */
+  const temIconeProprio = typeof no.icon === "string" && no.icon.trim() !== "";
+  const marca = (rumor || temIconeProprio)
+    ? iconeNaMesa(no)
+    : <RunaDoLugar tipo={no.type} />;
 
   return (
     <div
@@ -240,7 +250,7 @@ function LugarNaMesa({ no, escala, aqui, destino, selecionado, recemRevelado, an
               : "0 3px 10px rgba(0,0,0,.62)",
           }}
         >
-          {iconeNaMesa(no)}
+          {marca}
         </span>
 
         {mostrarRotulo ? (
@@ -339,6 +349,8 @@ function MarcadorDoGrupo({ posicao, escala, viajando, ondeEsta, tombo = 0 }) {
  * @param {Array} props.destinos saída de `destinosPossiveis`.
  * @param {{x:number,y:number}|null} props.marcador posição do grupo.
  * @param {Array} [props.rastro] trecho já percorrido nesta viagem.
+ * @param {Array} [props.rotaRestante] trecho que falta andar — a outra metade
+ *   da rota bicolor (spec 0035 · AC-1). Vazio fora de viagem.
  * @param {boolean} [props.viajando]
  * @param {string|null} [props.selecionadoId]
  * @param {string[]} [props.recemRevelados] ids que acabaram de acender.
@@ -363,6 +375,7 @@ export default function TelaDaMesa({
   destinos = [],
   marcador = null,
   rastro = [],
+  rotaRestante = [],
   viajando = false,
   selecionadoId = null,
   recemRevelados = [],
@@ -449,17 +462,23 @@ export default function TelaDaMesa({
     let ctx = null;
     try { ctx = canvas.getContext ? canvas.getContext("2d") : null; } catch { ctx = null; }
 
+    const acento = lerAcento(palcoRef.current);
+
     pintarMapa(ctx, {
       largura, altura: alturaPx, dpr, pan, scale, nos, trilhas,
       imagem: imagemFundo, mundo,
-      corDeAcento: lerAcento(palcoRef.current),
+      corDeAcento: acento,
     });
-    /* O rastro vai POR CIMA das trilhas — é o que o grupo já andou nesta
-       viagem, e some quando ela termina (quem o guarda é a Mesa). Desvanece
-       do começo para a ponta (movimento 4): a memória do caminho fica fraca,
-       a cauda acesa puxa o olho até o marcador. */
-    pintarRastro(ctx, { pontos: rastro, pan, scale });
-  }, [nos, trilhas, pan, scale, tamanho, imagemFundo, mundo, rastro]);
+    /* A rota vai POR CIMA das trilhas — é a viagem desta sessão, e some quando
+       ela termina (quem a guarda é a Mesa). Em duas cores (spec 0035 · AC-1):
+       o que falta andar no dourado da trilha, o que já foi andado no acento do
+       tema, ainda com o desvanecimento do movimento 4 — a memória do caminho
+       fica fraca e a cauda acesa puxa o olho até o marcador, que está exatamente
+       no ponto onde as duas metades se encostam. */
+    pintarRotaBicolor(ctx, {
+      percorrido: rastro, restante: rotaRestante, pan, scale, corDoPercorrido: acento,
+    });
+  }, [nos, trilhas, pan, scale, tamanho, imagemFundo, mundo, rastro, rotaRestante]);
 
   /* ── MOVIMENTO 4 · para que lado o grupo está indo ─────────────────── */
   const tombo = useMemo(
@@ -552,6 +571,15 @@ export default function TelaDaMesa({
           Entre a ilustração e a névoa, e ABAIXO dos nós: nenhum ícone e
           nenhum rótulo é tingido, em período nenhum. Ver `TintaDoDia.jsx`. */}
       <TintaDoDia relogio={relogio} ligada={tintaLigada} />
+
+      {/* A barra do cartógrafo fica FORA da camada da câmera: onde o grupo
+          está e que horas são não encolhem com o zoom (spec 0035 · M4). */}
+      <BarraDoCartografo
+        ondeEsta={ondeEsta}
+        relogio={relogio}
+        viajando={viajando}
+        anima={animando}
+      />
 
       {/* ── Camada 2 · névoa ──────────────────────────────────────────── */}
       {nevoa ? (

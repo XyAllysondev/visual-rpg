@@ -29,7 +29,27 @@
  * — duas renderizações desenham exatamente a mesma carta.
  *
  * MOVIMENTO: só a maré respira, e apenas quando `prefers-reduced-motion` permite
- * (AC-11). Nada mais anima.
+ * (AC-11 da 0028). Nada mais anima — a hachura, a rosa e as anotações da 0035
+ * são desenho parado.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * A CARTA EVOLUÍDA (spec 0035 · F2 · M8 · AC-11)
+ *
+ * A versão da 0028 tinha a geografia certa e a MÃO errada: contorno sem
+ * superfície, rosa dos ventos chapada como ícone, e nenhum sinal de que alguém
+ * já tivesse usado o papel. Três camadas fecham a distância, todas em vetor:
+ *
+ *  1. **Hachura de terreno** — relevo, mata e água, com gramáticas distintas
+ *     (ver o bloco HACHURA DE TERRENO abaixo);
+ *  2. **Rosa dos ventos em traço** — pipas partidas ao meio, um lado em tinta
+ *     cheia e o outro na trama;
+ *  3. **Anotações de margem** — cursiva na beira do papel, na mão de quem usou
+ *     a carta, nunca por cima do miolo onde o grafo mora.
+ *
+ * O teto é ~60 KB de FONTE: acima disso a carta vira peso de bundle, e o bundle
+ * já carrega 2,1 MB de `main.js`. `__tests__/cartografia-padrao.test.js` mede o
+ * arquivo e falha se ele passar — é gate, não recomendação.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import React from "react";
@@ -156,6 +176,193 @@ const ONDAS = (() => {
   });
 })();
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * HACHURA DE TERRENO  (spec 0035 · F2 · M8)
+ * ---------------------------------------------------------------------------
+ * O que separava esta carta de uma carta de cartógrafo era a AUSÊNCIA de
+ * textura: contorno de morro sem encosta, mancha de mata sem mato, água sem
+ * lâmina. Hachura é como o cartógrafo desenha superfície com uma pena só —
+ * densidade no lugar de tom.
+ *
+ * As três famílias têm gramáticas diferentes de propósito, senão o olho lê
+ * "textura de preenchimento" em vez de "relevo, mata, água":
+ *
+ *  · RELEVO — traços PERPENDICULARES à crista, caindo pelo lado da encosta.
+ *    É a hachura clássica: quem lê sabe para onde o morro desce.
+ *  · MATA   — pares de traços curtos e INCLINADOS, embaixo das copas. Fazem o
+ *    sub-bosque; sem eles a massa de mata é um borrão verde.
+ *  · ÁGUA   — traços HORIZONTAIS interrompidos, paralelos à lâmina, mais as
+ *    linhas d'água que acompanham a margem do rio. Horizontal é o que o olho
+ *    lê como "parado e molhado".
+ *
+ * Tudo aqui é gerado UMA vez, com semente constante — mesma regra do resto do
+ * módulo (nada de `Math.random()`).
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Traços de encosta ao longo das cristas. Cada crista é
+ * `[x1, y1, x2, y2, lado]`, e `lado` (+1/−1) diz para onde o morro cai — é ele
+ * que faz a hachura descrever o relevo em vez de só sujar o papel.
+ */
+const HACHURA_RELEVO = (() => {
+  const rnd = ruido(0x3a1105);
+  const cristas = [
+    [168, 512, 402, 496, 1], [402, 496, 640, 512, 1], [640, 512, 872, 470, 1],
+    [214, 236, 388, 172, -1], [388, 172, 596, 196, -1], [596, 196, 760, 250, -1],
+    [880, 392, 1006, 470, 1],
+    [1520, 566, 1690, 596, 1], [1690, 596, 1852, 560, 1],
+    [820, 962, 1010, 990, -1], [1010, 990, 1180, 958, -1],
+  ];
+  const riscos = [];
+  cristas.forEach(([x1, y1, x2, y2, lado]) => {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const comp = Math.hypot(dx, dy) || 1;
+    /* Normal da crista, virada para o lado que desce. */
+    const nx = (-dy / comp) * lado;
+    const ny = (dx / comp) * lado;
+    const quantos = Math.max(2, Math.round(comp / 22));
+    for (let i = 0; i <= quantos; i += 1) {
+      const t = i / quantos;
+      const px = x1 + dx * t;
+      const py = y1 + dy * t;
+      /* Traço mais longo = encosta mais íngreme. A variação é o que impede a
+         hachura de virar pente. */
+      const alcance = 15 + rnd() * 21;
+      riscos.push(
+        `M ${r1(px)} ${r1(py)} L ${r1(px + nx * alcance + (rnd() - 0.5) * 5)} `
+        + `${r1(py + ny * alcance + (rnd() - 0.5) * 5)}`,
+      );
+    }
+  });
+  return riscos;
+})();
+
+/** Sub-bosque: pares de traços inclinados espalhados sob as copas. */
+const HACHURA_MATA = (() => {
+  const rnd = ruido(0x77b3d1);
+  const riscos = [];
+  MATA.nucleos.forEach(([cx, cy, rx, ry]) => {
+    for (let k = 0; k < 11; k += 1) {
+      const ang = rnd() * Math.PI * 2;
+      /* Raiz quadrada distribui por ÁREA: sem ela os traços se amontoam no
+         centro da elipse e a borda da mata fica pelada. */
+      const dist = Math.sqrt(rnd()) * 0.88;
+      const x = cx + Math.cos(ang) * rx * dist;
+      const y = cy + Math.sin(ang) * ry * dist;
+      const larg = 9 + rnd() * 5;
+      riscos.push(
+        `M ${r1(x)} ${r1(y)} l ${r1(larg)} ${r1(-larg * 0.42)}`
+        + ` M ${r1(x + 3)} ${r1(y + 6)} l ${r1(larg - 2)} ${r1(-larg * 0.38)}`,
+      );
+    }
+  });
+  return riscos;
+})();
+
+/**
+ * Lâmina d'água do charco: fiadas horizontais interrompidas, cortadas pela
+ * silhueta do alagado (elipse que aproxima o polígono do §4).
+ */
+const HACHURA_AGUA = (() => {
+  const rnd = ruido(0x11ea55);
+  const cx = 1067;
+  const cy = 1200;
+  const rx = 372;
+  const ry = 158;
+  const riscos = [];
+  for (let y = cy - ry + 12; y < cy + ry; y += 24) {
+    const k = (y - cy) / ry;
+    const meia = rx * Math.sqrt(Math.max(0, 1 - k * k));
+    /* Fiada curta demais não lê como lâmina, lê como cisco. */
+    if (meia < 46) continue;
+    const esq = cx - meia + 10;
+    const dir = cx + meia - 10;
+    const vao = 26 + rnd() * 40;
+    const meio = cx + (rnd() - 0.5) * 90;
+    riscos.push(`M ${r1(esq)} ${r1(y)} H ${r1(Math.max(esq, meio - vao))}`);
+    riscos.push(`M ${r1(Math.min(dir, meio + vao))} ${r1(y)} H ${r1(dir)}`);
+  }
+  return riscos;
+})();
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * ROSA DOS VENTOS EM TRAÇO DE TINTA  (spec 0035 · F2 · M8)
+ * ---------------------------------------------------------------------------
+ * A rosa antiga era um losango chapado: duas cores sólidas, leitura de ícone.
+ * A rosa de carta é DESENHADA — cada ponta é uma pipa partida ao meio pelo
+ * eixo, com o lado que "recebe luz" hachurado e o oposto em tinta cheia. É o
+ * contraste dos dois lados que dá volume sem sombra nenhuma.
+ *
+ * Oito pontas (quatro cardeais longas, quatro colaterais curtas) e um anel de
+ * 32 marcas de rumo. As letras são **N/L/S/O** — a carta é brasileira, e Leste
+ * com E seria um anglicismo dentro de um objeto de ficção em português.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+const ROSA = (() => {
+  const pipa = (graus, alcance, ombro) => {
+    const rad = (graus * Math.PI) / 180;
+    /* Direção da ponta: 0° aponta para o norte da carta (y negativo). */
+    const dx = Math.sin(rad);
+    const dy = -Math.cos(rad);
+    /* Perpendicular, que abre os dois ombros da pipa. */
+    const ex = Math.cos(rad);
+    const ey = Math.sin(rad);
+    const px = r1(dx * alcance);
+    const py = r1(dy * alcance);
+    const meio = 0.24;
+    const ax = r1(dx * alcance * meio + ex * ombro);
+    const ay = r1(dy * alcance * meio + ey * ombro);
+    const bx = r1(dx * alcance * meio - ex * ombro);
+    const by = r1(dy * alcance * meio - ey * ombro);
+    return {
+      graus,
+      tinta: `M 0 0 L ${ax} ${ay} L ${px} ${py} Z`,
+      hachurada: `M 0 0 L ${bx} ${by} L ${px} ${py} Z`,
+    };
+  };
+
+  const pontas = [
+    pipa(0, 96, 15), pipa(90, 96, 15), pipa(180, 96, 15), pipa(270, 96, 15),
+    pipa(45, 60, 11), pipa(135, 60, 11), pipa(225, 60, 11), pipa(315, 60, 11),
+  ];
+
+  /* Anel de rumos: 32 marcas, a cada 11,25°. A cada quatro a marca é longa —
+     é assim que o olho conta os oito ventos sem precisar de número. */
+  const marcas = [];
+  for (let i = 0; i < 32; i += 1) {
+    const rad = (i * 11.25 * Math.PI) / 180;
+    const dx = Math.sin(rad);
+    const dy = -Math.cos(rad);
+    const de = i % 4 === 0 ? 100 : 106;
+    marcas.push(`M ${r1(dx * de)} ${r1(dy * de)} L ${r1(dx * 114)} ${r1(dy * 114)}`);
+  }
+
+  return { pontas, marcas };
+})();
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * ANOTAÇÕES DE MARGEM  (spec 0035 · F2 · M8)
+ * ---------------------------------------------------------------------------
+ * A mão de quem usou a carta, não a de quem a desenhou: recado torto na beira
+ * do papel, em cursiva, escrito depois. É o detalhe que transforma "ilustração
+ * de mapa" em "objeto que alguém carregou no bolso".
+ *
+ * Ficam todas nas MARGENS de propósito — a faixa fora do miolo onde o grafo
+ * mora (os doze nós do `mapaPadrao.js` ocupam x 300–2130, y 200–1330). Escrever
+ * por cima do miolo brigaria com os rótulos dos lugares, que são informação
+ * viva da mesa; a margem é o único lugar do papel que ninguém disputa.
+ *
+ * `giro` está em graus: as duas laterais são lidas de baixo para cima, como em
+ * carta dobrada.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+const ANOTACOES = [
+  { x: 1230, y: 96, giro: -1.2, tamanho: 34, texto: "copiada da carta do padre Aurélio, no ano das cinzas" },
+  { x: 92, y: 900, giro: -90, tamanho: 32, texto: "a serra fecha o passo com neblina" },
+  { x: 2318, y: 780, giro: -90, tamanho: 32, texto: "mar da Barra Negra — maré vira ao meio-dia" },
+  { x: 150, y: 1548, giro: 1.4, tamanho: 32, texto: "as cheias sobem até esta linha em fevereiro", ancora: "start" },
+  { x: 1560, y: 1540, giro: -1.6, tamanho: 32, texto: "daqui em diante ninguém mediu" },
+];
+
 /* ── Traçados fixos: costa, rio, afluentes e estradas ─────────────────────── */
 
 /** Linha de costa (leste). O `feDisplacementMap` é quem a torna irregular. */
@@ -203,7 +410,8 @@ const ROTULO_ACESSIVEL =
   "Carta desenhada à mão do sertão da Coroa de Cinzas: a Serra da Boca Seca a noroeste, o Rio "
   + "Ferrugem cortando o mapa até a foz a leste, Vila Candeia na curva do rio, o charco do Rebanho "
   + "Murcho ao sul com a mata fechada além dele, e a Estrada dos Tropeiros Mudos ligando a serra "
-  + "ao Forte da Barra Negra, na barra.";
+  + "ao Forte da Barra Negra, na barra. As encostas, a mata e a água estão hachuradas a pena; uma "
+  + "rosa dos ventos marca o norte no alto à direita, e há anotações à mão nas margens do papel.";
 
 /**
  * A ilustração do mapa padrão.
@@ -301,6 +509,16 @@ export default function CartografiaPadrao({
           <stop offset="0%" stopColor={COR.mar} stopOpacity="0.42" />
           <stop offset="100%" stopColor={COR.rio} stopOpacity="0.62" />
         </linearGradient>
+
+        {/* Hachura de pena: o meio-tom do cartógrafo. Um <pattern> vetorial faz
+            o trabalho de uma trama inteira sem um único pixel e sem inchar o
+            `d` de ninguém — e continua nítido em qualquer zoom (AC-11). */}
+        <pattern
+          id={gid("trama")} width="8" height="8"
+          patternUnits="userSpaceOnUse" patternTransform="rotate(38)"
+        >
+          <path d="M 0 0 V 8" stroke={COR.tinta} strokeWidth="1.3" opacity="0.72" />
+        </pattern>
       </defs>
 
       {/* ── 1. O papel ──────────────────────────────────────────────────── */}
@@ -335,6 +553,17 @@ export default function CartografiaPadrao({
         <path d={RIO} stroke={COR.papelSombra} strokeWidth="20" opacity="0.5" />
         <path d={RIO} stroke={COR.rio} strokeWidth="11" opacity="0.9" />
         <path d={RIO} stroke={COR.mar} strokeWidth="4" opacity="0.55" />
+        {/* LINHAS D'ÁGUA: duas cópias do próprio leito, afastadas para fora e
+            interrompidas. É como o cartógrafo diz "isto é água corrente" sem
+            pintar nada — e sai de graça, reusando o `d` do rio. */}
+        <path
+          d={RIO} transform="translate(0 -17)" stroke={COR.rio}
+          strokeWidth="1.8" strokeDasharray="38 26" opacity="0.42"
+        />
+        <path
+          d={RIO} transform="translate(0 17)" stroke={COR.rio}
+          strokeWidth="1.8" strokeDasharray="30 34" opacity="0.36"
+        />
       </g>
 
       {/* ── 4. Charco do Rebanho Murcho ─────────────────────────────────── */}
@@ -345,6 +574,15 @@ export default function CartografiaPadrao({
              C 738 1324, 660 1272, 706 1178 Z"
           fill={COR.charco} opacity="0.26" filter={u("pena")}
         />
+        {/* HACHURA DE ÁGUA: fiadas horizontais interrompidas, a lâmina parada
+            do alagado. Vai ABAIXO dos tufos de capim — a água é o fundo. */}
+        <g
+          data-camada="hachura-agua"
+          filter={u("pena")} stroke={COR.rio} strokeWidth="2"
+          strokeLinecap="round" opacity="0.44" fill="none"
+        >
+          {HACHURA_AGUA.map((d, i) => <path key={`agua-${i}`} d={d} />)}
+        </g>
         <g stroke={COR.tintaFraca} strokeWidth="2.6" strokeLinecap="round" opacity="0.66">
           {CHARCO.map((t, i) => (
             <g key={`charco-${i}`}>
@@ -366,6 +604,22 @@ export default function CartografiaPadrao({
             fill={COR.mata} opacity="0.22" filter={u("pena")}
           />
         ))}
+        {/* A trama de pena por cima da massa: dá granulação à mancha verde sem
+            desenhar árvore por árvore, que custaria mil paths. */}
+        {MATA.nucleos.map(([cx, cy, rx, ry], i) => (
+          <ellipse
+            key={`trama-${i}`} cx={cx} cy={cy} rx={rx} ry={ry}
+            fill={u("trama")} opacity="0.16" filter={u("pena")}
+          />
+        ))}
+        {/* HACHURA DE MATA: o sub-bosque, embaixo das copas. */}
+        <g
+          data-camada="hachura-mata"
+          filter={u("pena")} stroke={COR.tinta} strokeWidth="2"
+          strokeLinecap="round" opacity="0.5" fill="none"
+        >
+          {HACHURA_MATA.map((d, i) => <path key={`mato-${i}`} d={d} />)}
+        </g>
         <g filter={u("pena")}>
           {MATA.copas.map((c, i) => (
             <g key={`copa-${i}`}>
@@ -406,6 +660,18 @@ export default function CartografiaPadrao({
         })}
       </g>
 
+      {/* ── 6b. Hachura de relevo — as encostas da serra e os morros ─────
+          Traços perpendiculares à crista, caindo pelo lado que desce. Vêm
+          DEPOIS dos glifos de montanha porque a encosta é o que amarra o
+          glifo ao papel: sem ela o pico parece flutuar. */}
+      <g
+        data-camada="hachura-relevo"
+        filter={u("pena")} stroke={COR.serra} strokeWidth="2.2"
+        strokeLinecap="round" opacity="0.46" fill="none"
+      >
+        {HACHURA_RELEVO.map((d, i) => <path key={`encosta-${i}`} d={d} />)}
+      </g>
+
       {/* ── 7. Estrada dos Tropeiros Mudos ──────────────────────────────── */}
       <g filter={u("pena")} fill="none" strokeLinecap="round">
         {ESTRADAS.map((d, i) => (
@@ -416,22 +682,43 @@ export default function CartografiaPadrao({
         ))}
       </g>
 
-      {/* ── 8. Rosa dos ventos e escala ─────────────────────────────────── */}
-      <g transform="translate(1905 235)" opacity="0.85">
-        <circle r="92" fill="none" stroke={COR.tinta} strokeWidth="2.4" opacity="0.5" />
-        <circle r="66" fill="none" stroke={COR.tinta} strokeWidth="1.6" opacity="0.35" />
-        <path d="M 0 -88 L 20 0 L 0 88 L -20 0 Z" fill={COR.ouro} opacity="0.75" />
-        <path d="M 0 -88 L 20 0 L 0 88 L -20 0 Z" fill="none" stroke={COR.tinta} strokeWidth="2.4" />
-        <path d="M -88 0 L 0 -16 L 88 0 L 0 16 Z" fill={COR.papelSombra} opacity="0.85" />
-        <path d="M -88 0 L 0 -16 L 88 0 L 0 16 Z" fill="none" stroke={COR.tinta} strokeWidth="2.4" />
-        <path d="M -54 -54 L 0 0 L 54 -54 M -54 54 L 0 0 L 54 54" stroke={COR.tinta} strokeWidth="1.6" fill="none" opacity="0.45" />
-        <circle r="9" fill={COR.tinta} />
-        <text
-          x="0" y="-104" textAnchor="middle" fill={COR.tinta}
-          fontSize="40" fontFamily="var(--font-title, 'Cinzel', serif)" letterSpacing="3"
-        >
-          N
-        </text>
+      {/* ── 8. Rosa dos ventos, desenhada a pena ────────────────────────── */}
+      <g data-camada="rosa-dos-ventos" transform="translate(1898 244)" filter={u("pena")} opacity="0.88">
+        {/* Os dois anéis e as 32 marcas de rumo. */}
+        <circle r="114" fill="none" stroke={COR.tinta} strokeWidth="2" opacity="0.44" />
+        <circle r="106" fill="none" stroke={COR.tinta} strokeWidth="1.2" opacity="0.3" />
+        <g stroke={COR.tinta} strokeWidth="1.8" strokeLinecap="round" opacity="0.55" fill="none">
+          {ROSA.marcas.map((d, i) => <path key={`rumo-${i}`} d={d} />)}
+        </g>
+
+        {/* Cada ponta é uma pipa partida ao meio: um lado em tinta cheia, o
+            outro na trama. O volume nasce do contraste dos dois lados. */}
+        {ROSA.pontas.map((p) => (
+          <g key={`ponta-${p.graus}`}>
+            <path d={p.hachurada} fill={u("trama")} opacity="0.9" />
+            <path d={p.tinta} fill={COR.tinta} opacity="0.82" />
+            <path d={p.hachurada} fill="none" stroke={COR.tinta} strokeWidth="1.8" />
+            <path d={p.tinta} fill="none" stroke={COR.tinta} strokeWidth="1.8" />
+          </g>
+        ))}
+
+        {/* O norte leva o único ouro da rosa — é a informação, o resto é enfeite. */}
+        <path d="M 0 -96 L 7 -68 L 0 -58 L -7 -68 Z" fill={COR.ouro} opacity="0.92" />
+        <path d="M 0 -96 L 7 -68 L 0 -58 L -7 -68 Z" fill="none" stroke={COR.tinta} strokeWidth="1.6" />
+        <circle r="10" fill="none" stroke={COR.tinta} strokeWidth="2.4" />
+        <circle r="3.4" fill={COR.tinta} />
+
+        {[
+          ["N", 0, -126], ["L", 128, 12], ["S", 0, 148], ["O", -128, 12],
+        ].map(([letra, lx, ly]) => (
+          <text
+            key={`vento-${letra}`}
+            x={lx} y={ly} textAnchor="middle" fill={COR.tinta}
+            fontSize="36" fontFamily="var(--font-title, 'Cinzel', serif)" letterSpacing="2"
+          >
+            {letra}
+          </text>
+        ))}
       </g>
 
       <g transform="translate(150 1452)" opacity="0.8">
@@ -469,6 +756,36 @@ export default function CartografiaPadrao({
         >
           SERTÃO DO RIO FERRUGEM
         </text>
+      </g>
+
+      {/* ── 9b. Anotações de margem, na mão de quem usou a carta ─────────
+          Cursiva, tinta fraca e um risco embaixo — recado, não legenda. A
+          `filter` de pena entorta as letras o suficiente para não parecerem
+          digitadas. */}
+      <g
+        data-camada="anotacoes"
+        filter={u("pena")} fill={COR.tintaFraca} opacity="0.72"
+      >
+        {ANOTACOES.map((a) => (
+          <g key={a.texto} transform={`translate(${a.x} ${a.y}) rotate(${a.giro})`}>
+            <text
+              data-anotacao="margem"
+              textAnchor={a.ancora || "middle"}
+              fontSize={a.tamanho}
+              fontStyle="italic"
+              fontFamily="var(--font-hand, 'Segoe Script', 'Bradley Hand', 'Brush Script MT', cursive)"
+            >
+              {a.texto}
+            </text>
+            {/* O risco de pena por baixo: a mão que escreve torto sublinha torto. */}
+            <path
+              d={`M ${a.ancora === "start" ? 0 : -a.texto.length * a.tamanho * 0.21} ${r1(a.tamanho * 0.42)}`
+                + ` q ${r1(a.texto.length * a.tamanho * 0.21)} ${r1(a.tamanho * 0.16)},`
+                + ` ${r1(a.texto.length * a.tamanho * 0.42)} 0`}
+              fill="none" stroke={COR.tintaFraca} strokeWidth="1.6" opacity="0.6"
+            />
+          </g>
+        ))}
       </g>
 
       {/* ── 10. Moldura e vinheta ───────────────────────────────────────── */}

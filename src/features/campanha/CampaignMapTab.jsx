@@ -14,7 +14,12 @@ const MesaDoMapaMundi = lazy(() => import("../../components/WorldMap/Mesa"));
 /* ── CAMPAIGN MAP TAB ── */
 /* ── Mesa tática (spec 0007 / ADR 0005): o MapEditor é o mapa oficial da campanha.
    O tile-based foi aposentado; o doc legado map/current é ignorado. */
-function CampaignMapTab({ campaignId, uid, isMaster }) {
+/* `fichasCompartilhadas` só ATRAVESSA esta aba: quem as observa é o
+   `CampaignDetail` (uma assinatura só), e quem as usa é a mesa do mapa-múndi,
+   para tirar delas a melhor Furtividade da esquiva (spec 0035 · M6 · ADR-0012).
+   Vazio é o caso comum e não degrada nada — sem ficha, o mestre digita o bônus
+   como sempre digitou. */
+function CampaignMapTab({ campaignId, uid, isMaster, fichasCompartilhadas = [] }) {
   const [mesaAberta, setMesaAberta] = useState(false);
   const [builderAberto, setBuilder] = useState(false);
   /* A MESA do mapa-múndi (spec 0028 F4). Componente irmão do MapEditor, nunca
@@ -85,6 +90,7 @@ function CampaignMapTab({ campaignId, uid, isMaster }) {
         <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0, overflow:'hidden' }}>
           <Suspense fallback={<div style={{ padding:40, textAlign:'center', color:'var(--muted)', fontFamily:'Crimson Pro,serif' }}>Abrindo o mapa-múndi…</div>}>
             <MesaDoMapaMundi campaignId={campaignId} uid={uid} isMaster={isMaster}
+              fichasCompartilhadas={fichasCompartilhadas}
               onSair={() => setMundoAberto(false)}
               onEntrarNaCena={isMaster ? entrarNaCena : undefined} />
           </Suspense>

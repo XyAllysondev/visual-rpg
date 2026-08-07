@@ -23,26 +23,80 @@
  *  devolve a decisão. É montado só no cliente do mestre — mas, mesmo que
  *  alguém o montasse noutro lugar, não haveria pendência para lhe passar:
  *  ela vive num documento que o jogador não lê.
+ *
+ *  ── O RESTYLE DA 0035 (F3 · M5) ─────────────────────────────────────
+ *  A casca (portal, armadilha de foco, Esc, clique fora, título em
+ *  versalete, filete duplo, botão único) saiu daqui e virou
+ *  `CartaoDePergaminho.jsx`, compartilhada com o cartão de descoberta.
+ *  **O comportamento não mudou uma vírgula**: os mesmos `data-testid`, as
+ *  mesmas decisões, a mesma regra do Esc. O que mudou foi o papel embaixo
+ *  — e, com ele, a tinta do conteúdo, que passou a ser escura sobre claro.
+ *  Manter `var(--text)` aqui deixaria texto claro sobre pergaminho claro.
  * ══════════════════════════════════════════════════════════════════ */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 import { DECISOES } from "./encontrosUi";
-import {
-  DANGER_TEXT_AA, ELEV, FF, FS, FW, HIT, LINE, R, SP, SURF, T, btnStyle, campoStyle,
-} from "../Atelier/ui";
+import CartaoDePergaminho, { PERGAMINHO } from "./CartaoDePergaminho";
+import { FF, FS, FW, HIT, LS, R, SP } from "../Atelier/ui";
 
-/** Tudo que pode receber foco dentro do diálogo, na ordem do documento. */
-const FOCAVEIS = 'button:not([disabled]),input:not([disabled]),textarea:not([disabled]),'
-  + 'select:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])';
+const cor = (t) => `rgb(${t[0]},${t[1]},${t[2]})`;
+const corA = (t, a) => `rgba(${t[0]},${t[1]},${t[2]},${a})`;
+
+/* ── A tinta do conteúdo sobre o papel ────────────────────────────────
+   Nenhuma var de tema aqui, de propósito: as vars foram calibradas para a
+   escada grafite do app, e o pergaminho é claro. Um `var(--muted)` viraria
+   cinza-claro sobre bege — some. */
+const TINTA = {
+  corpo: cor(PERGAMINHO.tinta),
+  /* A "fraca" não é transparente: é a tinta do corpo, cheia. Rebaixar texto
+     com alfa sobre pergaminho custa contraste justamente no que já é pequeno
+     — e foi assim que o título reprovou no gate na primeira tentativa. */
+  fraca: cor(PERGAMINHO.tinta),
+  titulo: cor(PERGAMINHO.titulo),
+  filete: corA(PERGAMINHO.filete, 0.55),
+  campo: corA(PERGAMINHO.papel, 0.55),
+};
+
+/** Vermelho de erro com ≥4,5:1 SOBRE PERGAMINHO — o `DANGER_TEXT_AA` do
+ *  ateliê é claro, calibrado para fundo escuro, e aqui sumiria. */
+const PERIGO_NO_PAPEL = "#8c1d1d";
+
+const secao = {
+  fontFamily: FF.title, fontSize: FS.label, fontWeight: FW.bold,
+  letterSpacing: LS.label, textTransform: "uppercase", color: cor(PERGAMINHO.titulo),
+};
+const meta = { fontFamily: FF.ui, fontSize: FS.meta, lineHeight: 1.5, color: TINTA.fraca };
+const corpoSerif = {
+  fontFamily: "var(--font-title,'Cinzel',Georgia,serif)",
+  fontSize: FS.body, lineHeight: 1.65, color: TINTA.corpo,
+};
+
+const campoNoPapel = {
+  width: "100%", boxSizing: "border-box",
+  minHeight: HIT.mobile, padding: `10px ${SP.x3}px`,
+  background: TINTA.campo,
+  border: `1px solid ${corA(PERGAMINHO.filete, 0.6)}`,
+  borderRadius: R.input, color: TINTA.corpo,
+  fontFamily: FF.ui, fontSize: FS.input, outline: "none",
+};
+
+/** Botão de decisão, na gramática do selo. `forte` é o "Aceitar". */
+const botaoNoPapel = (forte) => ({
+  minHeight: HIT.mobile, padding: `0 ${SP.x4}px`, borderRadius: R.ctl, cursor: "pointer",
+  background: forte ? corA(PERGAMINHO.filete, 0.42) : corA(PERGAMINHO.filete, 0.14),
+  border: `1px solid ${corA(PERGAMINHO.filete, forte ? 0.95 : 0.62)}`,
+  color: TINTA.titulo,
+  fontFamily: FF.title, fontSize: FS.tag, fontWeight: FW.bold,
+  letterSpacing: LS.tag, textTransform: "uppercase",
+});
 
 const Linha = ({ rotulo, valor, destaque = false }) => (
   <div style={{ minWidth: 0 }}>
-    <div style={{ ...T.section, fontSize: FS.micro }}>{rotulo}</div>
+    <div style={{ ...secao, fontSize: FS.micro }}>{rotulo}</div>
     <div
       style={{
         fontFamily: FF.data, fontSize: FS.body, fontWeight: FW.semi,
-        color: destaque ? "var(--gold2,var(--gold))" : "var(--text)",
+        color: destaque ? TINTA.titulo : TINTA.corpo,
       }}
     >
       {valor}
@@ -62,6 +116,7 @@ const Linha = ({ rotulo, valor, destaque = false }) => (
  * @param {()=>void} props.onAdiar fecha sem decidir — a pendência fica.
  * @param {boolean} [props.ocupado]
  * @param {string} [props.falha]
+ * @param {boolean} [props.anima] encaminha o interruptor de movimento do palco.
  */
 export default function PainelDeEncontro({
   titulo,
@@ -75,49 +130,11 @@ export default function PainelDeEncontro({
   onAdiar,
   ocupado = false,
   falha = "",
+  anima = true,
 }) {
   const [trocando, setTrocando] = useState(false);
   const [novoTitulo, setNovoTitulo] = useState("");
   const [novoTexto, setNovoTexto] = useState("");
-
-  const caixaRef = useRef(null);
-  const gatilhoRef = useRef(null);
-
-  /* O foco entra na CAIXA, não num botão: o leitor de tela lê o título e o
-     resultado antes de qualquer ação, e um Enter distraído não solta um
-     encontro na mesa sem o mestre ter lido o que ele é. */
-  useEffect(() => {
-    gatilhoRef.current = typeof document !== "undefined" ? document.activeElement : null;
-    const t = setTimeout(() => { if (caixaRef.current) caixaRef.current.focus(); }, 30);
-    return () => {
-      clearTimeout(t);
-      const el = gatilhoRef.current;
-      if (el && typeof el.focus === "function") el.focus();
-    };
-  }, []);
-
-  const adiar = useCallback(() => { if (!ocupado && onAdiar) onAdiar(); }, [ocupado, onAdiar]);
-
-  /* Esc fecha; Tab fica preso. O laço do Tab é feito à mão porque o projeto
-     não tem (e não vai ganhar) dependência de foco — ADR-0004. */
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === "Escape") { e.preventDefault(); adiar(); return; }
-      if (e.key !== "Tab") return;
-      const caixa = caixaRef.current;
-      if (!caixa) return;
-      const alvos = Array.from(caixa.querySelectorAll(FOCAVEIS));
-      if (alvos.length === 0) { e.preventDefault(); caixa.focus(); return; }
-      const primeiro = alvos[0];
-      const ultimo = alvos[alvos.length - 1];
-      const atual = document.activeElement;
-      if (!caixa.contains(atual)) { e.preventDefault(); primeiro.focus(); return; }
-      if (e.shiftKey && atual === primeiro) { e.preventDefault(); ultimo.focus(); }
-      else if (!e.shiftKey && atual === ultimo) { e.preventDefault(); primeiro.focus(); }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [adiar]);
 
   const decidir = (valor) => {
     if (!onDecidir || ocupado) return;
@@ -128,204 +145,157 @@ export default function PainelDeEncontro({
     onDecidir("trocar", { title: t || "Encontro na estrada", playerText: p });
   };
 
-  if (typeof document === "undefined") return null;
-
-  return createPortal(
-    <div
-      onMouseDown={(e) => { if (e.target === e.currentTarget) adiar(); }}
-      style={{
-        position: "fixed", inset: 0, zIndex: 430, padding: SP.x4,
-        background: "rgba(8,8,14,0.84)", backdropFilter: "blur(5px)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}
+  return (
+    <CartaoDePergaminho
+      testId="wmm-encontro-do-mestre"
+      testIdDoBotao="wmm-encontro-adiar"
+      chapeu="Só você está vendo isto"
+      titulo="Um encontro na estrada"
+      rotuloAcessivel="Um encontro na estrada"
+      descritoPor="wmm-enc-desc"
+      corpo={contexto || null}
+      rotuloDoBotao="Decidir depois"
+      /* Esc, clique fora e o botão caem todos aqui: ADIAR, nunca "ignorar". */
+      onFechar={onAdiar}
+      ocupado={ocupado}
+      anima={anima}
     >
+      {/* ── A CONTA, ABERTA ────────────────────────────────────────
+          O mestre decide melhor sabendo de onde a rolagem veio. Esconder
+          a chance faria a decisão dele virar palpite sobre o próprio jogo. */}
       <div
-        ref={caixaRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="wmm-enc-tit"
-        aria-describedby="wmm-enc-desc"
-        data-testid="wmm-encontro-do-mestre"
-        tabIndex={-1}
-        onMouseDown={(e) => e.stopPropagation()}
+        data-testid="wmm-encontro-rolagem"
         style={{
-          width: "min(520px,100%)", maxHeight: "88vh", overflowY: "auto",
-          background: SURF.raised, border: `1px solid ${LINE.gold}`,
-          borderRadius: R.panel, boxShadow: ELEV.e3, padding: SP.x5,
-          display: "flex", flexDirection: "column", gap: SP.x4, outline: "none",
+          display: "grid", gridTemplateColumns: "1fr 1fr", gap: SP.x3,
+          padding: SP.x3, borderRadius: R.ctl,
+          background: TINTA.campo, border: `1px solid ${TINTA.filete}`,
         }}
       >
-        <div>
-          <div style={{ ...T.section, fontSize: FS.micro }}>
-            Só você está vendo isto
-          </div>
-          <h2
-            id="wmm-enc-tit"
-            style={{
-              ...T.hero, fontSize: FS.h3, margin: `${SP.x1}px 0 0`,
-              color: "var(--gold2,var(--gold))",
-            }}
-          >
-            Um encontro na estrada
-          </h2>
-          {contexto ? (
-            <div style={{ ...T.data, fontSize: FS.micro, marginTop: SP.x1 }}>{contexto}</div>
-          ) : null}
-        </div>
+        <Linha rotulo="Chance" valor={chance} />
+        <Linha rotulo="Rolou" valor={rolagem} destaque />
+      </div>
 
-        {/* ── A CONTA, ABERTA ────────────────────────────────────────
-            O mestre decide melhor sabendo de onde a rolagem veio. Esconder
-            a chance faria a decisão dele virar palpite sobre o próprio jogo. */}
+      {/* ── O QUE SAIU ─────────────────────────────────────────────── */}
+      <div style={{ display: "flex", flexDirection: "column", gap: SP.x2 }}>
+        <div style={secao}>O que saiu</div>
         <div
-          data-testid="wmm-encontro-rolagem"
+          data-testid="wmm-encontro-sugestao"
           style={{
-            display: "grid", gridTemplateColumns: "1fr 1fr", gap: SP.x3,
             padding: SP.x3, borderRadius: R.ctl,
-            background: "rgba(255,255,255,0.04)", border: `1px solid ${LINE.hair}`,
+            border: `1px solid ${TINTA.filete}`, background: TINTA.campo,
           }}
         >
-          <Linha rotulo="Chance" valor={chance} />
-          <Linha rotulo="Rolou" valor={rolagem} destaque />
-        </div>
-
-        {/* ── O QUE SAIU ─────────────────────────────────────────────── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: SP.x2 }}>
-          <div style={T.section}>O que saiu</div>
-          <div
-            data-testid="wmm-encontro-sugestao"
-            style={{
-              padding: SP.x3, borderRadius: R.ctl,
-              border: `1px solid ${LINE.hair}`, background: "rgba(255,255,255,0.03)",
-            }}
-          >
-            <div style={{ ...T.body, fontWeight: FW.semi }}>{titulo}</div>
-            <p id="wmm-enc-desc" style={{ ...T.meta, margin: `${SP.x2}px 0 0`, color: "var(--text)" }}>
-              {texto || "Sem texto do jogador — o grupo veria um cartão vazio."}
-            </p>
-          </div>
-          <p style={{ ...T.meta, margin: 0 }}>
-            O grupo ainda não viu nada disto. A viagem está parada até você decidir.
+          <div style={{ ...corpoSerif, fontWeight: FW.semi }}>{titulo}</div>
+          <p id="wmm-enc-desc" style={{ ...corpoSerif, margin: `${SP.x2}px 0 0` }}>
+            {texto || "Sem texto do jogador — o grupo veria um cartão vazio."}
           </p>
         </div>
+        <p style={{ ...meta, margin: 0 }}>
+          O grupo ainda não viu nada disto. A viagem está parada até você decidir.
+        </p>
+      </div>
 
-        {/* ── A TROCA ────────────────────────────────────────────────── */}
-        {trocando ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: SP.x2 }}>
-            <div style={T.section}>No lugar dele, acontece</div>
-            {alternativas.length > 0 ? (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: SP.x2 }}>
-                {alternativas.map((nome) => (
-                  <button
-                    key={nome}
-                    type="button"
-                    className="wmm-acao"
-                    onClick={() => setNovoTitulo(nome)}
-                    style={{ ...btnStyle("quiet", "sm"), textTransform: "none" }}
-                  >
-                    {nome}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            <input
-              type="text"
-              value={novoTitulo}
-              onChange={(e) => setNovoTitulo(e.target.value)}
-              placeholder="Título do que acontece"
-              aria-label="Título do encontro que substitui o sorteado"
-              data-testid="wmm-encontro-titulo"
-              className="wmm-focus"
-              style={{ ...campoStyle(false), fontSize: FS.body }}
-            />
-            <textarea
-              value={novoTexto}
-              onChange={(e) => setNovoTexto(e.target.value)}
-              rows={3}
-              placeholder="O que o grupo lê"
-              aria-label="O texto que o grupo vai ler"
-              data-testid="wmm-encontro-texto"
-              className="wmm-focus"
-              style={{ ...campoStyle(false), fontSize: FS.body, resize: "vertical" }}
-            />
-            <div style={{ display: "flex", gap: SP.x2, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="wmm-acao"
-                data-testid="wmm-encontro-confirmar-troca"
-                disabled={ocupado || !novoTexto.trim()}
-                onClick={() => decidir("trocar")}
-                style={{ ...btnStyle("primary"), minHeight: HIT.mobile }}
-              >
-                Trocar por este
-              </button>
-              <button
-                type="button"
-                className="wmm-acao"
-                disabled={ocupado}
-                onClick={() => setTrocando(false)}
-                style={{ ...btnStyle("quiet"), minHeight: HIT.mobile }}
-              >
-                Voltar
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: SP.x2 }}>
-            <div style={{ display: "flex", gap: SP.x2, flexWrap: "wrap" }}>
-              {DECISOES.map((d) => (
+      {/* A TROCA. O comentário fica ACIMA do ternário: em posição de
+          expressão as chaves são objeto literal, e o build quebra. */}
+      {trocando ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: SP.x2 }}>
+          <div style={secao}>No lugar dele, acontece</div>
+          {alternativas.length > 0 ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: SP.x2 }}>
+              {alternativas.map((nome) => (
                 <button
-                  key={d.valor}
+                  key={nome}
                   type="button"
-                  className="wmm-acao"
-                  data-testid={`wmm-encontro-${d.valor}`}
-                  /* Sem sugestão não há o que aceitar. O botão fica ali,
-                     desabilitado e explicado — sumir com ele faria o mestre
-                     achar que a interface está quebrada. */
-                  disabled={ocupado || (d.valor === "aceitar" && semSugestao)}
-                  title={d.dica}
-                  onClick={() => (d.valor === "trocar" ? setTrocando(true) : decidir(d.valor))}
-                  style={{
-                    ...btnStyle(d.valor === "aceitar" ? "primary" : "quiet"),
-                    minHeight: HIT.mobile, flex: "1 1 120px",
-                  }}
+                  className="wmm-selo"
+                  onClick={() => setNovoTitulo(nome)}
+                  style={{ ...botaoNoPapel(false), minHeight: 34, textTransform: "none" }}
                 >
-                  {d.label}
+                  {nome}
                 </button>
               ))}
             </div>
-            <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: SP.x1 }}>
-              {DECISOES.map((d) => (
-                <li key={d.valor} style={{ ...T.meta, fontSize: FS.micro }}>
-                  <strong style={{ color: "var(--text)" }}>{d.label}</strong> —{" "}
-                  {d.valor === "aceitar" && semSugestao
-                    ? "não há sugestão para aceitar desta vez."
-                    : d.dica}
-                </li>
-              ))}
-            </ul>
+          ) : null}
+          <input
+            type="text"
+            value={novoTitulo}
+            onChange={(e) => setNovoTitulo(e.target.value)}
+            placeholder="Título do que acontece"
+            aria-label="Título do encontro que substitui o sorteado"
+            data-testid="wmm-encontro-titulo"
+            className="wmm-selo"
+            style={{ ...campoNoPapel, fontSize: FS.body }}
+          />
+          <textarea
+            value={novoTexto}
+            onChange={(e) => setNovoTexto(e.target.value)}
+            rows={3}
+            placeholder="O que o grupo lê"
+            aria-label="O texto que o grupo vai ler"
+            data-testid="wmm-encontro-texto"
+            className="wmm-selo"
+            style={{ ...campoNoPapel, fontSize: FS.body, resize: "vertical" }}
+          />
+          <div style={{ display: "flex", gap: SP.x2, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="wmm-selo"
+              data-testid="wmm-encontro-confirmar-troca"
+              disabled={ocupado || !novoTexto.trim()}
+              onClick={() => decidir("trocar")}
+              style={botaoNoPapel(true)}
+            >
+              Trocar por este
+            </button>
+            <button
+              type="button"
+              className="wmm-selo"
+              disabled={ocupado}
+              onClick={() => setTrocando(false)}
+              style={botaoNoPapel(false)}
+            >
+              Voltar
+            </button>
           </div>
-        )}
-
-        {falha ? (
-          <p role="alert" data-testid="wmm-encontro-falha" style={{ margin: 0, ...T.meta, color: DANGER_TEXT_AA }}>
-            {falha}
-          </p>
-        ) : null}
-
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="wmm-acao"
-            data-testid="wmm-encontro-adiar"
-            disabled={ocupado}
-            onClick={adiar}
-            style={{ ...btnStyle("ghost", "sm") }}
-          >
-            Decidir depois
-          </button>
         </div>
-      </div>
-    </div>,
-    document.body,
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: SP.x2 }}>
+          <div style={{ display: "flex", gap: SP.x2, flexWrap: "wrap" }}>
+            {DECISOES.map((d) => (
+              <button
+                key={d.valor}
+                type="button"
+                className="wmm-selo"
+                data-testid={`wmm-encontro-${d.valor}`}
+                /* Sem sugestão não há o que aceitar. O botão fica ali,
+                   desabilitado e explicado — sumir com ele faria o mestre
+                   achar que a interface está quebrada. */
+                disabled={ocupado || (d.valor === "aceitar" && semSugestao)}
+                title={d.dica}
+                onClick={() => (d.valor === "trocar" ? setTrocando(true) : decidir(d.valor))}
+                style={{ ...botaoNoPapel(d.valor === "aceitar"), flex: "1 1 120px" }}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: SP.x1 }}>
+            {DECISOES.map((d) => (
+              <li key={d.valor} style={{ ...meta, fontSize: FS.micro }}>
+                <strong style={{ color: TINTA.titulo }}>{d.label}</strong> —{" "}
+                {d.valor === "aceitar" && semSugestao
+                  ? "não há sugestão para aceitar desta vez."
+                  : d.dica}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {falha ? (
+        <p role="alert" data-testid="wmm-encontro-falha" style={{ ...meta, margin: 0, color: PERIGO_NO_PAPEL }}>
+          {falha}
+        </p>
+      ) : null}
+    </CartaoDePergaminho>
   );
 }
