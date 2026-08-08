@@ -15,7 +15,8 @@ import "@testing-library/jest-dom";
 import OrdemParanormalSheet from "../OrdemParanormalSheet";
 import REGRAS_OFICIAIS from "../../../../data/ordemParanormal/regras-oficiais.json";
 import {
-  ACOES_INTERLUDIO, REGRA_DA_CENA, acaoPorId,
+  ACOES_INTERLUDIO, REGRA_DA_CENA, MAX_ACOES, acaoPorId, condicaoPorId,
+  recuperacaoBase, calcularRecuperacao, podeAdicionarAcao,
   aplicarInterludio, registroVazio, historicoDeInterludios,
 } from "../interludio";
 import {
@@ -59,12 +60,20 @@ const abrirDossie = (subAba, extra = {}, props = {}) => {
  * ════════════════════════════════════════════════════════════════════════ */
 
 describe("ACOES_INTERLUDIO — sai do livro, não do componente (AC-4)", () => {
-  it("são as seis ações da transcrição oficial", () => {
-    expect(ACOES_INTERLUDIO).toHaveLength(6);
+  /* ⚠ A spec 0040 travou SEIS ações e faltava "Exercitar-se"; e chamava
+   * "Manutenção" de "Consertar". A 0041 corrigiu a transcrição. */
+  it("são as sete ações da transcrição oficial", () => {
+    expect(ACOES_INTERLUDIO).toHaveLength(7);
     expect(ACOES_INTERLUDIO.map((a) => a.id)).toEqual([
       "interludio-dormir", "interludio-relaxar", "interludio-alimentar",
-      "interludio-ler", "interludio-revisar", "interludio-consertar",
+      "interludio-exercitar", "interludio-ler", "interludio-revisar",
+      "interludio-manutencao",
     ]);
+  });
+
+  it("a regra da cena diz DUAS ações, não uma", () => {
+    expect(MAX_ACOES).toBe(2);
+    expect(REGRA_DA_CENA.descricao).toMatch(/até DUAS/);
   });
 
   it("a cena em si NÃO é uma ação escolhível", () => {
@@ -84,66 +93,202 @@ describe("ACOES_INTERLUDIO — sai do livro, não do componente (AC-4)", () => {
   });
 });
 
-describe("aplicarInterludio — o clamp é a regra (AC-6)", () => {
-  const vitais = { pv: 18, pvMax: 20, san: 5, sanMax: 12, pe: 2, peMax: 4 };
-
-  it("recuperar além do máximo para no máximo", () => {
-    const r = aplicarInterludio(vitais, { acao: "interludio-dormir", pv: 9 });
-    expect(r.ok).toBe(true);
-    expect(r.vitais.pv).toBe(20); // não 27
+/* ⚠ O EXEMPLO DO LIVRO É O ORÁCULO DESTA CONTA.
+ * "um personagem de NEX 35% (limite de PE 7) recupera 7 PV e 7 PE" — e o nosso
+ * `deriveStats().peTurno` para NEX 35% é `1 + nexLevel(35)` = 7. É essa
+ * coincidência que autoriza calcular a recuperação em vez de pedir o número. */
+describe("recuperacaoBase — a escada de condições do livro", () => {
+  it("normal recupera o limite de PE cheio (exemplo do livro: 7)", () => {
+    expect(recuperacaoBase(7, "normal")).toBe(7);
   });
 
-  it("o registro guarda o que RECUPEROU, não o que foi pedido", () => {
-    const r = aplicarInterludio(vitais, { acao: "interludio-dormir", pv: 9 });
-    expect(r.registro.pv).toBe(2); // 18 → 20
+  it("precária é metade, confortável dobra, luxuosa triplica", () => {
+    expect(recuperacaoBase(7, "precaria")).toBe(3);     // metade, para baixo
+    expect(recuperacaoBase(7, "confortavel")).toBe(14);
+    expect(recuperacaoBase(7, "luxuosa")).toBe(21);
   });
 
-  it("recupera os três de uma vez, cada um no seu teto", () => {
-    const r = aplicarInterludio(vitais, { acao: "interludio-dormir", pv: 1, san: 99, pe: 1 });
-    expect(r.vitais).toMatchObject({ pv: 19, san: 12, pe: 3 });
-    expect(r.registro).toMatchObject({ pv: 1, san: 7, pe: 1 });
+  /* Decisão registrada, não regra do livro: metade de ímpar arredonda para
+   * baixo, porque meio PV não existe e para cima seria mais generoso do que o
+   * texto autoriza. */
+  it("metade de ímpar arredonda para baixo", () => {
+    expect(recuperacaoBase(5, "precaria")).toBe(2);
   });
 
-  it("valor negativo, zero e lixo não recuperam nada", () => {
-    for (const v of [-5, 0, "abc", null, undefined, NaN]) {
-      const r = aplicarInterludio(vitais, { acao: "interludio-relaxar", pv: v });
-      expect(r.vitais.pv).toBe(18);
-      expect(r.registro.pv).toBe(0);
+  it("condição desconhecida cai em normal, o padrão do livro", () => {
+    expect(recuperacaoBase(7, "cama-de-faquir")).toBe(7);
+    expect(condicaoPorId("nada").id).toBe("normal");
+  });
+
+  it("sem limite de PE não recupera nada", () => {
+    for (const v of [0, -3, null, undefined, "abc"]) expect(recuperacaoBase(v, "luxuosa")).toBe(0);
+  });
+});
+
+describe("calcularRecuperacao — o que cada ação faz", () => {
+  const ficha = { peTurno: 7 };
+
+  it("dormir recupera PV e PE, e não Sanidade", () => {
+    expect(calcularRecuperacao(ficha, { acoes: ["interludio-dormir"], condicao: "normal" }))
+      .toEqual({ pv: 7, san: 0, pe: 7 });
+  });
+
+  it("relaxar recupera Sanidade, e não PV nem PE", () => {
+    // 7 de base + 1 pelo próprio personagem que relaxou
+    expect(calcularRecuperacao(ficha, { acoes: ["interludio-relaxar"], condicao: "normal" }))
+      .toEqual({ pv: 0, san: 8, pe: 0 });
+  });
+
+  it("cada personagem que relaxa no mesmo interlúdio soma 1 SAN para todos", () => {
+    const r = calcularRecuperacao(ficha, { acoes: ["interludio-relaxar"], condicao: "normal", relaxantes: 4 });
+    expect(r.san).toBe(11); // 7 + 4
+  });
+
+  it("prato nutritivo sobe um degrau só no PV", () => {
+    const r = calcularRecuperacao(ficha, {
+      acoes: ["interludio-dormir", "interludio-alimentar"], condicao: "normal", prato: "nutritivo",
+    });
+    expect(r.pv).toBe(14); // normal → confortável
+    expect(r.pe).toBe(7);  // intocado
+  });
+
+  it("prato energético sobe um degrau só no PE", () => {
+    const r = calcularRecuperacao(ficha, {
+      acoes: ["interludio-dormir", "interludio-alimentar"], condicao: "confortavel", prato: "energetico",
+    });
+    expect(r.pv).toBe(14);
+    expect(r.pe).toBe(21); // confortável → luxuosa, o exemplo literal do livro
+  });
+
+  it("o degrau não passa do topo da escada", () => {
+    const r = calcularRecuperacao(ficha, {
+      acoes: ["interludio-dormir", "interludio-alimentar"], condicao: "luxuosa", prato: "nutritivo",
+    });
+    expect(r.pv).toBe(21); // já era luxuosa
+  });
+
+  it("prato favorito dá +2 SAN a quem relaxa", () => {
+    const r = calcularRecuperacao(ficha, {
+      acoes: ["interludio-relaxar", "interludio-alimentar"], condicao: "normal", prato: "favorito",
+    });
+    expect(r.san).toBe(10); // 7 + 1 + 2
+  });
+
+  it("prato só vale se a ação alimentar-se foi escolhida", () => {
+    const r = calcularRecuperacao(ficha, { acoes: ["interludio-dormir"], condicao: "normal", prato: "nutritivo" });
+    expect(r.pv).toBe(7); // o prato é ignorado
+  });
+
+  it("as ações sem recuperação não recuperam nada", () => {
+    for (const id of ["interludio-ler", "interludio-exercitar", "interludio-manutencao", "interludio-revisar"]) {
+      expect(calcularRecuperacao(ficha, { acoes: [id] })).toEqual({ pv: 0, san: 0, pe: 0 });
+    }
+  });
+});
+
+describe("podeAdicionarAcao — o teto de duas ações (AC-5)", () => {
+  it("cabem duas", () => {
+    expect(podeAdicionarAcao([], "interludio-dormir")).toBe(true);
+    expect(podeAdicionarAcao(["interludio-dormir"], "interludio-ler")).toBe(true);
+  });
+
+  it("a terceira não cabe", () => {
+    expect(podeAdicionarAcao(["interludio-dormir", "interludio-ler"], "interludio-relaxar")).toBe(false);
+  });
+
+  it("dormir/relaxar/alimentar não repetem — o livro diz uma vez por interlúdio", () => {
+    for (const id of ["interludio-dormir", "interludio-relaxar", "interludio-alimentar"]) {
+      expect(podeAdicionarAcao([id], id)).toBe(false);
     }
   });
 
+  it("Revisar o Caso repete — o livro diz isso dela, e só dela", () => {
+    expect(podeAdicionarAcao(["interludio-revisar"], "interludio-revisar")).toBe(true);
+  });
+
+  it("ação inexistente nunca entra", () => {
+    expect(podeAdicionarAcao([], "interludio-teletransporte")).toBe(false);
+  });
+});
+
+describe("aplicarInterludio — o clamp é a regra (AC-6)", () => {
+  const vitais = { pv: 18, pvMax: 20, san: 5, sanMax: 12, pe: 2, peMax: 4, peTurno: 7 };
+
+  it("recuperar além do máximo para no máximo", () => {
+    const r = aplicarInterludio(vitais, { acoes: ["interludio-dormir"], condicao: "normal" });
+    expect(r.ok).toBe(true);
+    expect(r.vitais.pv).toBe(20); // 18 + 7 seria 25
+    expect(r.vitais.pe).toBe(4);  // 2 + 7 seria 9
+  });
+
+  it("o registro guarda o que RECUPEROU, não o que a conta pediu", () => {
+    const r = aplicarInterludio(vitais, { acoes: ["interludio-dormir"], condicao: "normal" });
+    expect(r.registro.pv).toBe(2); // 18 → 20
+    expect(r.registro.pe).toBe(2); // 2 → 4
+  });
+
   it("sem máximo conhecido não recupera — deixar passar seria furar o teto", () => {
-    const r = aplicarInterludio({ pv: 5, pvMax: 0 }, { acao: "interludio-dormir", pv: 10 });
+    const r = aplicarInterludio({ pv: 5, pvMax: 0, peTurno: 7 }, { acoes: ["interludio-dormir"] });
     expect(r.vitais.pv).toBe(5);
     expect(r.registro.pv).toBe(0);
   });
 
   it("sem ação escolhida não aplica nada (AC-5)", () => {
-    const r = aplicarInterludio(vitais, { pv: 5 });
+    const r = aplicarInterludio(vitais, {});
     expect(r.ok).toBe(false);
-    expect(r.motivo).toMatch(/escolha uma ação/i);
+    expect(r.motivo).toMatch(/ao menos uma ação/i);
     expect(r.vitais).toBeUndefined();
   });
 
-  it("ação inexistente é recusada", () => {
-    expect(aplicarInterludio(vitais, { acao: "interludio-teletransporte" }).ok).toBe(false);
+  it("mais de duas ações é recusado, com o motivo do livro", () => {
+    const r = aplicarInterludio(vitais, {
+      acoes: ["interludio-dormir", "interludio-ler", "interludio-exercitar"],
+    });
+    expect(r.ok).toBe(false);
+    expect(r.motivo).toMatch(/até 2 ações/i);
   });
 
-  it("o registro carrega o nome legível da ação", () => {
-    const r = aplicarInterludio(vitais, { acao: "interludio-revisar", nota: "reabrimos o caso" });
-    expect(r.registro.acaoNome).toBe(acaoPorId("interludio-revisar").nome);
+  it("ação inexistente é filtrada e sozinha derruba o registro", () => {
+    expect(aplicarInterludio(vitais, { acoes: ["interludio-teletransporte"] }).ok).toBe(false);
+  });
+
+  it("o registro carrega os nomes legíveis das ações", () => {
+    const r = aplicarInterludio(vitais, {
+      acoes: ["interludio-revisar", "interludio-ler"], nota: "reabrimos o caso",
+    });
+    expect(r.registro.acoesNomes).toEqual([acaoPorId("interludio-revisar").nome, acaoPorId("interludio-ler").nome]);
     expect(r.registro.nota).toBe("reabrimos o caso");
   });
 
+  it("condição e prato só entram no registro quando fazem sentido", () => {
+    const semDescanso = aplicarInterludio(vitais, { acoes: ["interludio-ler"], condicao: "luxuosa", prato: "favorito" });
+    expect(semDescanso.registro.condicao).toBeNull();
+    expect(semDescanso.registro.prato).toBeNull();
+
+    const comDescanso = aplicarInterludio(vitais, { acoes: ["interludio-dormir"], condicao: "luxuosa" });
+    expect(comDescanso.registro.condicao).toBe("luxuosa");
+  });
+
   it("nota gigante é cortada, não gravada inteira", () => {
-    const r = aplicarInterludio(vitais, { acao: "interludio-ler", nota: "x".repeat(900) });
+    const r = aplicarInterludio(vitais, { acoes: ["interludio-ler"], nota: "x".repeat(900) });
     expect(r.registro.nota).toHaveLength(500);
   });
 
   it("interlúdio sem recuperação é um resultado legítimo", () => {
-    const r = aplicarInterludio(vitais, { acao: "interludio-consertar" });
+    const r = aplicarInterludio(vitais, { acoes: ["interludio-manutencao"] });
     expect(r.ok).toBe(true);
     expect(registroVazio(r.registro)).toBe(true);
+  });
+
+  /* A pré-visualização da tela e a aplicação têm de concordar — se divergissem,
+   * o jogador confirmaria um número e receberia outro. */
+  it("a conta da prévia é a MESMA que a aplicada, antes do clamp", () => {
+    const folgado = { pv: 0, pvMax: 99, san: 0, sanMax: 99, pe: 0, peMax: 99, peTurno: 7 };
+    const escolha = { acoes: ["interludio-dormir"], condicao: "confortavel" };
+    const previa = calcularRecuperacao(folgado, escolha);
+    const r = aplicarInterludio(folgado, escolha);
+    expect(r.registro.pv).toBe(previa.pv);
+    expect(r.registro.pe).toBe(previa.pe);
   });
 });
 
@@ -321,21 +466,41 @@ describe("Interlúdio na tela", () => {
     expect(screen.getByText(REGRA_DA_CENA.descricao)).toBeInTheDocument();
   });
 
-  it("lista as seis ações com o texto do JSON", () => {
+  /* O nome da ação aparece no botão E no histórico, então o botão se identifica
+   * pelo `aria-label`; a descrição é única e vale como prova de que o texto vem
+   * do JSON. */
+  it("lista as sete ações com o texto do JSON", () => {
     abrirDossie(/^Interlúdio$/);
     for (const a of ACOES_INTERLUDIO) {
-      expect(screen.getByText(a.nome.toUpperCase(), { exact: false })).toBeInTheDocument();
+      expect(screen.getByLabelText(a.nome)).toBeInTheDocument();
       expect(screen.getByText(a.descricao)).toBeInTheDocument();
     }
   });
 
-  it("só uma ação fica escolhida — trocar substitui (AC-5)", () => {
+  it("cabem DUAS ações — a regra que a spec 0040 tinha errado (AC-5)", () => {
     abrirDossie(/^Interlúdio$/);
     fireEvent.click(screen.getByLabelText("Dormir"));
+    fireEvent.click(screen.getByLabelText("Ler"));
     expect(screen.getByLabelText("Dormir (escolhida)")).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByLabelText("Relaxar"));
-    expect(screen.getByLabelText("Relaxar (escolhida)")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Ler (escolhida)")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(`2 de ${MAX_ACOES}`)).toBeInTheDocument();
+  });
+
+  it("a terceira é recusada, com o motivo do livro", () => {
+    abrirDossie(/^Interlúdio$/);
+    fireEvent.click(screen.getByLabelText("Dormir"));
+    fireEvent.click(screen.getByLabelText("Ler"));
+    fireEvent.click(screen.getByLabelText("Exercitar-se"));
+    expect(screen.getByLabelText("Exercitar-se")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText(/permite até 2 ações/i)).toBeInTheDocument();
+  });
+
+  it("clicar de novo desmarca, liberando a vaga", () => {
+    abrirDossie(/^Interlúdio$/);
+    fireEvent.click(screen.getByLabelText("Dormir"));
+    fireEvent.click(screen.getByLabelText("Dormir (escolhida)"));
     expect(screen.getByLabelText("Dormir")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText(`0 de ${MAX_ACOES}`)).toBeInTheDocument();
   });
 
   it("sem ação escolhida não dá para registrar (AC-5)", () => {
@@ -343,14 +508,35 @@ describe("Interlúdio na tela", () => {
     expect(screen.getByLabelText("Registrar interlúdio")).toBeDisabled();
   });
 
-  it("registrar aplica o clamp de verdade e entra no histórico (AC-6, AC-7)", () => {
-    abrirDossie(/^Interlúdio$/, { pv: 18, pvMax: 20, sanMax: 12, peMax: 4 });
+  it("a condição do descanso só aparece se dormir ou relaxar", () => {
+    abrirDossie(/^Interlúdio$/);
+    expect(screen.queryByLabelText(/^Confortável/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Dormir"));
-    fireEvent.change(screen.getByLabelText("Recuperação de PV"), { target: { value: "9" } });
+    expect(screen.getByLabelText(/^Confortável/)).toBeInTheDocument();
+  });
+
+  it("a refeição só aparece se alimentar-se", () => {
+    abrirDossie(/^Interlúdio$/);
+    expect(screen.queryByLabelText(/^Prato Nutritivo/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Alimentar-se"));
+    expect(screen.getByLabelText(/^Prato Nutritivo/)).toBeInTheDocument();
+  });
+
+  /* NEX 5% → peTurno = 1 + nexLevel(5) = 1. Dormir normal recupera 1 PV e 1 PE. */
+  it("a prévia mostra a conta antes de confirmar", () => {
+    abrirDossie(/^Interlúdio$/);
+    fireEvent.click(screen.getByLabelText("Dormir"));
+    expect(screen.getByText(/limite de PE por rodada \(1\)/)).toBeInTheDocument();
+  });
+
+  it("registrar aplica o clamp de verdade e entra no histórico (AC-6, AC-7)", () => {
+    // peTurno 1 (NEX 5%), condição luxuosa → 3 PV; com PV 19/20 só entra 1.
+    abrirDossie(/^Interlúdio$/, { pv: 19, pvMax: 20, san: 12, sanMax: 12, pe: 4, peMax: 4 });
+    fireEvent.click(screen.getByLabelText("Dormir"));
+    fireEvent.click(screen.getByLabelText(/^Luxuosa/));
     fireEvent.click(screen.getByLabelText("Registrar interlúdio"));
-    // O histórico guarda o efetivo (2), não o pedido (9).
-    expect(screen.getByText("+2 PV")).toBeInTheDocument();
-    expect(screen.queryByText("+9 PV")).not.toBeInTheDocument();
+    expect(screen.getByText("+1 PV")).toBeInTheDocument();
+    expect(screen.queryByText("+3 PV")).not.toBeInTheDocument();
   });
 
   it("sem histórico, diz para que serve", () => {
@@ -359,12 +545,32 @@ describe("Interlúdio na tela", () => {
   });
 
   it("interlúdio sem recuperação aparece marcado como tal", () => {
-    abrirDossie(/^Interlúdio$/, { interludios: [{ id: "i1", acao: "interludio-ler", acaoNome: "Ler", pv: 0, san: 0, pe: 0 }] });
+    abrirDossie(/^Interlúdio$/, { interludios: [{ id: "i1", acoes: ["interludio-ler"], acoesNomes: ["Ler"], pv: 0, san: 0, pe: 0 }] });
     expect(screen.getByText("sem recuperação")).toBeInTheDocument();
   });
 
+  it("as duas ações do registro aparecem juntas no histórico", () => {
+    abrirDossie(/^Interlúdio$/, {
+      interludios: [{ id: "i1", acoes: ["interludio-dormir", "interludio-alimentar"], acoesNomes: ["Dormir", "Alimentar-se"], condicao: "luxuosa", prato: "nutritivo", pv: 5, pe: 3 }],
+    });
+    expect(screen.getByText("Dormir + Alimentar-se")).toBeInTheDocument();
+    expect(screen.getByText("Luxuosa")).toBeInTheDocument();
+    expect(screen.getByText("Prato Nutritivo")).toBeInTheDocument();
+  });
+
+  /* ⚠ Interlúdios gravados pela spec 0040 usam `acao` no singular. Eles estão em
+   * PRODUÇÃO — se o histórico os ignorasse, o jogador veria o registro dele
+   * desaparecer depois de um deploy. */
+  it("registro no formato antigo (acao singular) continua aparecendo", () => {
+    abrirDossie(/^Interlúdio$/, { interludios: [{ id: "velho", acao: "interludio-dormir", acaoNome: "Dormir", pv: 3 }] });
+    // "Dormir" também é o rótulo do botão de ação — o que prova o histórico é a
+    // recuperação gravada, que só existe no registro.
+    expect(screen.getAllByText("Dormir").length).toBeGreaterThan(1);
+    expect(screen.getByText("+3 PV")).toBeInTheDocument();
+  });
+
   it("somente-leitura mostra o histórico e esconde o registro (AC-9)", () => {
-    abrirDossie(/^Interlúdio$/, { interludios: [{ id: "i1", acao: "interludio-dormir", acaoNome: "Dormir", pv: 3 }] }, { readOnly: true });
+    abrirDossie(/^Interlúdio$/, { interludios: [{ id: "i1", acoes: ["interludio-dormir"], acoesNomes: ["Dormir"], pv: 3 }] }, { readOnly: true });
     expect(screen.getByText("+3 PV")).toBeInTheDocument();
     expect(screen.queryByLabelText("Registrar interlúdio")).not.toBeInTheDocument();
   });

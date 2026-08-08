@@ -10,9 +10,59 @@ alwaysApply: true
 > todo. Diferente do **ADR** (decisão durável e imutável). Decisão estrutural → ADR; estado do
 > trabalho → aqui. Atualize ao **pausar/encerrar**; leia ao **retomar**. Use a skill `/handoff`.
 
-**Última atualização:** 2026-08-08 (4) — **SPEC 0040 ENTREGUE. 0036–0039 JÁ EM PRODUÇÃO.**
-Gate: **113 suítes / 2.666 testes verdes** (`--runInBand`) e **`CI=true npm run build` compila
+**Última atualização:** 2026-08-08 (5) — **SPEC 0041 ENTREGUE (corrige 2 regras erradas da 0040).**
+Gate: **113 suítes / 2.694 testes verdes** (`--runInBand`) e **`CI=true npm run build` compila
 limpo**.
+
+> **2026-08-08 (5): SPEC 0041 — OS VALORES DO INTERLÚDIO, DO LIVRO.** O Andre autorizou transcrever
+> a tabela de recuperação. **E a transcrição provou que a spec 0040 tinha implementado DUAS REGRAS
+> ERRADAS, já em produção.**
+>
+> **⚠ OS DOIS ERROS QUE A 0040 SUBIU:**
+> 1. **"Cada personagem escolhe UMA ação de interlúdio"** — o livro diz literalmente *"um personagem
+>    pode fazer até **DUAS** das ações a seguir"*. O AC-5 da 0040 travava em uma.
+> 2. **Faltava a ação "Exercitar-se"**, e **"Consertar" chama-se "Manutenção"**. A transcrição da
+>    spec 0026 tinha 6 ações; são **7**.
+>
+> Lição: a 0040 tratou `regras-oficiais.json` como fonte completa. Ele é uma **transcrição parcial**
+> — as entradas diziam `(Resumo — valores no livro.)` e eu li isso como "os valores faltam", quando
+> na verdade **a regra inteira estava resumida**, inclusive o número de ações. Resumo declarado é
+> aviso de que falta conferir a fonte, não só de que falta um número.
+>
+> **⚠ E OS VALORES ERAM CALCULÁVEIS DESDE SEMPRE.** O livro: dormir recupera PV e PE iguais ao
+> **limite de PE por rodada**, vezes a condição do descanso. O nosso `deriveStats().peTurno` **JÁ É
+> esse limite** — o exemplo do livro (NEX 35% → limite 7 → recupera 7 PV e 7 PE) confere exatamente
+> com `1 + nexLevel(35)` = 7. A 0040 pediu o número ao jogador quando a ficha já sabia calculá-lo.
+>
+> - **Escada de condições:** precária ½ · normal ×1 · confortável ×2 · luxuosa ×3. A ORDEM importa —
+>   o prato nutritivo/energético "sobe um degrau", e o exemplo do livro (confortável → triplicada)
+>   só fecha com essa escada.
+> - **Relaxar** usa a mesma base, mas em Sanidade, + 1 SAN por personagem que relaxou no mesmo
+>   interlúdio (inclusive o próprio — por isso o padrão é 1, não 0).
+> - **Os quatro pratos** de Alimentar-se entraram com seus efeitos condicionais.
+> - **Só Revisar o Caso repete** no mesmo interlúdio; o livro diz isso dela, e só dela.
+> - **A prévia e a aplicação chamam a MESMA função** (`calcularRecuperacao`). Se divergissem, o
+>   jogador confirmaria um número e receberia outro — há teste travando a igualdade.
+> - **Compatibilidade com o que já está gravado:** interlúdios da 0040 usam `acao` no singular e
+>   estão em PRODUÇÃO. `historicoDeInterludios` os converte, senão o jogador veria o próprio
+>   registro desaparecer depois do deploy. Há teste.
+>
+> **DECISÃO REGISTRADA, NÃO REGRA DO LIVRO:** a condição precária vale "metade", e meio PV não
+> existe — **arredondo para baixo**. O livro que temos não diz o sentido, e para cima seria mais
+> generoso do que o texto autoriza. Se a mesa preferir o contrário, é uma linha, mas é decisão de
+> produto.
+>
+> **PII:** o texto extraído do PDF carrega a marca d'água com nome e e-mail do comprador.
+> **Nada disso entrou no repo** — só regra parafraseada.
+>
+> **Arquivos:** `regras-oficiais.json` (7 ações, textos com os valores reais),
+> `interludio.js` (reescrito: escada, pratos, `calcularRecuperacao`, teto de 2 ações),
+> `Tabs/InterludioTab.jsx` (reescrito: multi-seleção, condição, prato, prévia),
+> `__tests__/investigacao-interludio.test.js` (73 testes), `OrdemParanormalSheet.jsx` (passa `peTurno`).
+>
+> **PENDENTE DO ANDRE:** validar no navegador (escolher Dormir + Alimentar-se com prato nutritivo e
+> conferir que o PV sobe um degrau; tentar uma terceira ação e ver a recusa) e **decidir o
+> arredondamento da condição precária**.
 
 > **2026-08-08 (4): SPEC 0040 — INVESTIGAÇÃO E INTERLÚDIO.** O Andre pediu as duas páginas que a
 > RPGpedia anuncia como "em breve", *"trabalhe 100% nisso"*, e sugeriu juntá-las com Descrição.

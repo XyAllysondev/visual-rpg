@@ -1268,7 +1268,11 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
               <DossieTab
                 descricao={descricao} setDescricao={setDescricao}
                 investigacao={investigacao} setInvestigacao={setInvestigacao}
-                vitais={{ pv: hp, pvMax, san, sanMax, pe, peMax }}
+                /* `peTurno` é o LIMITE DE PE POR RODADA, e o livro usa
+                   exatamente ele como base da recuperação de interlúdio
+                   (spec 0041). Já vem de `deriveStats` — o exemplo do livro
+                   (NEX 35% → limite 7) confere com o nosso cálculo. */
+                vitais={{ pv: hp, pvMax, san, sanMax, pe, peMax, peTurno: peTurno + pdBonus }}
                 interludios={interludios}
                 onAplicarInterludio={aplicarInterludio}
                 readOnly={readOnly}
