@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useLocale } from "../../i18n/useLocale";
 import { rollNotation, rollOP } from "../../domain/dice";
 import { nexStats } from "../../lib/nexStats";
-import { useIsMobile } from "../../lib/useViewport";
+import { sanitizarHtml } from "../../lib/sanitizarHtml";
 import SettingsTabs from "./SettingsTabs";
 import AttrDiagram from "./AttrDiagram";
 import Bar from "./Bar";
@@ -85,7 +85,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
   const [trilha, setTrilha] = useState(character.trilha ?? null);
   const [rituais, setRituais] = useState(character.rituais ?? []);
   const [skillFilter, setSkillFilter] = useState("");
-  const [showAddSkill, setShowAddSkill] = useState(false);
+  const [showAddSkill] = useState(false);
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [skillDraft, setSkillDraft] = useState({ name:"Nova Habilidade", image:"", desc:"Minha nova habilidade" });
   const skillImgRef = useRef(null);
@@ -114,7 +114,6 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
     setSkills(v=>[...v,s]); setOpenSkillId(s.id); setShowSkillModal(false);
   };
   const [openSkillId, setOpenSkillId] = useState(null);
-  const [newSkillName, setNewSkillName] = useState("");
   const [desc, setDesc] = useState({
     anotacoes: form.anotacoes || "",
     aparencia: form.aparencia || "",
@@ -167,6 +166,9 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
       allowMasterEdit,
       allowAnyEdit,
     });
+    // `character` e `onUpdate` ficam de fora de propósito: incluí-los faria o
+    // efeito disparar a cada render do pai e ressalvar a ficha inteira em loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attrs, form, desc, origem, classe, skillTreino, skillOutros, skillAttr, pdBonus, nex, hp, san, pe, pvMax, sanMax, peMax, attacks, skills, trilha, rituais, isPrivate, allowMasterEdit, allowAnyEdit]);
 
   // derived
@@ -201,6 +203,9 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
     setPvMax(ns.pv);  setHp(v  => Math.min(v, ns.pv));
     setSanMax(ns.san); setSan(v => Math.min(v, ns.san));
     setPeMax(ns.pe);  setPe(v  => Math.min(v, ns.pe));
+    // Só a TROCA DE CLASSE refaz os máximos por aqui; `attrs` e `nex` têm o
+    // efeito seguinte, e listá-los aqui recalcularia duas vezes o mesmo valor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classe?.id]);
 
   // Qualquer mudança de atributo recalcula PV (VIG), PE (PRE) e SAN (classe)
@@ -270,10 +275,6 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
   }, [attrOpen]);
 
   const tabs = ["combate","poderes","habilidades","rituais","inventário","descrição"];
-
-  /* ── left col width (isMobile reativo: reflui ao girar o device) */
-  const isMobile = useIsMobile();
-  const leftW = isMobile ? "100%" : 310;
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:0,position:"relative",fontFamily:"Crimson Pro,serif"}}>
@@ -635,7 +636,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                     <div
                       contentEditable
                       suppressContentEditableWarning
-                      dangerouslySetInnerHTML={{__html: d.notes||""}}
+                      dangerouslySetInnerHTML={{__html: sanitizarHtml(d.notes||"")}}
                       onInput={e=>setD(x=>({...x,notes:e.currentTarget.innerHTML}))}
                       style={{
                         minHeight:120,padding:"10px 12px",outline:"none",
@@ -797,7 +798,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
               onChange={e=>setForm(f=>({...f,personagem:e.target.value}))}
               style={{
                 display:"block", width:"100%", boxSizing:"border-box",
-                background:"transparent", border:"none", outline:"none",
+                border:"none", outline:"none",
                 fontFamily:"'Cinzel Decorative',serif", fontSize:22, fontWeight:700,
                 letterSpacing:2, lineHeight:1.1, marginBottom:10,
                 background:"linear-gradient(135deg,#c9a84c,#e8c96d,#c9a84c)",
@@ -976,7 +977,6 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
               const t = getT(p.n);
               const outros = skillOutros[base] ?? 0;
               const totalBonus = t.bonus + outros;
-              const isTrained = t.bonus>0;
               return (
                 <div key={p.n}
                   style={{display:"grid",gridTemplateColumns:"22px 1fr 50px 42px 44px 42px",gap:"0 4px",alignItems:"center",padding:"6px 10px",background:i%2===0?"transparent":"rgba(255,255,255,0.018)",borderBottom:"1px solid rgba(201,168,76,0.05)",cursor:"pointer",transition:"background 0.15s"}}
@@ -1097,7 +1097,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
               const TLBLS = { combate:"Combate", poderes:"Poderes", habilidades:"Skills", rituais:"Rituais", "inventário":"Itens", "descrição":"Diário" };
               return tabs.map(t=>(
                 <button key={t} onClick={()=>setActiveTab(t)} style={{
-                  flex:1,padding:"10px 2px 9px",background:"none",border:"none",cursor:"pointer",
+                  flex:1,padding:"10px 2px 9px",border:"none",cursor:"pointer",
                   display:"flex",flexDirection:"column",alignItems:"center",gap:3,
                   fontFamily:"Cinzel,serif",fontSize:7.5,letterSpacing:0.8,textTransform:"uppercase",
                   color:activeTab===t?"var(--gold)":"rgba(255,255,255,0.28)",
@@ -1288,7 +1288,9 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                                 ))}
                                 {atk.notes && (
                                   <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid rgba(255,255,255,0.07)",fontFamily:"Crimson Pro,serif",fontSize:13,color:"rgba(255,255,255,0.55)",lineHeight:1.7}}
-                                    dangerouslySetInnerHTML={{__html: atk.notes.replace(/<strong>/g,'<strong style="color:#a78bfa;font-weight:700">')}}/>
+                                    /* sanitiza ANTES de realçar: o `style` daqui é nosso,
+                                       o do jogador não passa (sanitizarHtml tira atributo). */
+                                    dangerouslySetInnerHTML={{__html: sanitizarHtml(atk.notes).replace(/<strong>/g,'<strong style="color:#a78bfa;font-weight:700">')}}/>
                                 )}
                                 <div style={{display:"flex",justifyContent:"space-between",marginTop:8,paddingTop:8,borderTop:"1px solid rgba(255,255,255,0.07)"}}>
                                   <button onClick={()=>setAttacks(a=>a.filter((_,j)=>j!==i))}

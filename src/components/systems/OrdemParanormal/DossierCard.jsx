@@ -7,6 +7,7 @@
 import { getElementTheme } from "./elementos";
 import ElementoSymbol from "./ElementoSymbol";
 import { getActiveAvatar } from "../../../domain/character";
+import { nexStats } from "../../../lib/nexStats";
 
 const PV_CRITICO = 0.3;
 
@@ -49,10 +50,18 @@ export default function DossierCard({ character: c, systemAccent, onClick }) {
   const glow    = elId ? elTheme.glow   : "rgba(201,168,76,0.25)";
 
   const nex    = Number(c.nex ?? 5);
-  const pv     = Number(c.pv   ?? c.pvMax ?? 0);
-  const pvMax  = Number(c.pvMax ?? 1);
-  const san    = Number(c.san  ?? c.sanMax ?? 0);
-  const sanMax = Number(c.sanMax ?? 1);
+  /* Ficha recém-criada não tem vitais gravados — o criador só persiste atributos,
+   * origem, classe e NEX; os máximos nascem quando a ficha é aberta. Sem este
+   * fallback o card lia 0/1 e carimbava INCONSCIENTE em um agente que acabou de
+   * entrar na Ordem. `nexStats` é o mesmo cálculo que o card de ficha
+   * compartilhada usa (lib/nexStats), não uma segunda régua. */
+  const derivado = nexStats(nex, c.classe?.id, {
+    VIG: Number(c.attrs?.VIG) || 0, PRE: Number(c.attrs?.PRE) || 0,
+  });
+  const pvMax  = Number(c.pvMax  ?? derivado.pv)  || 1;
+  const sanMax = Number(c.sanMax ?? derivado.san) || 1;
+  const pv     = Number(c.pv  ?? pvMax);
+  const san    = Number(c.san ?? sanMax);
 
   const status = statusInfo(pv, pvMax);
 

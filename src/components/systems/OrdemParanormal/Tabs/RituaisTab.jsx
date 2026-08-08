@@ -4,10 +4,11 @@ import RichTextEditor from "./shared/RichTextEditor";
 import ElementoBadge from "./shared/ElementoBadge";
 import {
   fieldLabel, inputS, btnGold, btnGhost, overlayS, BannerHeader, ModalShell,
-  tLabel, tCardTitle, tStat, tEmpty,
+  tLabel, tCardTitle, tEmpty,
 } from "./shared/modalStyles";
 import RITUAIS_OFICIAIS from "../../../../data/ordemParanormal/rituais-oficiais.json";
 import { circuloMaxNex } from "../rules";
+import { sanitizarHtml } from "../../../../lib/sanitizarHtml";
 
 const ELEMENTOS = ["conhecimento", "energia", "morte", "sangue", "medo", "varia"];
 const CIRCULOS = [1, 2, 3, 4];
@@ -187,7 +188,7 @@ const addPill = (active, small) => ({
   border: active ? "1px solid var(--el-accent)" : "1px solid rgba(255,255,255,0.1)",
 });
 
-function AdicionarRituaisModal({ onClose, onAdd, homebrew, onCreateHomebrew, onDeleteHomebrew }) {
+function AdicionarRituaisModal({ onClose, onAdd, homebrew, conhecidos, onCreateHomebrew, onDeleteHomebrew }) {
   const [tab, setTab] = useState("oficial");
   const [fEl, setFEl] = useState("todos");
   const [fCirc, setFCirc] = useState("todos");
@@ -286,8 +287,15 @@ function AdicionarRituaisModal({ onClose, onAdd, homebrew, onCreateHomebrew, onD
                     <button onClick={() => onDeleteHomebrew(r.id)} title="Excluir ritual" aria-label="Excluir ritual"
                       style={{ fontFamily: FONT_CINZEL, fontSize: 14, fontWeight: 700, width: 32, height: 32, borderRadius: 6, background: "none", color: "var(--danger-text,#d85a5a)", border: "1px solid var(--danger-text,#d85a5a)", cursor: "pointer", flexShrink: 0, marginRight: 6 }}>×</button>
                   )}
-                  <button onClick={() => onAdd(r)} title="Adicionar à ficha" className="op-add-plus"
-                    style={{ fontFamily: FONT_CINZEL, fontSize: 14, fontWeight: 700, width: 32, height: 32, borderRadius: 6, background: "var(--el-accent)", color: "#000", border: "none", cursor: "pointer", flexShrink: 0 }}>+</button>
+                  {/* Ritual já conhecido não pode entrar duas vezes — em vez de
+                      um "+" que não faz nada, o botão diz que ele já está lá. */}
+                  {conhecidos?.has(r.id) ? (
+                    <span title="Já está na ficha" aria-label="Já está na ficha"
+                      style={{ fontFamily: FONT_CINZEL, fontSize: 13, fontWeight: 700, width: 32, height: 32, borderRadius: 6, border: "1px solid rgba(74,222,128,0.45)", color: "#4ade80", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✓</span>
+                  ) : (
+                    <button onClick={() => onAdd(r)} title="Adicionar à ficha" className="op-add-plus"
+                      style={{ fontFamily: FONT_CINZEL, fontSize: 14, fontWeight: 700, width: 32, height: 32, borderRadius: 6, background: "var(--el-accent)", color: "#000", border: "none", cursor: "pointer", flexShrink: 0 }}>+</button>
+                  )}
                 </div>
                 {open && (
                   <div style={{ padding: "0 16px 12px 40px" }}>
@@ -301,7 +309,7 @@ function AdicionarRituaisModal({ onClose, onAdd, homebrew, onCreateHomebrew, onD
                       </div>
                     )}
                     <div style={{ fontFamily: FONT_LORE, fontSize: 15, color: "rgba(232,228,217,0.88)", lineHeight: 1.65 }}
-                      dangerouslySetInnerHTML={{ __html: r.descricao || r.efeito || "" }} />
+                      dangerouslySetInnerHTML={{ __html: sanitizarHtml(r.descricao || r.efeito || "") }} />
                   </div>
                 )}
               </div>
@@ -422,7 +430,7 @@ function RitualCard({ r, onEdit, onRemove, onRoll, overNex, maxCirc }) {
           )}
           {r.descricao && (
             <div className="op-rich-render" style={{ fontFamily: FONT_LORE, fontSize: 14, color: "rgba(232,228,217,0.85)", lineHeight: 1.65, paddingTop: 6, borderTop: "1px solid var(--border)" }}
-              dangerouslySetInnerHTML={{ __html: r.descricao }} />
+              dangerouslySetInnerHTML={{ __html: sanitizarHtml(r.descricao) }} />
           )}
 
           <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 8, borderTop: "1px solid var(--border)" }}>
@@ -446,7 +454,15 @@ export default function RituaisTab({ rituais, setRituais, dtBase, dtBonus, setDt
   const homebrew = rituais.filter((r) => r.is_homebrew);
   const filtered = rituais.filter((r) => r.nome?.toLowerCase().includes(busca.toLowerCase()));
 
-  const addRitual = (r) => setRituais((arr) => [...arr, { ...r, id: Date.now() + Math.random(), is_homebrew: r.is_homebrew ?? false }]);
+  /* O id OFICIAL do ritual é preservado de propósito: é por ele que o motor de
+   * progressão (`progressao/motor.js`) sabe o que este agente já conhece. Ao
+   * trocá-lo por um número novo, o mesmo ritual voltava a ser oferecido como
+   * pendência e podia entrar duas vezes na ficha — nomes iguais, ids
+   * diferentes. Ritual já conhecido não entra de novo. */
+  const addRitual = (r) => setRituais((arr) => {
+    if (r?.id != null && arr.some((x) => x.id === r.id)) return arr;
+    return [...arr, { ...r, id: r?.id ?? Date.now() + Math.random(), is_homebrew: r?.is_homebrew ?? false }];
+  });
   const saveRitual = (r) => {
     setRituais((arr) => {
       const idx = arr.findIndex((x) => x.id === r.id);
@@ -493,7 +509,8 @@ export default function RituaisTab({ rituais, setRituais, dtBase, dtBonus, setDt
       )}
 
       {showForm && <RitualFormModal ritual={editing} onClose={() => setShowForm(false)} onSave={saveRitual} />}
-      {showAdd && <AdicionarRituaisModal onClose={() => setShowAdd(false)} onAdd={addRitual} homebrew={homebrew} onCreateHomebrew={saveRitual} onDeleteHomebrew={removeRitual} />}
+      {showAdd && <AdicionarRituaisModal onClose={() => setShowAdd(false)} onAdd={addRitual} homebrew={homebrew}
+        conhecidos={new Set(rituais.map((r) => r.id))} onCreateHomebrew={saveRitual} onDeleteHomebrew={removeRitual} />}
     </div>
   );
 }

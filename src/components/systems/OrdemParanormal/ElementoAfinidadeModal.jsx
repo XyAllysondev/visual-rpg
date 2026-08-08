@@ -34,7 +34,11 @@ export default function ElementoAfinidadeModal({ onChoose }) {
           <p style={{ textAlign: "center", color: "var(--muted2)", fontFamily: "var(--font-body,'IM Fell English',serif)", fontStyle: "italic", fontSize: 15, margin: "10px 0 22px" }}>
             Seu agente desenvolveu uma afinidade paranormal. Esta escolha é permanente e irreversível.
           </p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+          {/* Quatro colunas FIXAS viravam quatro cartões de ~78px num celular de
+              360px — símbolo, nome e descrição espremidos justo na tela que
+              marca o NEX 50%. Com `auto-fit`+`minmax` o desktop mantém as quatro
+              (840/4 = 210 > 170) e o celular quebra em duas. */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
             {SELECTABLE_ELEMENTS.map((el) => (
               <div key={el.id} className="op-el-card" role="button" tabIndex={0}
                 onClick={() => setPicked(el.id)} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setPicked(el.id)}

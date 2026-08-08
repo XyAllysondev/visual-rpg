@@ -100,7 +100,15 @@ function PublicSheetView({ charId }) {
           <OrdemParanormalSheet
             character={editedChar || data}
             readOnly={!isEditorMode}
-            onBack={isEditorMode ? null : () => { window.location.href = "/"; }}
+            /* A ficha SEMPRE desenha o "← Voltar". Com `onBack` nulo no modo
+               editor, o botão existia e não fazia nada — controle morto bem na
+               única tela que um convidado de fora enxerga. Sair é a mesma coisa
+               nos dois modos; o que o editor perde ao sair é a sugestão ainda
+               não enviada, e por isso ele confirma antes. */
+            onBack={() => {
+              if (isEditorMode && !window.confirm("Sair sem enviar suas sugestões?")) return;
+              window.location.href = "/";
+            }}
             onRoll={null}
             defaultEditMode={isEditorMode}
             flushSaveRef={isEditorMode ? flushSaveRef : undefined}

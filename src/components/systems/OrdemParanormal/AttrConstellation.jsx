@@ -9,6 +9,7 @@
 import AttributeCircle from "./AttributeCircle";
 import { ATTR_LABELS } from "./rules";
 import { useLocale } from "../../../i18n/useLocale";
+import { useIsMobile } from "../../../lib/useViewport";
 
 /* pentagon points as % of the box: AGI top, then clockwise */
 const POS = {
@@ -20,13 +21,19 @@ const POS = {
 };
 const EDGE_ORDER = ["AGI", "INT", "VIG", "PRE", "FOR"];
 
-export default function AttrConstellation({ attrs, accent = "#e8c96d", onRoll, onEdit, edit, size = 76 }) {
+export default function AttrConstellation({ attrs, accent = "#e8c96d", onRoll, onEdit, edit, size }) {
   const { t } = useLocale();
+  /* O dial é dimensionado aqui, não em CSS: o tamanho vai inline no
+     AttributeCircle e estilo inline vence @media — as regras de .op-dial para
+     telas estreitas nunca valiam. Em 480px cinco dials de 76px com os rótulos
+     embaixo passavam da caixa de 320px de altura e encostavam no cartão de NEX. */
+  const compacto = useIsMobile(481);
+  const dialSize = size ?? (compacto ? 66 : 76);
   const elementTheme = { glow: accent, rune: accent };
   const pts = EDGE_ORDER.map((k) => `${POS[k].x},${POS[k].y}`).join(" ");
 
   return (
-    <div style={{ position: "relative", width: "100%", maxWidth: 300, height: 320, margin: "0 auto" }}>
+    <div style={{ position: "relative", width: "100%", maxWidth: 300, height: compacto ? 290 : 320, margin: "0 auto" }}>
       {/* constellation lines */}
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", overflow: "visible" }}>
         <polygon points={pts} fill="none" stroke={accent} strokeOpacity="0.22" strokeWidth="1" vectorEffect="non-scaling-stroke" style={{ filter: `drop-shadow(0 0 3px ${accent}55)` }} />
@@ -42,7 +49,7 @@ export default function AttrConstellation({ attrs, accent = "#e8c96d", onRoll, o
             abbr={k}
             name={t("op.attrs." + k) || ATTR_LABELS[k]}
             value={attrs[k] ?? 0}
-            size={size}
+            size={dialSize}
             elementTheme={elementTheme}
             edit={edit}
             onRoll={() => onRoll?.(k)}

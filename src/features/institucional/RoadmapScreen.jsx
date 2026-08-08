@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { roadmapData } from "../../roadmapData";
 import RoadmapItem from "./RoadmapItem";
+import { ALVO_EXTERNO, DISCORD_URL } from "../../lib/links";
 
 const PHASE_STATUS = {
   done:    { label:"Concluído",    color:"#7ecb82", bg:"rgba(76,175,80,0.08)",    border:"rgba(76,175,80,0.28)",    pulse:false },
@@ -170,7 +171,10 @@ export default function RoadmapScreen() {
           </p>
 
           {/* button */}
-          <a href="https://discord.gg/nexusrpg" target="_blank" rel="noopener noreferrer" style={{ textDecoration:"none", position:"relative" }}>
+          {/* O endereço vem de `lib/links.js` — spec 0036, AC-2. Ele já esteve
+              literal aqui e em SystemSelect.jsx, e quando o convite expirou as
+              duas cópias morreram juntas, sem ninguém notar. */}
+          <a href={DISCORD_URL} {...ALVO_EXTERNO} style={{ textDecoration:"none", position:"relative" }}>
             <button className="btn-gold"
               style={{ padding:"14px 36px", fontSize:"0.78rem", letterSpacing:"0.12em" }}
               onMouseEnter={e=>{ e.currentTarget.style.transform="translateY(-2px)"; }}

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import * as bestiaryRepo from "../../infrastructure/firestore/bestiaryRepo";
 import { clampHp } from "../../domain/creature";
 import { rollNotation } from "../../domain/dice";
+import { sanitizarHtml } from "../../lib/sanitizarHtml";
 import REGRAS_OFICIAIS from "../../data/ordemParanormal/regras-oficiais.json";
 import RITUAIS_LIB from "../../data/ordemParanormal/rituais-oficiais.json";
 import ITENS_LIB from "../../data/ordemParanormal/itens-oficiais.json";
@@ -769,7 +770,7 @@ function BestiaryTab({ campaignId }) {
                         {r.resistencia&&r.resistencia!=='-'&&r.resistencia!=='—'&&<div style={{ gridColumn:'1/-1' }}><span style={{ color:'var(--muted)' }}>RESISTÊNCIA </span><span style={{ color:'var(--text)' }}>{r.resistencia}</span></div>}
                       </div>
                       <div style={{ fontFamily:'Crimson Pro,serif', fontSize:13, color:'rgba(255,255,255,0.85)', lineHeight:1.6, marginTop:4 }}
-                        dangerouslySetInnerHTML={{ __html: r.descricao || r.efeito || '' }} />
+                        dangerouslySetInnerHTML={{ __html: sanitizarHtml(r.descricao || r.efeito || '') }} />
                       <div style={{ display:'flex', justifyContent:'flex-end', marginTop:8 }}>
                         <button onClick={()=>doRoll('1d20')} title="Rolar 1d20 para conjurar"
                           style={{ display:'flex', alignItems:'center', gap:4, padding:'4px 10px', borderRadius:5, border:`1px solid ${ec}44`, background:`${ec}11`, color:ec, cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1 }}>

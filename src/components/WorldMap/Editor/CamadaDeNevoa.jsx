@@ -156,8 +156,11 @@ export function raioDoDesfoque(escala, scale) {
  *   teste inspeciona sem precisar de pixels.
  */
 export function pintarNevoa(ctx, opcoes = {}) {
+  /* `mascaraAtual` e `papel` seguem chegando no objeto de opções (o chamador os
+     passa junto), mas quem os LÊ é o `construirPixels` — desestruturá-los aqui
+     só criava dois nomes mortos. O contrato de entrada não muda. */
   const {
-    mascara = null, mascaraAtual = null, papel = "mestre",
+    mascara = null,
     largura = 0, altura = 0, dpr = 1, pan = { x: 0, y: 0 }, scale = 1,
     offscreen = null,
   } = opcoes;

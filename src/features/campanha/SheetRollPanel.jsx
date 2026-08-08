@@ -6,6 +6,10 @@ function SheetRollPanel({ campaigns, uid, userName, userPhoto, onRollReady }) {
   const [selId, setSelId] = useState(() => active[0]?.id ?? null);
   const campaign = active.find(c => c.id === selId) ?? active[0] ?? null;
 
+  // Só o ID da campanha importa: `campaign` é um objeto novo a cada render do
+  // pai e `onRollReady` costuma ser lambda inline — qualquer um dos dois na
+  // lista avisaria o pai a cada render, sem que a campanha tivesse mudado.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { onRollReady?.(campaign ?? null); }, [campaign?.id]);
 
   return (

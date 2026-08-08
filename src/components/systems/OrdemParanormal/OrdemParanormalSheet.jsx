@@ -19,6 +19,7 @@ import { OrdemSheetStyles } from "./ordemStyles";
 import { getElementTheme, ELEMENT_UNLOCK_NEX } from "./elementos";
 import ElementoSymbol from "./ElementoSymbol";
 import ElementoAfinidadeModal from "./ElementoAfinidadeModal";
+import ElementoRitual, { RITUAL_MS } from "./ElementoRitual";
 import HabilidadesTab from "./Tabs/HabilidadesTab";
 import RituaisTab from "./Tabs/RituaisTab";
 import InventarioTab from "./Tabs/InventarioTab";
@@ -31,12 +32,15 @@ import {
   ATTR_KEYS, ATTR_LABELS, PERICIAS, PERICIA_GRUPOS, defaultTrainedSet, treinoColor,
   deriveStats, rollOP, rollExpr, nexLevel, NEX_LADDER, rollPayload,
   dtRituais as dtRituaisRule,
-  TIPOS_DANO, ALCANCES, PERICIAS_ATAQUE, critMargin, isCritical, combineDamage,
+  TIPOS_DANO, ALCANCES, PERICIAS_ATAQUE, critMargin, isCritical, combineDamage, attackSkillBonus,
+  bonusDeModificadores, boloDeDados, notacaoDeDados, termosDaConta, TREINO_TIERS,
 } from "./rules";
+import RollCard, { DiceRow, ContaBreakdown } from "./RollCard";
 import { ModalShell, inputS, fieldLabel, btnGold, btnGhost } from "./Tabs/shared/modalStyles";
 import { useSlidingPill } from "../../../hooks/useSlidingPill";
 import SlidingTabPill from "../../SlidingTabPill";
 import RichTextEditor from "./Tabs/shared/RichTextEditor";
+import { sanitizarHtml } from "../../../lib/sanitizarHtml";
 
 const downscale = (file, max = 420) =>
   new Promise((resolve) => {
@@ -266,11 +270,30 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
 
   const [defesaBonus, setDefesaBonus] = useState(character.defesaBonus ?? 0);
   const [defesaOutros, setDefesaOutros] = useState(character.defesaOutros ?? 0);
-  const [esquivaBonus, setEsquivaBonus] = useState(character.esquivaBonus ?? 0);
+  /* Esquiva bônus não tem campo próprio na ficha: ele chega por sugestão de
+   * edição (o painel de revisões escreve `esquivaBonus`) e é somado na Esquiva
+   * abaixo. Ficava guardado e ignorado — o revisor aprovava um número que a
+   * ficha nunca mostrava. */
+  const [esquivaBonus] = useState(character.esquivaBonus ?? 0);
   const [bloqueio, setBloqueio] = useState(character.bloqueio ?? 0);
   const [protecao, setProtecao] = useState(character.protecao ?? "");
   const [resistencias, setResistencias] = useState(character.resistencias ?? []);
   const [proeficiencia, setProeficiencia] = useState(character.proeficiencia ?? 0);
+  /* Banca de modificadores de teste (spec 0037). Bônus situacional nomeado, que o
+   * jogador registra uma vez ("Sob efeito de Sangue: +1 dado") e liga/desliga na
+   * mesa. Cada item: {id, nome, dados, valor, ativo}. `dados` engorda o bolo de
+   * d20; `valor` é soma plana. Aditivo no documento — Firestore é schemaless. */
+  const [modificadores, setModificadores] = useState(character.modificadores ?? []);
+  /* Perícias que o jogador escondeu (spec 0038). Guarda o `base` da perícia, não
+   * índice — a ordem de `PERICIAS` pode mudar e um índice viraria a perícia
+   * errada oculta. Ocultar é só de EXIBIÇÃO: `skillTreino`/`skillOutros` seguem
+   * intactos e quem lê perícia fora da lista (a Esquiva lê Reflexos) não sente. */
+  const [periciasOcultas, setPericiasOcultas] = useState(character.periciasOcultas ?? []);
+  /* Regras opcionais da mesa (spec 0038). Só entram aqui regras que MUDAM
+   * comportamento de verdade — ver o corte declarado na spec: munição não tem o
+   * que contar, e NEX/Patente trocam o motor de progressão inteiro. */
+  const [regrasOpcionais, setRegrasOpcionais] = useState(character.regrasOpcionais ?? {});
+  const semSanidade = !!regrasOpcionais.semSanidade;
 
   const [elementoAfinidade, setElementoAfinidade] = useState(character.elementoAfinidade ?? null);
   const [elementoEscolhidoEm, setElementoEscolhidoEm] = useState(character.elementoEscolhidoEm ?? null);
@@ -283,6 +306,7 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
   /* Indicadores deslizantes das duas barras desta ficha (spec 0022 AC-1). */
   const tabsPill = useSlidingPill(activeTab);
   const secPill = useSlidingPill(mobileSec);
+  const [mostrarOcultas, setMostrarOcultas] = useState(false);
   const [diceInput, setDiceInput] = useState("");
   const [roll, setRoll] = useState(null);
   const [showNex, setShowNex] = useState(false);
@@ -362,7 +386,8 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
     pv: hp, san, pe, pvMax, sanMax, peMax, attacks, ataques: attacks, skills, poderes, rituais, itens,
     diario, creditos, rollHistory, trilha, defesaBonus, defesaOutros, esquivaBonus, bloqueio, protecao, resistencias,
     proeficiencia, elementoAfinidade, elementoEscolhidoEm, elementoGmOverride, elementoNotas,
-    habilidades, inventario, descricao, dtRituaisBonus, progressao,
+    habilidades, inventario, descricao, dtRituaisBonus, progressao, modificadores,
+    periciasOcultas, regrasOpcionais,
     dtRituais: dtRituaisRule(nex, attrs, dtRituaisBonus), // total calculado (compat de leitura)
   };
   const latest = useRef(snapshot);
@@ -387,8 +412,12 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
   }, [attrs, form, skillTreino, skillOutros, pdBonus, deslocamentoBonus, nex, hp, san, pe, pvMax, sanMax, peMax, attacks, skills, poderes,
       rituais, itens, diario, creditos, defesaBonus, defesaOutros, esquivaBonus, bloqueio, protecao, resistencias,
       proeficiencia, elementoAfinidade, elementoNotas, habilidades, inventario, descricao, dtRituaisBonus,
-      progressao, trilha]);
-  useEffect(() => () => flushSave(), []); // flush on unmount
+      progressao, trilha, modificadores, periciasOcultas, regrasOpcionais]);
+  // flush on unmount — a dependência é o `flushSave` recriado a cada render, e
+  // incluí-lo faria o efeito rodar (e salvar) a cada tecla. O ref `latest` já
+  // garante que o que sai no unmount é o estado mais novo.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => flushSave(), []);
   const handleBack = () => { flushSave(); onBack?.(); };
 
   /* ── derived ── */
@@ -398,13 +427,19 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
   const defesa = 10 + (attrs.AGI || 0) + defesaBonus + defesaOutros;
   const reflexosTreino = Number(skillTreino["Reflexos"]) || 0;
   const reflexosExtra  = Number(skillOutros["Reflexos"]) || 0;
-  const esquiva        = 10 + (attrs.AGI || 0) + reflexosTreino + reflexosExtra;
+  const esquiva        = 10 + (attrs.AGI || 0) + reflexosTreino + reflexosExtra + (Number(esquivaBonus) || 0);
   const profBonus = nex >= 95 ? 6 : nex >= 75 ? 5 : nex >= 55 ? 4 : nex >= 35 ? 3 : nex >= 15 ? 2 : 1;
   const pvPct = pvMax > 0 ? hp / pvMax : 0;
   const sanPct = sanMax > 0 ? san / sanMax : 0;
   const pePct = peMax > 0 ? pe / peMax : 0;
   const wounded = pvPct < 0.3;
-  const breach = sanPct < 0.3;
+  /* Com "Jogando sem Sanidade" a mesa não usa o número — então os cinco efeitos
+   * que ele governa (classe de trepidação, camada do Outro Lado, glifos, selo de
+   * SURTO e sussurro) ficam desarmados na RAIZ, aqui, em vez de cada ponto de uso
+   * checar a regra. Um `breach` que continua verdadeiro e cinco `&&` espalhados é
+   * como se esquece o sexto. O valor de `san` NÃO é zerado nem recalculado:
+   * desligar a regra devolve o sinal vital com o mesmo número (AC-6). */
+  const breach = !semSanidade && sanPct < 0.3;
   const pvColor = "#e53935"; // PV is always blood-red
   const sanColor = elementoAfinidade ? theme.accent : "#7b1fa2"; // Determinação follows the element
   const isMedo = elementoAfinidade === "medo";
@@ -425,13 +460,48 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
     onRoll?.(rollPayload(label, { ...res, expr: res.expr || label }, charName, elementoAfinidade));
     pushHistory({ label, rolls: res.rolls, result: res.result, crit: !!res.crit, ts: Date.now() });
   };
-  const rollAttr = (k) => fireRoll(`${ATTR_LABELS[k]} (${k})`, { ...rollOP(attrs[k]), rollType: "attribute" });
+  /* Bônus vindo da banca de modificadores ativos (spec 0037). `dados` engorda o
+   * bolo de d20, `valor` soma plano. Recalculado a cada rolagem de propósito: a
+   * banca é ligada/desligada durante o turno e uma memo por render seria uma
+   * fonte de "liguei e não valeu". */
+  const modBonus = () => bonusDeModificadores(modificadores);
+
+  /* ⚠ `kept` e `bonus` existem para a ficha poder MOSTRAR a conta (spec 0037).
+   * Antes desta spec o dado que venceu era jogado fora aqui — `base.result` era
+   * sobrescrito pelo total e não havia como a tela dizer qual d20 sobreviveu.
+   * Invariante: `kept + bonus === result`. Nada disso atravessa para o Firestore
+   * (AC-10): `rollPayload` escolhe campo por campo e não lê estes dois. */
+  const rollAttr = (k) => {
+    const { dados, valor } = modBonus();
+    const bolo = boloDeDados(attrs[k], dados);
+    const res = rollOP(bolo.attrEfetivo);
+    fireRoll(`${ATTR_LABELS[k]} (${k})`, {
+      ...res,
+      result: res.result + valor,
+      kept: res.result,
+      bonus: valor,
+      conta: termosDaConta({ kept: res.result, mods: modificadores, worst: res.worst }),
+      bonusIgnorado: bolo.bonusIgnorado,
+      rollType: "attribute",
+    });
+  };
   const rollSkill = (p) => {
     const ak = skillAttr[p.base] || p.attr;
-    const base = rollOP(attrs[ak]);
+    const { dados, valor } = modBonus();
+    const bolo = boloDeDados(attrs[ak], dados);
+    const base = rollOP(bolo.attrEfetivo);
     const tBonus = Number(skillTreino[p.base]) || 0;
     const other = Number(skillOutros[p.base] || 0);
-    fireRoll(`${p.base} (${ak})`, { ...base, result: base.result + tBonus + other, rollType: "skill" });
+    const bonus = tBonus + other + valor;
+    fireRoll(`${p.base} (${ak})`, {
+      ...base,
+      result: base.result + bonus,
+      kept: base.result,
+      bonus,
+      conta: termosDaConta({ kept: base.result, treino: tBonus, outros: other, mods: modificadores, worst: base.worst }),
+      bonusIgnorado: bolo.bonusIgnorado,
+      rollType: "skill",
+    });
   };
   const rollFree = () => {
     const res = rollExpr(diceInput);
@@ -451,7 +521,7 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
     const atkAttr = attackTestAttr(a);
     const atk = rollOP(attrs[atkAttr] || 1);
     const kept = atk.result;
-    const skillBonus = a.pericia && !ATTR_KEYS.includes(a.pericia) ? (Number(skillTreino[a.pericia]) || 0) : 0;
+    const skillBonus = attackSkillBonus(a.pericia, skillTreino, skillOutros);
     const atkBonus = Number(a.bonus) || 0;
     const testTotal = kept + skillBonus + atkBonus;
     const crit = isCritical(kept, a.critico);
@@ -488,7 +558,10 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attrs, showElementModal, transEl]);
 
-  /* ── element choice → eruption transition → persist ── */
+  /* ── element choice → ritual do elemento → persist ──
+   * O prazo vem de RITUAL_MS (ElementoRitual), não de um número solto aqui:
+   * mexer na duração da animação sem mexer neste timeout cortaria o ritual
+   * no meio ou deixaria a tela preta depois que ele acabasse. */
   const chooseElement = (id) => {
     setShowElementModal(false);
     setTransEl(id);
@@ -496,7 +569,7 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
       setElementoAfinidade(id);
       setElementoEscolhidoEm(Date.now());
       setTransEl(null);
-    }, 1500);
+    }, RITUAL_MS);
   };
 
   const onPortrait = async (e) => {
@@ -524,11 +597,6 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
       const resp = await fetch(url);
       if (!resp.ok) throw new Error("Falha ao gerar");
       const blob = await resp.blob();
-      const base64 = await new Promise((res) => {
-        const reader = new FileReader();
-        reader.onload = (ev) => res(ev.target.result);
-        reader.readAsDataURL(blob);
-      });
       const downscaled = await downscale(new File([blob], "ai.jpg", { type: blob.type }));
       setForm((f) => {
         const ativa = (f.phases || []).find((p) => p.id === f.activePhaseId);
@@ -613,6 +681,18 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
 
   const inputMini = { padding: "4px 7px", fontSize: 13, width: "100%" };
 
+  /* Grau de treino como CONTAGEM de marcas, não só matiz (spec 0037, AC-5).
+   * `treinoColor` distinguia Destreinado/Treinado/Veterano/Expert só por cor —
+   * quem não separa verde de azul lia a mesma linha para dois graus. As marcas
+   * dão a redundância; a cor continua, como reforço. */
+  const PIPS_POR_GRAU = { 0: 0, 5: 1, 10: 2, 15: 3 };
+
+  /* Ocultar guarda o `base` da perícia, nunca o índice: a ordem de `PERICIAS`
+   * pode mudar e um índice passaria a esconder a perícia errada. */
+  const ocultas = new Set(periciasOcultas);
+  const ocultarPericia = (base) => setPericiasOcultas((v) => (v.includes(base) ? v : [...v, base]));
+  const reexibirPericia = (base) => setPericiasOcultas((v) => v.filter((x) => x !== base));
+
   const renderSkillRow = (p) => {
     const tBonus = Number(skillTreino[p.base]) || 0;
     const isTrained = tBonus > 0;
@@ -620,27 +700,75 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
     const outros = Number(skillOutros[p.base] || 0);
     const bonus = tBonus + outros;
     const skillName = t("op.pericias." + p.base) || p.base;
+    const grau = TREINO_TIERS[tBonus]?.label || `Treino ${tBonus}`;
+    const pips = PIPS_POR_GRAU[tBonus] ?? Math.min(3, Math.ceil(tBonus / 5));
+    /* A coluna 3 é rotulada "Dados" e mostrava a sigla do atributo. Agora mostra
+     * dados de verdade — o atributo decide QUANTOS d20 entram no bolo, e é essa a
+     * informação que o jogador procura ali. A sigla não se perde: vai para a
+     * segunda linha do nome, junto do grau. */
+    const bolo = boloDeDados(attrs[ak], bonusDeModificadores(modificadores).dados);
+    const ciclarTreino = () => {
+      if (!editMode) return;
+      setSkillTreino((s) => { const cur = Number(s[p.base]) || 0; const next = cur >= 15 ? 0 : cur >= 10 ? 15 : cur >= 5 ? 10 : 5; return { ...s, [p.base]: next }; });
+    };
     return (
       <div key={p.base} className="op-skill">
-        <span role="button" tabIndex={0} title="Alternar grau de treino" aria-label={`Treino de ${skillName}`}
-          onClick={() => setSkillTreino((s) => { const cur = Number(s[p.base]) || 0; const next = cur >= 15 ? 0 : cur >= 10 ? 15 : cur >= 5 ? 10 : 5; return { ...s, [p.base]: next }; })}
-          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setSkillTreino((s) => { const cur = Number(s[p.base]) || 0; const next = cur >= 15 ? 0 : cur >= 10 ? 15 : cur >= 5 ? 10 : 5; return { ...s, [p.base]: next }; })}
-          style={{ color: treinoColor(tBonus), fontSize: 13, textAlign: "center", cursor: "pointer" }}>{isTrained ? "⬢" : "⬡"}</span>
-        <span onClick={() => rollSkill(p)} title={`Rolar ${skillName}`}
-          style={{ color: isTrained ? treinoColor(tBonus) : "var(--muted2)", cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {skillName}
-          {p.onlyTrained && <sup title="Somente treinado" style={{ color: "var(--muted)", cursor: "help" }}>*</sup>}
-          {p.needsKit && <sup title="Somente treinado com Bônus" style={{ color: "var(--muted)", cursor: "help" }}>+</sup>}
+        <span role={editMode ? "button" : undefined} tabIndex={editMode ? 0 : -1}
+          title={editMode ? `${grau} — clique para alternar` : grau}
+          aria-label={`${skillName}: ${grau}`}
+          onClick={ciclarTreino}
+          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && ciclarTreino()}
+          style={{ display: "inline-flex", gap: 1.5, alignItems: "center", justifyContent: "center", cursor: editMode ? "pointer" : "default" }}>
+          {pips === 0
+            ? <span aria-hidden="true" style={{ width: 4, height: 4, borderRadius: "50%", border: `1px solid ${treinoColor(0)}` }} />
+            : Array.from({ length: pips }, (_, i) => (
+                <span key={i} aria-hidden="true" style={{ width: 4, height: 4, borderRadius: "50%", background: treinoColor(tBonus) }} />
+              ))}
         </span>
-        <span style={{ textAlign: "center", color: "var(--muted)", fontSize: 10 }}>{ak}</span>
+        <span onClick={() => rollSkill(p)} title={`Rolar ${skillName}`}
+          style={{ color: isTrained ? treinoColor(tBonus) : "var(--muted2)", cursor: "pointer", overflow: "hidden", minWidth: 0 }}>
+          <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {skillName}
+            {p.onlyTrained && <sup title="Somente treinado" style={{ color: "var(--muted)", cursor: "help" }}>*</sup>}
+            {p.needsKit && <sup title="Somente treinado com Bônus" style={{ color: "var(--muted)", cursor: "help" }}>+</sup>}
+          </span>
+          <span className="op-skill-sub" aria-hidden="true">{ak} · {grau}</span>
+        </span>
+        <span style={{ textAlign: "center", color: isTrained ? "var(--el-glow)" : "var(--muted2)", fontSize: 10, whiteSpace: "nowrap" }}
+          title={bolo.worst ? `${ak} 0: rola 2d20 e fica com o pior` : `${ak} ${attrs[ak] || 0}: rola ${bolo.n}d20 e fica com o melhor`}>
+          {notacaoDeDados(bolo)}{bolo.worst ? "↓" : ""}
+        </span>
         <span style={{ textAlign: "center", color: isTrained ? "var(--el-glow)" : "var(--muted)" }}>({bonus})</span>
-        <input type="number" value={tBonus} onClick={(e) => e.stopPropagation()} aria-label={`Treino ${skillName}`}
+        {/* AC-8: a ficha tem trava de edição e estes dois campos a ignoravam. */}
+        <input type="number" value={tBonus} readOnly={!editMode} onClick={(e) => e.stopPropagation()} aria-label={`Treino ${skillName}`}
           onChange={(e) => setSkillTreino((s) => ({ ...s, [p.base]: Math.max(0, Math.min(99, parseInt(e.target.value, 10) || 0)) }))}
-          style={{ color: treinoColor(tBonus) }} />
-        <input type="number" value={outros} onClick={(e) => e.stopPropagation()} aria-label={`Outros ${skillName}`}
+          style={{ color: treinoColor(tBonus), cursor: editMode ? "text" : "default" }} />
+        <input type="number" value={outros} readOnly={!editMode} onClick={(e) => e.stopPropagation()} aria-label={`Outros ${skillName}`}
           onChange={(e) => setSkillOutros((s) => ({ ...s, [p.base]: parseInt(e.target.value, 10) || 0 }))}
-          style={{ color: "var(--muted2)" }} />
+          style={{ color: "var(--muted2)", cursor: editMode ? "text" : "default" }} />
         <button className="op-roll-btn" onClick={() => rollSkill(p)} aria-label={`Rolar ${skillName}`}>🎲</button>
+        {/* Ocultar é estrutura (pede Modo de Edição); REEXIBIR é recuperação e
+            vive na faixa de ocultas, disponível sempre — quem herda uma ficha
+            precisa poder achar o que falta sem destravar nada (AC-2). */}
+        {editMode && (
+          <button className="op-eye" onClick={() => ocultarPericia(p.base)}
+            aria-label={`Ocultar ${skillName}`} title="Ocultar da lista">👁</button>
+        )}
+      </div>
+    );
+  };
+
+  const renderSkillRowOculta = (p) => {
+    const skillName = t("op.pericias." + p.base) || p.base;
+    return (
+      <div key={p.base} className="op-skill op-skill-oculta">
+        <span />
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--muted)" }}>
+          {skillName}
+        </span>
+        <span className="op-label" style={{ gridColumn: "3 / -2", color: "var(--muted)" }}>oculta</span>
+        <button className="op-eye" onClick={() => reexibirPericia(p.base)}
+          aria-label={`Reexibir ${skillName}`} title="Trazer de volta para a lista">↩</button>
       </div>
     );
   };
@@ -890,10 +1018,18 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
           </div>
 
           {/* VITAL SIGNS */}
+          {/* O segundo argumento de vitalState é "acabou" — e vinha `false`
+              cravado nos dois, então o traçado seguia batendo com 0 PV. O PE já
+              fazia certo. "Morrendo" é o nome da condição no livro (regra
+              `pv-morrendo`): com PV em 0 o agente fica inconsciente. */}
           <VitalSign label="PV · Vida" abbr="PV" value={hp} max={pvMax} color={pvColor} fill={pvFill(pvPct)}
-            state={vitalState(pvPct, false)} onVal={setHp} onMax={setPvMax} edit={editMode} />
-          <VitalSign label="Determinação · SAN" abbr="SAN" value={san} max={sanMax} color={sanColor} fill={sanColor}
-            state={vitalState(sanPct, false)} onVal={setSan} onMax={setSanMax} edit={editMode} badge={breach ? "SURTO" : null} />
+            state={vitalState(pvPct, hp <= 0)} onVal={setHp} onMax={setPvMax} edit={editMode} badge={hp <= 0 ? "MORRENDO" : null} />
+          {/* Regra opcional "Jogando sem Sanidade": o sinal vital sai da tela. O
+              valor continua no documento — a regra é reversível (AC-6). */}
+          {!semSanidade && (
+            <VitalSign label="Determinação · SAN" abbr="SAN" value={san} max={sanMax} color={sanColor} fill={sanColor}
+              state={vitalState(sanPct, san <= 0)} onVal={setSan} onMax={setSanMax} edit={editMode} badge={breach ? "SURTO" : null} />
+          )}
           <VitalSign label="Esforço · PE" abbr="PE" value={pe} max={peMax} color="#00acc1" fill="#00acc1"
             state={pe <= 0 ? "flat" : vitalState(pePct, false)} onVal={setPe} onMax={setPeMax} edit={editMode} badge={pe <= 0 ? "EXAUSTO" : null} />
 
@@ -953,7 +1089,7 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
                   <div className="op-label" style={{ marginBottom:4, fontSize:9 }}>Esquiva</div>
                   <div style={{ fontFamily:"Cinzel,serif", fontSize:22, fontWeight:700, color:"#fff", lineHeight:1 }}>{esquiva}</div>
                   <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:8, color:"rgba(255,255,255,0.3)", marginTop:3, whiteSpace:"nowrap" }}>
-                    10+{attrs.AGI||0}AGI{reflexosTreino > 0 ? `+Ref${reflexosTreino}` : ""}{reflexosExtra > 0 ? `+${reflexosExtra}` : ""}
+                    10+{attrs.AGI||0}AGI{reflexosTreino > 0 ? `+Ref${reflexosTreino}` : ""}{reflexosExtra > 0 ? `+${reflexosExtra}` : ""}{Number(esquivaBonus) ? `+${esquivaBonus}` : ""}
                   </div>
                 </div>
               </div>
@@ -1010,13 +1146,14 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
         </div>
 
         {/* ── CENTER: perícias ── */}
-        <div className={`op-ink op-col-panel${mobileSec !== "pericias" ? " op-mobile-hidden" : ""}`} style={{ display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden", background: "rgba(0,0,0,0.22)" }}>
+        <div className={`op-ink op-col-panel${mobileSec !== "pericias" ? " op-mobile-hidden" : ""}`} data-edit={editMode ? "true" : "false"} style={{ display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden", background: "rgba(0,0,0,0.22)" }}>
           <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border2)", display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span className="op-label" style={{ color: "var(--el-glow)" }}>{t("op.sheet.skills.title")}</span>
               <span className="op-data" style={{ fontSize: 9, color: "var(--muted)" }}>{trained.size} {t("op.sheet.skills.actives")}</span>
             </div>
             <input value={skillFilter} onChange={(e) => setSkillFilter(e.target.value)} placeholder={t("op.sheet.skills.filter")} style={{ ...inputMini, fontFamily: "var(--font-data,'Share Tech Mono',monospace)" }} />
+            {!readOnly && <BancaDeModificadores mods={modificadores} setMods={setModificadores} />}
           </div>
           <div className="op-skill-head">
             <span />
@@ -1026,10 +1163,16 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
             <span className="op-label" style={{ fontSize: 8, textAlign: "center" }}>{t("op.sheet.skills.treino")}</span>
             <span className="op-label" style={{ fontSize: 8, textAlign: "center" }}>{t("op.sheet.skills.outros")}</span>
             <span />
+            {editMode && <span />}
           </div>
           <div className="op-col-rows" style={{ overflowY: "auto", flex: "0 1 auto", minHeight: 0 }}>
             {PERICIA_GRUPOS.map((g) => {
-              const rows = filteredPericias.filter((p) => p.categoria === g.id);
+              /* Perícia oculta sai da lista — MENOS quando há filtro de texto ou
+               * quando o jogador pediu para ver as ocultas. Procurar pelo nome e
+               * não achar faria a perícia parecer apagada, e ela não está (AC-4). */
+              const rows = filteredPericias.filter(
+                (p) => p.categoria === g.id && (skillFilter || mostrarOcultas || !ocultas.has(p.base)),
+              );
               if (rows.length === 0) return null;
               const ativas = rows.filter((p) => (skillTreino[p.base] ?? (trained.has(p.base) ? 5 : 0)) > 0).length;
               const collapsed = skillFilter ? false : !!collapsedCats[g.id];
@@ -1043,11 +1186,27 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
                     </span>
                     {ativas > 0 && <span className="op-data" style={{ fontSize: 9, color: "var(--el-glow)" }}>{ativas} {ativas > 1 ? t("op.sheet.skills.actives") : t("op.sheet.skills.active")}</span>}
                   </button>
-                  {!collapsed && rows.map(renderSkillRow)}
+                  {!collapsed && rows.map((p) => (ocultas.has(p.base) ? renderSkillRowOculta(p) : renderSkillRow(p)))}
                 </div>
               );
             })}
           </div>
+          {/* Nada é escondido sem deixar rastro (AC-2). A faixa aparece em Modo de
+              JOGO também: ocultar exige ficha destravada, mas descobrir o que está
+              oculto não pode exigir nada — quem abre a ficha de outra pessoa
+              precisa ver que a lista está incompleta. */}
+          {ocultas.size > 0 && (
+            <div style={{ padding: "6px 12px", borderTop: "1px solid var(--border)", flexShrink: 0, display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="op-data" style={{ flex: 1, fontSize: 9, color: "var(--muted)" }}>
+                {ocultas.size} {ocultas.size === 1 ? "perícia oculta" : "perícias ocultas"}
+              </span>
+              <button onClick={() => setMostrarOcultas((v) => !v)} aria-pressed={mostrarOcultas}
+                className="op-label"
+                style={{ background: "none", border: "1px solid var(--border)", borderRadius: 3, color: "var(--el-glow)", cursor: "pointer", padding: "2px 8px" }}>
+                {mostrarOcultas ? "esconder de novo" : "mostrar"}
+              </button>
+            </div>
+          )}
           <div className="op-data" style={{ padding: "8px 12px", fontSize: 9, color: "var(--muted)", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
             {t("op.sheet.skills.footnote")}
           </div>
@@ -1091,7 +1250,7 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
             )}
 
             {activeTab === "descricao" && (
-              <DescricaoTab descricao={descricao} setDescricao={setDescricao} isMaster={!!character.viewerIsMaster} />
+              <DescricaoTab descricao={descricao} setDescricao={setDescricao} />
             )}
           </div>
 
@@ -1185,11 +1344,17 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
 
             <div style={{ height: 1, background: "linear-gradient(90deg,transparent,var(--el-accent),transparent)", opacity: 0.45, margin: "10px 0", position: "relative", zIndex: 2 }} />
 
+            {/* O crítico mostra a conta ABERTA (spec 0037): o modal já é
+                espetáculo em tela cheia, e um botão de virar aqui brigaria com a
+                animação. O dado mantido vem destacado; os descartados, riscados. */}
             {Array.isArray(roll.rolls) && roll.rolls.length > 0 && (
-              <div className="op-data" style={{ textAlign: "center", color: "var(--muted2)", fontSize: 14, letterSpacing: 1, position: "relative", zIndex: 2 }}>
-                {roll.rolls.map((d, i) => (
-                  <span key={i} className="op-die-pip" style={{ animationDelay: `${0.25 + i * 0.05}s`, color: d === 20 ? "var(--el-glow)" : undefined, fontWeight: d === 20 ? 700 : 400 }}>{i > 0 ? " · " : ""}{d}</span>
-                ))}
+              <div style={{ position: "relative", zIndex: 2 }}>
+                <DiceRow rolls={roll.rolls} kept={roll.kept} worst={roll.worst} />
+              </div>
+            )}
+            {Array.isArray(roll.conta) && roll.conta.length > 0 && (
+              <div style={{ position: "relative", zIndex: 2, maxWidth: 260, margin: "12px auto 0" }}>
+                <ContaBreakdown conta={roll.conta} total={roll.result} bonusIgnorado={roll.bonusIgnorado} />
               </div>
             )}
 
@@ -1197,42 +1362,16 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
           </div>
         </div>, document.body)
       ) : (
-        /* ─── NORMAL: corner card fixo na viewport (portal em document.body) ─── */
+        /* ─── NORMAL: corner card fixo na viewport (portal em document.body) ───
+         * O `rootVars` precisa acompanhar: o card sai do palco da ficha por
+         * portal e sem ele as `--el-*` do elemento não resolvem. */
         createPortal(
-        <div className="op-corner" style={rootVars} role="status" aria-live="polite">
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <ElementoSymbol id={elementoAfinidade || "ordem"} size={18} color={theme.primary} />
-            <span style={{ flex: 1, fontFamily: "var(--font-title,'Cinzel',serif)", fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--el-glow)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{roll.attr}</span>
-            <button className="op-corner-x" onClick={() => setRoll(null)} aria-label="Fechar">✕</button>
-          </div>
-          {roll.kind === "attack" ? (
-            <div style={{ display: "flex" }}>
-              <div style={{ flex: 1, textAlign: "center", borderRight: "1px solid var(--el-border)" }}>
-                <div style={{ fontFamily: "var(--font-display,'Cinzel Decorative',serif)", fontSize: 40, color: "var(--el-primary)", lineHeight: 1 }}>{roll.result}</div>
-                <div className="op-label">Ataque</div>
-              </div>
-              <div style={{ flex: 1, textAlign: "center" }}>
-                <div style={{ fontFamily: "var(--font-display,'Cinzel Decorative',serif)", fontSize: 40, color: "#fff", lineHeight: 1 }}>{roll.dano}</div>
-                <div className="op-label">Dano</div>
-              </div>
-            </div>
-          ) : (
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontFamily: "var(--font-display,'Cinzel Decorative',serif)", fontSize: 58, color: "var(--el-primary)", lineHeight: 1, textShadow: "0 0 18px var(--el-glow)" }}>{roll.result}</div>
-              <div className="op-label" style={{ marginTop: 2 }}>resultado</div>
-              {Array.isArray(roll.rolls) && roll.rolls.length > 0 && <div className="op-data" style={{ marginTop: 8, fontSize: 11, color: "var(--muted2)" }}>[{roll.rolls.join(" · ")}]</div>}
-            </div>
-          )}
-        </div>,
-        document.body
+          <RollCard roll={roll} onClose={() => setRoll(null)} elemento={elementoAfinidade} styleVars={rootVars} />,
+          document.body
         )
       ))}
 
-      {transEl && (
-        <div className="op-el-transition" style={{ "--el-deep": getElementTheme(transEl).bg }}>
-          <div className="op-el-erupt"><ElementoSymbol id={transEl} size={120} color={getElementTheme(transEl).accent} /></div>
-        </div>
-      )}
+      {transEl && <ElementoRitual id={transEl} />}
 
       {showElementModal && <ElementoAfinidadeModal onChoose={chooseElement} />}
       {editAtk && <AttackModal draft={editAtk.draft} isNew={editAtk.index < 0} attrs={attrs}
@@ -1291,7 +1430,12 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
           {faseAtiva && <div className="op-data" style={{ fontSize: 10, color: "var(--gold2)", marginBottom: 8 }}>Enviar arquivo / Gerar com IA aplicam a imagem na fase ativa: {faseAtiva.label}</div>}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button className="btn-gold" onClick={() => portraitInput.current?.click()}>Enviar arquivo</button>
-            <button className="btn-ghost" onClick={() => { setShowUpload(false); setShowAI(true); }}>✦ Gerar com IA</button>
+            {/* O botão obedece ao ajuste "Geração de Arte com IA" (engrenagem do
+                cabeçalho), que promete exatamente isto: "Habilita o botão
+                'Gerar com IA' no upload de retrato". Antes o botão aparecia
+                sempre — o ajuste existia e não ajustava nada. É a mesma regra
+                que o criador de personagem já aplica (`aiArtEnabled`). */}
+            {aiArt && <button className="btn-ghost" onClick={() => { setShowUpload(false); setShowAI(true); }}>✦ Gerar com IA</button>}
             {!faseAtiva && form.avatar && <button className="btn-ghost" onClick={() => setForm((f) => ({ ...f, avatar: "", avatarAI: false }))}>Remover</button>}
           </div>
           <div className="op-data" style={{ fontSize: 10, color: "var(--muted)", marginTop: 12 }}>O retrato recebe tratamento de fotografia desgastada automaticamente.</div>
@@ -1308,8 +1452,8 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
         const base = { ...character, attrs, form, pv: hp, san, pe, pvMax, sanMax, peMax,
           skillTreino, skillOutros, nex, pdBonus, creditos, defesaBonus, defesaOutros, esquivaBonus,
           bloqueio, protecao, resistencias, rituais, itens, habilidades, attacks, poderes, inventario, descricao, diario };
-        let diffs = []; let _diffErr = null;
-        try { diffs = buildDiff(base, proposed); } catch(e) { _diffErr = String(e); }
+        let diffs = [];
+        try { diffs = buildDiff(base, proposed); } catch(e) { console.error("buildDiff render error", e); }
         const grouped = groupByCategory(diffs);
         const selCount = Object.values(selectedDiffs).filter(Boolean).length;
         const typeColor = t => t==="added"?"#4ade80":t==="removed"?"#f87171":"#fbbf24";
@@ -1494,6 +1638,39 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
                       color:aiArt?"#fff":"#666", transition:"all 0.2s" }}>LIGADO</button>
                 </div>
               </div>
+              {/* ── Regras Opcionais (spec 0038) ──
+                  ⚠ SÓ ENTRA REGRA QUE MUDA COMPORTAMENTO DE VERDADE. A referência
+                  oferece quatro; três não têm o que ligar aqui: munição não existe
+                  em ataque nenhum (`municao|ammo` = 0 ocorrências no projeto), e
+                  "NEX & Experiência" e "Evolução por Patente" trocam o motor de
+                  progressão inteiro (spec 0033). Interruptor que não faz nada —
+                  mesmo cinzento — é a promessa falsa que a spec 0036 foi escrita
+                  para matar. Não adicione os outros três sem a spec que os
+                  implemente de fato. */}
+              <div>
+                <div style={{ fontFamily:"Cinzel,serif", fontSize:12, color:"#fff", marginBottom:12 }}>Regras Opcionais</div>
+                <div style={{ display:"flex", alignItems:"flex-start", gap:10 }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:12, color:"#ddd", marginBottom:4 }}>Jogando sem Sanidade</div>
+                    <div style={{ fontSize:11, color:"#666", lineHeight:1.5 }}>
+                      Some com o sinal vital de Determinação e desarma os efeitos de surto.
+                      O valor é preservado — desligar traz tudo de volta.
+                    </div>
+                  </div>
+                  <div style={{ display:"inline-flex", border:"1px solid #333", borderRadius:6, overflow:"hidden", flexShrink:0 }}>
+                    <button onClick={() => setRegrasOpcionais((r) => ({ ...r, semSanidade: false }))}
+                      aria-pressed={!semSanidade}
+                      style={{ padding:"7px 14px", background:!semSanidade?"#8b5cf6":"transparent", border:"none",
+                        cursor:"pointer", fontFamily:"Cinzel,serif", fontSize:10, letterSpacing:1,
+                        color:!semSanidade?"#fff":"#666", transition:"all 0.2s" }}>USANDO</button>
+                    <button onClick={() => setRegrasOpcionais((r) => ({ ...r, semSanidade: true }))}
+                      aria-pressed={semSanidade}
+                      style={{ padding:"7px 14px", background:semSanidade?"#8b5cf6":"transparent", border:"none",
+                        cursor:"pointer", fontFamily:"Cinzel,serif", fontSize:10, letterSpacing:1,
+                        color:semSanidade?"#fff":"#666", transition:"all 0.2s" }}>SEM</button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>,
@@ -1561,7 +1738,7 @@ function ArsenalCard({ a, i, attrs, rm, setAttacks, rollAttack, onEdit }) {
               {a.extras.map((e, k) => <span key={k} style={tag("#f59e0b")}>+{e.dano} {e.tipo}</span>)}
             </div>
           )}
-          {a.notas && <div style={{ marginTop: 4, fontSize: 13, color: "rgba(232,228,217,0.8)", fontFamily: "var(--font-body,serif)", lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: a.notas }} />}
+          {a.notas && <div style={{ marginTop: 4, fontSize: 13, color: "rgba(232,228,217,0.8)", fontFamily: "var(--font-body,serif)", lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: sanitizarHtml(a.notas) }} />}
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
             <button onClick={() => rm(setAttacks)(i)} style={{ background: "none", border: "none", color: "var(--danger-text)", cursor: "pointer", fontSize: 12, fontFamily: "var(--font-title,'Cinzel',serif)" }}>Remover</button>
             <button onClick={onEdit} style={{ background: "none", border: "none", color: "var(--el-accent)", cursor: "pointer", fontSize: 12, fontFamily: "var(--font-title,'Cinzel',serif)" }}>Editar</button>
@@ -1708,6 +1885,105 @@ function CombateTab({ diceRef, diceInput, setDiceInput, rollFree, attrs, rollAtt
 }
 
 /* ════════════════════════════════════════════════════════════════════════
+ *  BANCA DE MODIFICADORES (spec 0037)
+ *
+ *  Bônus situacional NOMEADO: o jogador registra "Sob efeito de Sangue: +1
+ *  dado" uma vez e liga/desliga durante o turno, em vez de somar de cabeça a
+ *  cada teste. `dados` engorda o bolo de d20; `valor` é soma plana.
+ *
+ *  ⚠ NÃO fica atrás do `editMode`, e isso é deliberado: ligar um modificador é
+ *  jogar, não montar personagem. A trava existe para proteger a ESTRUTURA da
+ *  ficha (treino, atributo, NEX) de dedo torto na mesa — e obrigar a destravar a
+ *  ficha para dizer "estou em cobertura" transformaria a proteção em obstáculo.
+ *  Se alguém "consertar" isso, o efeito é o jogador editando a ficha inteira no
+ *  meio do combate para aplicar um +2.
+ * ════════════════════════════════════════════════════════════════════════ */
+function BancaDeModificadores({ mods, setMods }) {
+  const [aberta, setAberta] = useState(false);
+  const [nome, setNome] = useState("");
+  const [dados, setDados] = useState(0);
+  const [valor, setValor] = useState(0);
+
+  const ativos = mods.filter((m) => m && m.ativo);
+  const resumo = bonusDeModificadores(mods);
+  const podeAdicionar = nome.trim() !== "" && (Number(dados) !== 0 || Number(valor) !== 0);
+
+  const adicionar = () => {
+    if (!podeAdicionar) return;
+    setMods((v) => [...v, {
+      id: `mod-${Date.now()}-${v.length}`,
+      nome: nome.trim().slice(0, 40),
+      dados: Math.max(0, Number(dados) || 0),
+      valor: Number(valor) || 0,
+      ativo: true,
+    }]);
+    setNome(""); setDados(0); setValor(0);
+  };
+
+  const num = { width: 40, textAlign: "center", padding: "3px 4px", fontSize: 12 };
+
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 4, background: "rgba(0,0,0,0.2)" }}>
+      <button onClick={() => setAberta((v) => !v)} aria-expanded={aberta}
+        style={{ width: "100%", display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", background: "none", border: "none", cursor: "pointer" }}>
+        <span className="op-label" style={{ color: "var(--el-glow)" }}>{aberta ? "▾" : "▸"} Modificadores</span>
+        <span style={{ flex: 1 }} />
+        {ativos.length > 0 ? (
+          <span className="op-data" style={{ fontSize: 9, color: "var(--el-glow)" }}>
+            {resumo.dados ? `+${resumo.dados}d20 ` : ""}
+            {resumo.valor ? `${resumo.valor >= 0 ? "+" : ""}${resumo.valor}` : ""}
+          </span>
+        ) : (
+          <span className="op-data" style={{ fontSize: 9, color: "var(--muted)" }}>nenhum ativo</span>
+        )}
+      </button>
+
+      {aberta && (
+        <div style={{ padding: "0 8px 8px", display: "flex", flexDirection: "column", gap: 6 }}>
+          {mods.length === 0 && (
+            <div className="op-data" style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.6 }}>
+              Registre um bônus situacional e ligue/desligue sem recalcular a ficha.
+            </div>
+          )}
+          {mods.map((m) => (
+            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input type="checkbox" checked={!!m.ativo} aria-label={`${m.nome} ativo`}
+                onChange={() => setMods((v) => v.map((x) => (x.id === m.id ? { ...x, ativo: !x.ativo } : x)))} />
+              <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: m.ativo ? "var(--text)" : "var(--muted)",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                textDecoration: m.ativo ? "none" : "line-through" }} title={m.nome}>{m.nome}</span>
+              <span className="op-data" style={{ fontSize: 10, color: m.ativo ? "var(--el-glow)" : "var(--muted)", whiteSpace: "nowrap" }}>
+                {m.dados ? `+${m.dados}d20` : ""}{m.dados && m.valor ? " " : ""}
+                {m.valor ? `${m.valor >= 0 ? "+" : ""}${m.valor}` : ""}
+              </span>
+              <button onClick={() => setMods((v) => v.filter((x) => x.id !== m.id))} aria-label={`Remover ${m.nome}`}
+                style={{ background: "none", border: "none", color: "var(--danger-text)", cursor: "pointer", padding: 0, fontSize: 13 }}>×</button>
+            </div>
+          ))}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 4, borderTop: "1px solid var(--border)", paddingTop: 6 }}>
+            <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="nome do modificador" maxLength={40}
+              aria-label="Nome do modificador" onKeyDown={(e) => e.key === "Enter" && adicionar()}
+              style={{ flex: 1, minWidth: 0, padding: "3px 6px", fontSize: 12 }} />
+            <input type="number" value={dados} onChange={(e) => setDados(e.target.value)} aria-label="Dados de bônus"
+              title="d20 a mais no bolo" style={num} />
+            <input type="number" value={valor} onChange={(e) => setValor(e.target.value)} aria-label="Valor de bônus"
+              title="soma plana no resultado" style={num} />
+            <button onClick={adicionar} disabled={!podeAdicionar} aria-label="Adicionar modificador"
+              title={podeAdicionar ? "Adicionar" : "Dê um nome e um valor"}
+              style={{ background: "none", border: "1px solid var(--border)", borderRadius: 3, color: podeAdicionar ? "var(--el-glow)" : "var(--muted)",
+                cursor: podeAdicionar ? "pointer" : "not-allowed", padding: "2px 7px", fontSize: 13 }}>+</button>
+          </div>
+          <div className="op-data" style={{ fontSize: 9, color: "var(--muted)", display: "flex", gap: 10 }}>
+            <span>dados = d20 a mais</span><span>valor = soma plana</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════════
  *  SMALL PARTS
  * ════════════════════════════════════════════════════════════════════════ */
 function Field({ label, value, editMode, onChange, placeholder }) {
@@ -1745,28 +2021,8 @@ function FaseThumb({ selected, label, image, onSelect, onRename, onRemove }) {
     </div>
   );
 }
-function Stat({ label, value, edit, onChange }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "6px 4px", border: "1px solid var(--border)", borderRadius: 3, background: "rgba(0,0,0,0.25)" }}>
-      <span className="op-label" style={{ fontSize: 8 }}>{label}</span>
-      {edit ? (
-        <input type="number" value={value} onChange={(e) => onChange?.(parseInt(e.target.value, 10) || 0)} style={{ width: 48, textAlign: "center", padding: "2px", fontFamily: "var(--font-display,'Cinzel Decorative',serif)", fontSize: 16, color: "var(--gold2)" }} />
-      ) : (
-        <span style={{ fontFamily: "var(--font-display,'Cinzel Decorative',serif)", fontSize: 20, color: "var(--el-glow)" }}>{value}</span>
-      )}
-    </div>
-  );
-}
 function MiniBtn({ children, onClick, style }) {
   return <button onClick={onClick} className="op-data" style={{ background: "rgba(201,168,76,0.08)", border: "1px solid var(--border2)", color: "var(--gold2)", borderRadius: 3, padding: "2px 8px", fontSize: 11, cursor: "pointer", ...style }}>{children}</button>;
-}
-function LabeledMini({ label, value, onChange }) {
-  return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <span className="op-label" style={{ fontSize: 8 }}>{label}</span>
-      <input value={value ?? ""} onChange={(e) => onChange(e.target.value)} style={{ padding: "3px 6px", fontSize: 12, fontFamily: "var(--font-data,'Share Tech Mono',monospace)" }} />
-    </label>
-  );
 }
 function Empty({ children }) {
   return <div className="op-data" style={{ fontSize: 11, color: "var(--muted)", padding: "14px 0", fontStyle: "italic" }}>{children}</div>;

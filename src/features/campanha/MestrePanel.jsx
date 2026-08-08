@@ -104,7 +104,6 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
 
   const lbl = { fontFamily: "Cinzel,serif", fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.5)" };
   const card = { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 14 };
-  const inp = { background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 6, color: "#eee", padding: "8px 10px", fontFamily: "'Share Tech Mono',monospace", width: "100%" };
 
   const liveSheets = sheets.filter(s => s.isLive);
 

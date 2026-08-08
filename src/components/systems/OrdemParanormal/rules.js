@@ -192,6 +192,23 @@ export function isCritical(keptDie, critico) {
 }
 
 /**
+ * Bônus de perícia que entra no teste de ataque.
+ *
+ * É o MESMO bônus do teste de perícia comum — grau de treinamento + os outros
+ * bônus da linha (`skillOutros`). Somar só o treino deixaria de fora o que vem
+ * de item, poder ou condição, e o mesmo ataque com Luta valeria menos que um
+ * teste de Luta rolado na coluna do meio da ficha, com os números idênticos na
+ * tela — a ficha se contradiria em duas colunas vizinhas.
+ *
+ * Quando a "perícia" do ataque é um ATRIBUTO puro (FOR/AGI/…), não há bônus:
+ * o atributo já decidiu quantos d20 foram lançados.
+ */
+export function attackSkillBonus(pericia, skillTreino = {}, skillOutros = {}) {
+  if (!pericia || ATTR_KEYS.includes(pericia)) return 0;
+  return (Number(skillTreino[pericia]) || 0) + (Number(skillOutros[pericia]) || 0);
+}
+
+/**
  * Combina o dano de um ataque (spec 0020 AC-2/AC-3). Recebe números JÁ rolados
  * (pureza/testabilidade). No crítico, o dano BASE é multiplicado pelo multiplicador;
  * o dano extra NÃO é multiplicado (dano adicional de efeito, padrão OP). Retorna o
@@ -534,6 +551,75 @@ export function patenteForPrestigio(pp) {
 export function cargaMaxima(attrs) {
   return 5 + (attrs?.FOR || 0) * 5;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   A CONTA DA ROLAGEM (spec 0037 — "Mostrar a conta")
+
+   Estas cinco funções são puras e existem para que a ficha possa EXIBIR a
+   aritmética de um teste, não só o total. Nenhuma delas rola dado: o motor
+   continua sendo `src/domain/dice.js` (AC-9 da spec 0028 proíbe motor
+   paralelo). Elas decidem QUANTOS dados o motor deve lançar e COMO a conta
+   se lê depois.
+══════════════════════════════════════════════════════════════════════════ */
+
+/** Soma os modificadores ATIVOS da banca. Inativo continua na lista e fora da conta. */
+export function bonusDeModificadores(mods) {
+  const ativos = (Array.isArray(mods) ? mods : []).filter((m) => m && m.ativo);
+  return {
+    dados: ativos.reduce((a, m) => a + (Number(m.dados) || 0), 0),
+    valor: ativos.reduce((a, m) => a + (Number(m.valor) || 0), 0),
+    nomes: ativos.map((m) => String(m.nome || "").trim() || "Modificador"),
+  };
+}
+
+/**
+ * Quantos d20 o teste lança, e qual valor entregar ao `rollOP`.
+ *
+ * ⚠ `attrEfetivo` existe porque `rollOP` decide o "fica com o pior" a partir do
+ * NÚMERO que recebe (`attrVal === 0`), não de uma flag. Passar `n` direto seria
+ * o bug silencioso desta feature: `rollOP(2)` lança 2 dados e fica com o
+ * MELHOR, que é o oposto da regra de atributo 0. Só `attrEfetivo` preserva a
+ * semântica — mande sempre ele, nunca o `n`.
+ *
+ * Atributo 0 é o caso invertido do livro (2d20, fica com o pior) e **dado de
+ * bônus não se aplica a ele** — decisão registrada na spec 0037. O livro que
+ * temos não resolve o caso, e adivinhar mudaria regra de personagem inválido
+ * para todos. `bonusIgnorado` é o que deixa a interface dizer isso em voz alta.
+ */
+export function boloDeDados(attrVal, dadosBonus = 0) {
+  const attr = Math.max(0, Number(attrVal) || 0);
+  const bonus = Math.max(0, Number(dadosBonus) || 0);
+  if (attr === 0) return { n: 2, worst: true, bonusIgnorado: bonus > 0, attrEfetivo: 0 };
+  return { n: attr + bonus, worst: false, bonusIgnorado: false, attrEfetivo: attr + bonus };
+}
+
+/** Notação exibida na coluna "Dados" da linha de perícia. O literal "d20" mora aqui. */
+export const notacaoDeDados = (bolo) => `${bolo?.n ?? 1}d20`;
+
+/**
+ * A conta, termo a termo, na ordem em que se lê. Único lugar que decide ordem e
+ * rótulo — o verso do card e qualquer futuro log leem daqui, não remontam.
+ * Termo que vale 0 e não traz dado é omitido: "Outros +0" é ruído, não informação.
+ */
+export function termosDaConta({ kept, treino = 0, outros = 0, mods = [], worst = false } = {}) {
+  const t = Number(treino) || 0;
+  const o = Number(outros) || 0;
+  const termos = [{ rotulo: worst ? "Pior d20" : "Melhor d20", valor: Number(kept) || 0, dado: true }];
+  if (t) termos.push({ rotulo: TREINO_TIERS[t] ? `Treino · ${TREINO_TIERS[t].label}` : "Treino", valor: t });
+  if (o) termos.push({ rotulo: "Outros", valor: o });
+  for (const m of Array.isArray(mods) ? mods : []) {
+    if (!m || !m.ativo) continue;
+    const valor = Number(m.valor) || 0;
+    const dados = Number(m.dados) || 0;
+    if (!valor && !dados) continue;
+    termos.push({ rotulo: String(m.nome || "").trim() || "Modificador", valor, dados, mod: true });
+  }
+  return termos;
+}
+
+/** Total da conta. Dado de bônus não soma valor — ele já entrou no bolo. */
+export const totalDaConta = (termos) =>
+  (Array.isArray(termos) ? termos : []).reduce((a, x) => a + (Number(x?.valor) || 0), 0);
 
 /* Format a roll for the campaign feed / onRoll bridge (matches App handleRoll). */
 export function rollPayload(label, res, charName, elemento) {

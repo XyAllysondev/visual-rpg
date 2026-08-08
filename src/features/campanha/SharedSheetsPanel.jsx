@@ -1,10 +1,54 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { createPortal } from "react-dom";
 import * as sharedSheetsRepo from "../../infrastructure/firestore/sharedSheetsRepo";
 import { getActiveAvatar } from "../../domain/character";
 import SharedSheetCard from "./SharedSheetCard";
 import { fsSendMessage, fsShareSheet } from "./campanhaApi";
 import { FullSheet } from "../ficha";
+import { fichaDoSistema } from "../../lib/lazySystemSheets";
+
+/* A mesa abria SEMPRE a FullSheet legada, qualquer que fosse o sistema — então um
+ * agente de Ordem Paranormal aparecia para a campanha numa ficha diferente da que
+ * o jogador usa: sem elemento de afinidade, sem aba de progressão, sem arsenal v2.
+ * A visão pública (`features/ficha/PublicSheetView`) já roteava certo; aqui não.
+ * A FullSheet fica como destino de quem não tem ficha própria de sistema. */
+const fichaDaMesa = (dados) => fichaDoSistema(dados) || FullSheet;
+
+/* Os três ajustes de privacidade moravam DENTRO da ficha legada. Como a mesa
+ * deixou de abri-la para Ordem Paranormal, eles subiram para cá — senão o dono
+ * perderia o único lugar do app onde consegue mexer neles. Só o dono vê a barra:
+ * a escolha é dele, e é ela que este painel lê para esconder ficha privada e para
+ * decidir quem edita. Texto herdado da ficha legada, de propósito. */
+const AJUSTES = [
+  { campo: "isPrivate", padrao: false, label: "Ficha privada",
+    desc: "Apenas você e o mestre da campanha poderão visualizar a ficha." },
+  { campo: "allowMasterEdit", padrao: true, label: "Permitir que o Mestre da campanha edite minha ficha" },
+  { campo: "allowAnyEdit", padrao: false, label: "Permitir que qualquer pessoa edite minha ficha",
+    desc: "Atenção: com essa opção ligada qualquer pessoa da campanha pode editar sua ficha." },
+];
+
+function BarraPrivacidade({ dados, onChange }) {
+  return (
+    <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border2)", background: "var(--card)", display: "flex", gap: 22, flexWrap: "wrap" }}>
+      {AJUSTES.map(({ campo, padrao, label, desc }) => {
+        const val = dados?.[campo] ?? padrao;
+        return (
+          <div key={campo} style={{ minWidth: 200, flex: "1 1 220px" }}>
+            <div style={{ fontFamily: "Cinzel,serif", fontSize: 11, color: "var(--text)", marginBottom: 4 }}>{label}</div>
+            {desc && <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6, lineHeight: 1.45 }}>{desc}</div>}
+            <div style={{ display: "inline-flex", border: "1px solid var(--border2)", borderRadius: 6, overflow: "hidden" }}>
+              {[[false, "DESLIGADO"], [true, "LIGADO"]].map(([v, txt]) => (
+                <button key={txt} onClick={() => onChange(campo, v)} aria-pressed={val === v}
+                  style={{ padding: "6px 14px", background: val === v ? "#8b5cf6" : "transparent", border: "none", cursor: "pointer",
+                    fontFamily: "Cinzel,serif", fontSize: 9, letterSpacing: 1, color: val === v ? "#fff" : "#666" }}>{txt}</button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function SharedSheetsPanel({ campaignId, uid, userName, isMaster, characters }) {
   const [sharedSheets, setSharedSheets] = useState([]);
@@ -35,6 +79,10 @@ function SharedSheetsPanel({ campaignId, uid, userName, isMaster, characters }) 
       if (!char) return;
       sharedSheetsRepo.updateCharacterData({ campaignId, sheetId: sheet.id }, char);
     });
+    // `campaignId` e `uid` ficam de fora: trocar de campanha ou de usuário
+    // remonta este painel inteiro, e listá-los só faria o live-sync reescrever
+    // fichas sem que nada tivesse mudado nelas.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   },[characters, loading]);
 
   const handleShare = async (character, isLive) => {
@@ -187,18 +235,35 @@ function SharedSheetsPanel({ campaignId, uid, userName, isMaster, characters }) 
         </div>
       )}
 
-      {viewSheet && createPortal(
-        <div onClick={()=>setViewSheet(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",zIndex:9999,overflowY:"auto",padding:"20px"}}>
-          <div onClick={e=>e.stopPropagation()} style={{maxWidth:960,margin:"0 auto",background:"var(--bg)",borderRadius:10,overflow:"hidden"}}>
-            <FullSheet character={viewSheet.characterData} onBack={()=>setViewSheet(null)}
-              onUpdate={canEditSheet(viewSheet) ? (updated)=>handleSheetUpdate(viewSheet,updated) : ()=>{}}
-              onRoll={roll=>{ fsSendMessage(campaignId,uid,userName,null,
-                `${roll.charName} rolou ${roll.expr||roll.attr} → [${roll.rolls.join(",")}] = ${roll.result}`,
-                "roll",{expr:roll.expr||roll.attr,rolls:roll.rolls,total:roll.result,sides:parseInt((roll.dice||"D20").slice(1)),count:roll.rolls.length,crit:roll.crit});
-              }}/>
+      {viewSheet && (() => {
+        /* Lê a versão VIVA do documento: `viewSheet` é a foto do clique, e sem
+         * isto um ajuste de privacidade só apareceria ao fechar e reabrir. */
+        const atual = sharedSheets.find(s => s.id === viewSheet.id) || viewSheet;
+        const dados = atual.characterData;
+        const Ficha = fichaDaMesa(dados);
+        const podeEditar = canEditSheet(atual);
+        const ehDono = atual.ownerId === uid;
+        return createPortal(
+          <div onClick={()=>setViewSheet(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",zIndex:9999,overflowY:"auto",padding:"20px"}}>
+            <div onClick={e=>e.stopPropagation()} style={{maxWidth:960,margin:"0 auto",background:"var(--bg)",borderRadius:10,overflow:"hidden"}}>
+              {ehDono && (
+                <BarraPrivacidade dados={dados}
+                  onChange={(campo, val) => handleSheetUpdate(atual, { ...dados, [campo]: val })} />
+              )}
+              <Suspense fallback={<div style={{padding:"60px 0",textAlign:"center",fontFamily:"Cinzel,serif",fontSize:11,letterSpacing:2,color:"var(--muted)",textTransform:"uppercase"}}>Abrindo ficha…</div>}>
+                {/* Sem `charId`: o bloco de compartilhar/tornar pública é da ficha
+                    do DONO, não da cópia que vive na mesa. */}
+                <Ficha character={dados} onBack={()=>setViewSheet(null)} readOnly={!podeEditar}
+                  onUpdate={podeEditar ? (updated)=>handleSheetUpdate(atual,updated) : ()=>{}}
+                  onRoll={roll=>{ fsSendMessage(campaignId,uid,userName,null,
+                    `${roll.charName} rolou ${roll.expr||roll.attr} → [${roll.rolls.join(",")}] = ${roll.result}`,
+                    "roll",{expr:roll.expr||roll.attr,rolls:roll.rolls,total:roll.result,sides:parseInt((roll.dice||"D20").slice(1)),count:roll.rolls.length,crit:roll.crit});
+                  }}/>
+              </Suspense>
+            </div>
           </div>
-        </div>
-      , document.body)}
+        , document.body);
+      })()}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { SYSTEMS } from "./systems";
 import NexusLogo from "../../lib/NexusLogo";
+import { ALVO_EXTERNO, DISCORD_URL } from "../../lib/links";
 import useReducedMotion from "../../lib/useReducedMotion";
 import AmbientBackdrop from "../../ui/AmbientBackdrop";
 import Deco from "../../ui/Deco";
@@ -266,10 +267,10 @@ function SystemSelect({ onSelect, onLogout }) {
 
           {/* Footer */}
           <div style={{textAlign:"center", marginTop:48, paddingBottom:8}}>
+            {/* Endereço em `lib/links.js` — spec 0036, AC-2. */}
             <a
-              href="https://discord.gg/nexusrpg"
-              target="_blank"
-              rel="noopener noreferrer"
+              href={DISCORD_URL}
+              {...ALVO_EXTERNO}
               style={{
                 fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:2, color:"var(--muted)",
                 textTransform:"uppercase", textDecoration:"none",

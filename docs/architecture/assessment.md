@@ -54,7 +54,6 @@ src/
         VitalSign.jsx              ← HP, sanidade, esforço
         AttrConstellation.jsx      ← visualização de atributos
         AttributeCircle.jsx
-        AttrPentagon.jsx
         ElementoAfinidadeModal.jsx
         ElementoSymbol.jsx
         elementos.jsx

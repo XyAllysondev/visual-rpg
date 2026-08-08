@@ -56,7 +56,6 @@ function RollFeed({ campaignId, uid }) {
           const rolls = rd.rolls || [];
           const expr  = rd.expr || r.content?.match(/rolou (.+?) →/i)?.[1] || "?";
           const total = rd.total ?? "?";
-          const sides = rd.sides || 20;
           return (
             <div key={r.id} style={{border:"1px solid rgba(124,58,237,0.35)",borderRadius:8,padding:"11px 13px",background:"rgba(124,58,237,0.06)"}}>
               <div style={{fontFamily:"Cinzel,serif",fontSize:11,color:"rgba(255,255,255,0.85)",marginBottom:8,fontWeight:600}}>{r.userName}</div>

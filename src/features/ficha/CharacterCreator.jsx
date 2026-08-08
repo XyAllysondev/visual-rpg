@@ -1,8 +1,10 @@
 import { useState, useRef } from "react";
 import NexusLogo from "../../lib/NexusLogo";
 import AttrDiagram from "./AttrDiagram";
-import StepBar from "./StepBar";
+import StepBar, { PASSOS } from "./StepBar";
+import DocPanel from "./DocPanel";
 import { ORIGENS, CLASSES } from "./opConstants";
+import { assinaturaDe, numeroDeDossie } from "../../domain/character";
 
 
 /* ═══════════════════════════════
@@ -12,7 +14,6 @@ import { ORIGENS, CLASSES } from "./opConstants";
 function CharacterCreator({ onFinish, onCancel }) {
   const [step, setStep] = useState(0);
   const [attrs, setAttrs] = useState({ AGI:1, FOR:1, INT:1, PRE:1, VIG:1 });
-  const [pontos, setPontos] = useState(4);
   const [origem, setOrigem] = useState(null);
   const [classe, setClasse] = useState(null);
   const [form, setForm] = useState({ personagem:"", jogador:"", aparencia:"", personalidade:"", historico:"", objetivo:"", avatar:"" });
@@ -44,7 +45,60 @@ function CharacterCreator({ onFinish, onCancel }) {
     desc: { fontFamily:"Crimson Pro,serif", fontSize:18, color:"var(--muted2)", lineHeight:1.8, fontStyle:"italic" },
   };
 
-  /* STEP 0 — ATRIBUTOS */
+  /* STEP 0 — ADMISSÃO (spec 0039)
+   * Enquadramento de ficção antes dos números. O texto é AUTORAL: descreve as
+   * obrigações do agente com as nossas palavras, não transcreve a referência. */
+  const StepAdmissao = () => (
+    <div className="fade" style={{display:"grid", gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)", gap:32, alignItems:"start"}}>
+      <div>
+        <div style={S.h2}>Termo de Admissão</div>
+        <p style={S.desc}>
+          A partir de agora você responde à <strong style={{color:"var(--gold)"}}>Ordo Realitas</strong>.
+          Nós existimos para manter a Membrana fechada — e para que o mundo do lado de cá siga
+          sem saber que ela existe.
+        </p>
+        <p style={{...S.desc, fontSize:16, marginTop:16}}>
+          Este documento é confidencial. Ele não deixa a base, não é citado fora dela e não
+          descreve o que você viu em combate.
+        </p>
+        <div style={{marginTop:22, padding:"12px 16px", borderLeft:"2px solid var(--gold)", background:"rgba(201,168,76,0.06)"}}>
+          <div style={{fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:2, color:"var(--muted)", textTransform:"uppercase", marginBottom:6}}>Continue</div>
+          <div style={{fontFamily:"Crimson Pro,serif", fontSize:15, color:"var(--muted2)", lineHeight:1.7, fontStyle:"italic"}}>
+            As páginas seguintes pedem o que precisamos saber sobre você. Ao final, assine.
+          </div>
+        </div>
+      </div>
+      <div>
+        <div style={{fontFamily:"Cinzel,serif", fontSize:10, letterSpacing:2, color:"var(--gold2)", textTransform:"uppercase", marginBottom:14}}>
+          O que esperamos de você
+        </div>
+        <div style={{display:"flex", flexDirection:"column", gap:14}}>
+          {[
+            ["Conter o que atravessa", "Se algo rompeu a Membrana, o problema é seu. Resolva com eficiência e sem hesitar."],
+            ["Sustentar a equipe", "Nenhum agente opera sozinho. Cobertura e apoio não são favores — são procedimento."],
+            ["Registrar tudo", "Caso sem relatório é caso que a Ordem vai enfrentar de novo, do zero."],
+            ["Desmontar cultos", "Grupos ocultistas são a via mais rápida para uma ruptura. Interfira sempre que puder."],
+            ["Proteger os civis", "A população não precisa saber. Precisa continuar viva."],
+          ].map(([titulo, corpo], i)=>(
+            <div key={titulo} style={{display:"flex", gap:12, alignItems:"flex-start"}}>
+              <span aria-hidden="true" style={{
+                fontFamily:"'IBM Plex Mono','Share Tech Mono',monospace", fontSize:10,
+                flexShrink:0, width:20, height:20, borderRadius:"50%",
+                display:"inline-flex", alignItems:"center", justifyContent:"center",
+                border:"1px solid var(--border2)", color:"var(--gold)",
+              }}>{i+1}</span>
+              <div style={{minWidth:0}}>
+                <div style={{fontFamily:"Cinzel,serif", fontSize:12, letterSpacing:1, color:"var(--text)", textTransform:"uppercase", marginBottom:3}}>{titulo}</div>
+                <div style={{fontFamily:"Crimson Pro,serif", fontSize:15, color:"var(--muted2)", lineHeight:1.6}}>{corpo}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  /* STEP 1 — ATRIBUTOS */
   const StepAtributos = () => (
     <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:32, alignItems:"start"}}>
       <div>
@@ -262,7 +316,9 @@ function CharacterCreator({ onFinish, onCancel }) {
           <strong style={{color:"var(--gold)", fontStyle:"normal"}}>Perícias concedidas serão adicionadas automaticamente.</strong> Como uma alternativa, você pode não escolher uma classe e começar como <span style={{color:"var(--gold)"}}>Mundano</span>.
         </p>
       </div>
-      <div style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:16}}>
+      {/* três colunas fixas espremiam os cartões de classe em ~110px no celular;
+          `auto-fit` mantém as três no desktop e quebra em duas na tela estreita */}
+      <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:16}}>
         {CLASSES.map(c=>{
           const isSel = classe?.id === c.id;
           return (
@@ -294,6 +350,11 @@ function CharacterCreator({ onFinish, onCancel }) {
   );
 
   /* STEP 3 — TOQUES FINAIS — renderizado inline para evitar perda de foco */
+  const assinatura = assinaturaDe(form.personagem);
+  /* Derivado, nunca sorteado: documento cujo número muda a cada render não é
+   * documento. Sem nome, `numeroDeDossie` devolve "" e o cabeçalho desenha o
+   * traçado de "ainda não emitido" (spec 0039, AC-2 e AC-3). */
+  const numeroDossie = numeroDeDossie(form.personagem);
   const renderStepFinal = () => (
     <div className="fade" style={{display:"flex", flexDirection:"column", gap:20}}>
       <div style={{display:"flex", flexWrap:"wrap", justifyContent:"space-between", alignItems:"flex-start", gap:12}}>
@@ -303,9 +364,6 @@ function CharacterCreator({ onFinish, onCancel }) {
             Até aqui, você definiu as características mecânicas de sua ficha — mas um bom personagem é mais do que apenas números. Agora, vamos trabalhar na descrição de seu agente, definindo aspectos como nome, gênero e idade.
           </p>
         </div>
-        <button className="btn-gold" onClick={()=>{ if(form.personagem) onFinish({attrs,origem,classe,form}); }} style={{flexShrink:0}}>
-          Finalizar Ficha
-        </button>
       </div>
 
       {/* Avatar upload */}
@@ -413,14 +471,59 @@ function CharacterCreator({ onFinish, onCancel }) {
         <label style={S.label}>Objetivo</label>
         <textarea value={form.objetivo} onChange={e=>setForm(f=>({...f,objetivo:e.target.value}))} placeholder="Por que ele faz parte da Ordem? Por que luta contra o Outro Lado?" rows={3} style={{resize:"vertical"}}/>
       </div>
+
+      {/* ── FECHO: a assinatura (spec 0038) ──
+          O documento que nasce aqui é uma ficha de agente da Ordo Realitas, e o
+          gesto que a fecha é assinar, não clicar em "Criar". O botão comum que
+          ficava no topo do passo foi REMOVIDO de propósito: dois caminhos para a
+          mesma ação é convite a manter só o feio.
+          Sem nome não há assinatura — `assinaturaDe("")` devolve "", e assinar o
+          nada criaria um agente sem nome. */}
+      <div style={{marginTop:12, paddingTop:22, borderTop:"1px solid var(--border2)", display:"flex", flexDirection:"column", alignItems:"center", gap:6}}>
+        <button
+          onClick={()=>{ if(assinatura) onFinish({attrs,origem,classe,form}); }}
+          disabled={!assinatura}
+          aria-label={assinatura ? `Assinar como ${assinatura} e finalizar a ficha` : "Preencha o nome do agente para assinar"}
+          title={assinatura ? "Assinar e finalizar" : "Preencha o nome do agente acima"}
+          style={{
+            background:"none", border:"none", borderBottom:"1px solid rgba(201,168,76,0.55)",
+            minWidth:260, padding:"6px 24px 8px",
+            fontFamily:"'Seaweed Script','Segoe Script','Brush Script MT',cursive",
+            fontSize:30, lineHeight:1.15, color: assinatura ? "var(--gold2)" : "transparent",
+            cursor: assinatura ? "pointer" : "not-allowed",
+            transition:"color 0.25s",
+          }}
+        >
+          {/* O ` ` mantém a linha com altura de assinatura antes de haver nome —
+              sem ele a linha salta para baixo quando o nome é digitado. */}
+          {assinatura || " "}
+        </button>
+        <div style={{fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:2, color:"var(--muted)", textTransform:"uppercase"}}>
+          {assinatura ? "Assine aqui para finalizar" : "Preencha o nome do agente para assinar"}
+        </div>
+      </div>
     </div>
   );
 
+  /* As travas de avanço, uma por passo. O passo de Admissão não trava nada — ele
+   * só enquadra — e o de Autenticação não tem "próximo": quem fecha é a
+   * assinatura (spec 0038). */
   const canNext = [
-    pontosRestantes === 0,
-    origem !== null,
-    classe !== null,
-    true,
+    true,                       // Admissão
+    pontosRestantes === 0,      // Atributos
+    origem !== null,            // Origem
+    classe !== null,            // Classe
+    true,                       // Autenticação
+  ][step];
+
+  /* A natureza do documento muda por passo — é o que faz cada tela se ler como
+   * uma página diferente do mesmo dossiê, e não como quatro formulários. */
+  const NATUREZA = [
+    "Termo de admissão",
+    "Anexo I · Aptidões",
+    "Anexo II · Vida pregressa",
+    "Anexo III · Treinamento",
+    "Autenticação do agente",
   ][step];
 
   return (
@@ -445,14 +548,17 @@ function CharacterCreator({ onFinish, onCancel }) {
       </div>
 
       <div style={{maxWidth:900, margin:"0 auto", padding:"40px 28px"}}>
-        <StepBar current={step}/>
+        <StepBar current={step} onPick={setStep}/>
 
-        {/* Step content */}
+        {/* Step content — cada passo é uma PÁGINA do mesmo dossiê (spec 0039) */}
         <div style={{marginBottom:32}}>
-          {step===0 && <StepAtributos/>}
-          {step===1 && <StepOrigem/>}
-          {step===2 && <StepClasse/>}
-          {step===3 && renderStepFinal()}
+          <DocPanel natureza={NATUREZA} numero={numeroDossie}>
+            {step===0 && <StepAdmissao/>}
+            {step===1 && <StepAtributos/>}
+            {step===2 && <StepOrigem/>}
+            {step===3 && <StepClasse/>}
+            {step===4 && renderStepFinal()}
+          </DocPanel>
         </div>
 
         {/* Navigation */}
@@ -464,13 +570,18 @@ function CharacterCreator({ onFinish, onCancel }) {
             opacity: step>0?1:0.3,
           }}>← Voltar</button>
 
-          <div style={{display:"flex", gap:8}}>
-            {[0,1,2,3].map(i=>(
+          <div style={{display:"flex", gap:8}} aria-hidden="true">
+            {PASSOS.map((_,i)=>(
               <div key={i} style={{width:i===step?20:6,height:6,borderRadius:3,background:i<=step?"var(--gold)":"rgba(201,168,76,0.2)",transition:"all 0.3s"}}/>
             ))}
           </div>
 
-          {step < 3 ? (
+          {/* ⚠ NO ÚLTIMO PASSO NÃO HÁ BOTÃO AQUI, e isso é deliberado.
+              Existia um "Criar Agente ✦" nesta barra ALÉM da assinatura do fecho
+              (spec 0038) — dois caminhos para a mesma ação, e o teste da 0038 não
+              pegou porque procurava pelo rótulo do outro botão, já removido. Quem
+              finaliza é a assinatura, e ela é uma só. */}
+          {step < PASSOS.length - 1 ? (
             <button onClick={()=>canNext&&setStep(s=>s+1)} className={canNext?"btn-gold":""} style={!canNext?{
               background:"rgba(201,168,76,0.05)", border:"1px solid rgba(201,168,76,0.15)", borderRadius:4,
               color:"var(--muted)", cursor:"not-allowed", fontFamily:"Cinzel,serif", fontSize:10,
@@ -479,10 +590,9 @@ function CharacterCreator({ onFinish, onCancel }) {
               Próximo →
             </button>
           ) : (
-            <button className="btn-gold" onClick={()=>{ if(form.personagem) onFinish({attrs,origem,classe,form}); }}
-              style={{opacity: form.personagem?1:0.4, cursor:form.personagem?"pointer":"not-allowed"}}>
-              Criar Agente ✦
-            </button>
+            <span style={{fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:2, color:"var(--muted)", textTransform:"uppercase"}}>
+              Assine ao pé do documento
+            </span>
           )}
         </div>
       </div>

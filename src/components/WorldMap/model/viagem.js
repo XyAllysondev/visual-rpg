@@ -38,7 +38,6 @@ import { pontasDaTrilha, vizinhos } from "./graph";
 export const HORAS_POR_DIA = 24;
 
 const listaDe = (v) => (Array.isArray(v) ? v : []);
-const idValido = (v) => typeof v === "string" && v.trim() !== "";
 const ehPonto = (p) => !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
 const grampear01 = (t) => Math.min(1, Math.max(0, Number.isFinite(t) ? t : 0));
 const naoNegativo = (n) => (Number.isFinite(n) && n > 0 ? n : 0);

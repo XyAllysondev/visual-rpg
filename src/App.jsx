@@ -7,7 +7,6 @@ import { useCampaign } from "./hooks/useCampaign";
    recuperação de senha e persistência de sessão. */
 /* O SDK do Firestore NÃO é importado aqui (spec 0029 AC-1). Todo acesso a dados passa
    pelos repositórios de `src/infrastructure/firestore/`, importados logo abaixo. */
-import { useLocale } from "./i18n/useLocale";
 import MasterSuite from './components/MasterSuite';
 /* Trilhas Sonoras (spec 0031). A `LocalMusicBar` também mora nessa feature, mas quem a usa é
    a própria `MusicPlayerBar` — o App só conhece a tela e a barra de "tocando agora". */
@@ -68,11 +67,10 @@ import MobileBottomNav from "./ui/MobileBottomNav";
 ═══════════════════════════════ */
 /* ── Ficha pública (rota /p/:charId, sem login) ─────────────────────── */
 export default function App() {
-  const { t: sT, lang: appLang, setLang: setAppLang } = useLocale();
   const [introPlayed, setIntroPlayed] = useState(() => sessionStorage.getItem("nx_intro") === "1");
-  const { currentUser, authLoading, userName: hookUserName, userPhoto: hookUserPhoto, logout } = useAuth();
+  const { currentUser, authLoading, userName: hookUserName, logout } = useAuth();
   const loggedIn = authLoading ? null : !!currentUser;
-  const { campaigns, campsLoading: campaignsLoading, createCampaign, joinCampaign, leaveCampaign } = useCampaign(currentUser?.uid, hookUserName);
+  const { campaigns, campsLoading: campaignsLoading, createCampaign, joinCampaign } = useCampaign(currentUser?.uid, hookUserName);
   const [selectedCampaign, setSelectedCampaign] = useState(null);
   const [showCreateCampaign, setShowCreateCampaign] = useState(false);
   const [showJoinCampaign, setShowJoinCampaign] = useState(false);
@@ -91,7 +89,7 @@ export default function App() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [creatingChar, setCreatingChar] = useState(false);
   const [createdChar, setCreatedChar] = useState(null);
-  const { characters, setCharacters, charsLoading, saveError, clearSaveError, saveCharacter, deleteCharacter } = useCharacter(currentUser?.uid, activeSystem?.id);
+  const { characters, saveError, clearSaveError, saveCharacter, deleteCharacter } = useCharacter(currentUser?.uid, activeSystem?.id);
   /* O estado `sessions` foi removido: `setSessions` só era chamado para reler o
      MESMO array vazio do localStorage — nada em lugar nenhum do app adicionava
      uma sessão. Eram três efeitos e uma chave de storage sustentando um zero
@@ -175,6 +173,9 @@ export default function App() {
   useEffect(() => {
     if (!currentUser) { setUserPlans([]); return; }
     return usersRepo.watchSubscribedSystems(currentUser.uid, setUserPlans);
+    // O que identifica o usuário aqui é o uid; `currentUser` inteiro troca de
+    // referência a cada renovação de token e reabriria o listener à toa.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.uid]);
 
   useEffect(() => {
@@ -208,6 +209,8 @@ export default function App() {
     else if (screen === 'party' && selectedCampaign) path = `/campanhas/${selectedCampaign.id}`;
     else path = SCREEN_PATH[screen] || '/painel';
     if (window.location.pathname !== path) window.history.pushState({},'', path);
+    // `SCREEN_PATH` é tabela constante do módulo — não muda entre renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, createdChar, selectedCampaign, loggedIn, activeSystem]);
 
   // URL → State: apply URL path once after auth+system are ready
@@ -221,6 +224,9 @@ export default function App() {
     if (fichaM)      { setScreen('sheet'); }
     else if (campM)  { setScreen('party'); }
     else { const s = PATH_SCREEN[path]; if (s) setScreen(s); }
+    // `PATH_SCREEN` é tabela constante do módulo; e o `_urlInit` garante que este
+    // efeito aplica a URL UMA vez, logo depois de auth e sistema prontos.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggedIn, activeSystem]);
 
   // When characters load after a deep link to /fichas/:id, restore the character
@@ -231,6 +237,9 @@ export default function App() {
       const char = characters.find(c => String(c.id || c.createdAt) === fichaM[1]);
       if (char) setCreatedChar(char);
     }
+    // `createdChar` é o que este efeito PREENCHE — listá-lo faria o efeito
+    // disparar de novo assim que a ficha entrasse, sem nada novo para fazer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [characters, screen, loggedIn, activeSystem]);
 
   // Popstate: handle browser back / forward
@@ -256,6 +265,9 @@ export default function App() {
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
+    // `PATH_SCREEN` é tabela constante do módulo. O listener precisa enxergar as
+    // listas atuais de fichas e campanhas — por isso só elas na lista.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [characters, campaigns]);
   useEffect(() => { setCreatedChar(null); }, [activeSystem?.id]);
   useEffect(() => {
@@ -318,7 +330,6 @@ export default function App() {
   };
 
   const renderScreen = () => {
-    const sysName = activeSystem?.name || "Sistema";
     if (creatingChar) return null;
     if (createdChar && screen === "sheet") {
       const uid    = currentUser?.uid || "";
@@ -490,7 +501,10 @@ export default function App() {
           </main>
           {nowPlaying && <MusicPlayerBar nowPlaying={nowPlaying} onNowPlaying={setNowPlaying} ytPlayerRef={ytPlayerRef} />}
           <MobileBottomNav active={screen} onNav={setScreen}/>
-          <AppFooter system={activeSystem}/>
+          {/* O "Changelog" do rodapé é navegação INTERNA: o Roadmap já é a
+              página de "o que mudou". Sem este callback o item não aparece —
+              melhor um item a menos do que um botão morto (spec 0036, AC-1). */}
+          <AppFooter system={activeSystem} onIrParaRoadmap={()=>setScreen("roadmap")}/>
         </div>
       </div>
       {showUpgrade && <UpgradeModal onClose={()=>setShowUpgrade(false)} onGoToPlans={()=>{setShowUpgrade(false);setScreen("planos");}}/>}
