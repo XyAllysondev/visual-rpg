@@ -23,7 +23,7 @@ import ElementoRitual, { RITUAL_MS } from "./ElementoRitual";
 import HabilidadesTab from "./Tabs/HabilidadesTab";
 import RituaisTab from "./Tabs/RituaisTab";
 import InventarioTab from "./Tabs/InventarioTab";
-import DescricaoTab from "./Tabs/DescricaoTab";
+import DossieTab from "./Tabs/DossieTab";
 import ProgressaoTab from "./Tabs/ProgressaoTab";
 import { derivar, aplicar as aplicarMotor, reverterPara, pendencias } from "./progressao/motor";
 import LicencaOP, { TEXTO_IA } from "../../LicencaOP";
@@ -294,6 +294,10 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
    * que contar, e NEX/Patente trocam o motor de progressão inteiro. */
   const [regrasOpcionais, setRegrasOpcionais] = useState(character.regrasOpcionais ?? {});
   const semSanidade = !!regrasOpcionais.semSanidade;
+  /* Dossiê do caso e livro-razão de interlúdios (spec 0040). Aditivos no
+   * documento — Firestore é schemaless, mesmo padrão de `progressao.marcos`. */
+  const [investigacao, setInvestigacao] = useState(character.investigacao ?? {});
+  const [interludios, setInterludios] = useState(character.interludios ?? []);
 
   const [elementoAfinidade, setElementoAfinidade] = useState(character.elementoAfinidade ?? null);
   const [elementoEscolhidoEm, setElementoEscolhidoEm] = useState(character.elementoEscolhidoEm ?? null);
@@ -387,7 +391,7 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
     diario, creditos, rollHistory, trilha, defesaBonus, defesaOutros, esquivaBonus, bloqueio, protecao, resistencias,
     proeficiencia, elementoAfinidade, elementoEscolhidoEm, elementoGmOverride, elementoNotas,
     habilidades, inventario, descricao, dtRituaisBonus, progressao, modificadores,
-    periciasOcultas, regrasOpcionais,
+    periciasOcultas, regrasOpcionais, investigacao, interludios,
     dtRituais: dtRituaisRule(nex, attrs, dtRituaisBonus), // total calculado (compat de leitura)
   };
   const latest = useRef(snapshot);
@@ -412,7 +416,8 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
   }, [attrs, form, skillTreino, skillOutros, pdBonus, deslocamentoBonus, nex, hp, san, pe, pvMax, sanMax, peMax, attacks, skills, poderes,
       rituais, itens, diario, creditos, defesaBonus, defesaOutros, esquivaBonus, bloqueio, protecao, resistencias,
       proeficiencia, elementoAfinidade, elementoNotas, habilidades, inventario, descricao, dtRituaisBonus,
-      progressao, trilha, modificadores, periciasOcultas, regrasOpcionais]);
+      progressao, trilha, modificadores, periciasOcultas, regrasOpcionais,
+      investigacao, interludios]);
   // flush on unmount — a dependência é o `flushSave` recriado a cada render, e
   // incluí-lo faria o efeito rodar (e salvar) a cada tecla. O ref `latest` já
   // garante que o que sai no unmount é o estado mais novo.
@@ -464,6 +469,16 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
    * bolo de d20, `valor` soma plano. Recalculado a cada rolagem de propósito: a
    * banca é ligada/desligada durante o turno e uma memo por render seria uma
    * fonte de "liguei e não valeu". */
+  /* Interlúdio (spec 0040): o clamp já aconteceu no módulo puro — aqui só se
+   * grava o que ele devolveu. Reaplicar Math.min aqui seria uma segunda opinião
+   * sobre a mesma regra, e é assim que duas réguas divergem. */
+  const aplicarInterludio = ({ vitais, registro }) => {
+    setHp(vitais.pv);
+    setSan(vitais.san);
+    setPe(vitais.pe);
+    setInterludios((v) => [...v, registro]);
+  };
+
   const modBonus = () => bonusDeModificadores(modificadores);
 
   /* ⚠ `kept` e `bonus` existem para a ficha poder MOSTRAR a conta (spec 0037).
@@ -1250,7 +1265,14 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
             )}
 
             {activeTab === "descricao" && (
-              <DescricaoTab descricao={descricao} setDescricao={setDescricao} />
+              <DossieTab
+                descricao={descricao} setDescricao={setDescricao}
+                investigacao={investigacao} setInvestigacao={setInvestigacao}
+                vitais={{ pv: hp, pvMax, san, sanMax, pe, peMax }}
+                interludios={interludios}
+                onAplicarInterludio={aplicarInterludio}
+                readOnly={readOnly}
+              />
             )}
           </div>
 

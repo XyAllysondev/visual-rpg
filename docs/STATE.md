@@ -10,9 +10,78 @@ alwaysApply: true
 > todo. Diferente do **ADR** (decisão durável e imutável). Decisão estrutural → ADR; estado do
 > trabalho → aqui. Atualize ao **pausar/encerrar**; leia ao **retomar**. Use a skill `/handoff`.
 
-**Última atualização:** 2026-08-08 (3) — **SPECS 0037, 0038 e 0039 ENTREGUES.**
-Gate: **112 suítes / 2.619 testes verdes** (`--runInBand`) e **`CI=true npm run build` compila
-limpo**. Nada commitado (a árvore ainda carrega o não-commitado de 2026-08-07).
+**Última atualização:** 2026-08-08 (4) — **SPEC 0040 ENTREGUE. 0036–0039 JÁ EM PRODUÇÃO.**
+Gate: **113 suítes / 2.666 testes verdes** (`--runInBand`) e **`CI=true npm run build` compila
+limpo**.
+
+> **2026-08-08 (4): SPEC 0040 — INVESTIGAÇÃO E INTERLÚDIO.** O Andre pediu as duas páginas que a
+> RPGpedia anuncia como "em breve", *"trabalhe 100% nisso"*, e sugeriu juntá-las com Descrição.
+>
+> **NÃO HAVIA O QUE COPIAR** — lá as duas são modais de "em breve". O que existe de verdade é no
+> nosso repo: **as 7 regras de interlúdio JÁ ESTAVAM transcritas** em `regras-oficiais.json`
+> (`secao: "interludio"`, spec 0026). A aba **lê de lá** e há teste comparando nome e descrição
+> **caractere a caractere** com o JSON — se alguém reescrever a regra no componente, reprova. Era o
+> risco real: o `STATE` já registra duas réguas divergentes de trilha em `opConstants.js`.
+>
+> - **⚠ OS VALORES DE RECUPERAÇÃO NÃO EXISTEM NO REPO.** As entradas dizem literalmente
+>   `(Resumo — valores no livro.)`. Então **não inventei número**: quem informa quanto recuperou é
+>   quem tem o livro, e o app aplica **a parte da regra que temos por escrito** —
+>   `interludio-geral`: *"Nenhuma recuperação ultrapassa o máximo do personagem"*. Preencher um
+>   valor "provável" seria inventar regra de sistema publicado.
+> - **O registro guarda o EFETIVAMENTE recuperado, não o pedido.** PV 18/20 com +9 informado grava
+>   `+2`. Histórico com número que não aconteceu é mentira no livro-razão — e o histórico é
+>   exatamente o que o pedido chamava de "revisar as ações".
+> - **Armadilha fechada:** sem máximo conhecido (`pvMax` 0 ou ausente) a função **não recupera
+>   nada**. Deixar passar seria a única forma de a recuperação furar o teto.
+> - **A SUGESTÃO DO ANDRE ERA O DESENHO CERTO, NÃO UM ATALHO.** A barra de abas da ficha **já
+>   quebrou com seis** (`fix(ficha): abas somem quando são seis`). Investigação e Interlúdio no topo
+>   dariam **oito** e reintroduziriam o defeito. Viraram sub-abas de um **Dossiê** (Agente ·
+>   Investigação · Interlúdio) na gramática de pílula deslizante. **Há teste travando as seis abas
+>   do topo.** `DescricaoTab` não foi tocada — virou a sub-aba "Agente".
+> - **Pista tem ESTADO, e é o ponto todo.** Aberta / confirmada / descartada, com **marca**
+>   (`?`/`✓`/`✕`) e riscado na descartada — não só cor. Numa bola de texto em "Anotações", pista
+>   descartada fica indistinguível de pista viva, e é essa confusão que faz o grupo perseguir o que
+>   já eliminou. Pista nasce **aberta**: pista que entra confirmada não foi investigada, foi assumida.
+> - **O cabeçalho conta ABERTAS, não o total** — total inclui trabalho encerrado e não diz quanto
+>   falta perseguir.
+> - **Estado fora dos três conhecidos é ignorado** — o Firestore é schemaless e uma string errada
+>   não pode virar um quarto estado.
+> - A ficha só **grava** o que o módulo puro devolveu; não reaplica `Math.min`. Segunda opinião sobre
+>   a mesma regra é como duas réguas divergem.
+>
+> **Arquivos:** `specs/0040-investigacao-e-interludio/{spec,tasks}.md`, `interludio.js` e
+> `investigacao.js` (novos, puros), `Tabs/{DossieTab,InvestigacaoTab,InterludioTab}.jsx` (novos),
+> `__tests__/investigacao-interludio.test.js` (novo, 45 testes), `OrdemParanormalSheet.jsx`.
+>
+> **FORA DE ESCOPO, declarado:** transcrever os valores de recuperação do livro (é conteúdo, spec
+> própria); Notas do Mestre (segue proibida pela regra do Firestore — precisa de documento separado
+> + ADR); ligar pista a nó do mapa-múndi ou a PNJ (acoplamento entre agregados, ADR antes).
+>
+> **PENDENTE DO ANDRE:** validar no navegador (registrar duas pistas e descartar uma; registrar um
+> interlúdio pedindo mais PV do que cabe e conferir que o histórico grava o efetivo) e **commitar/
+> deployar**.
+
+> **2026-08-08 (3): SPECS 0037, 0038 e 0039 — ENTREGUES E EM PRODUÇÃO.**
+> Commits `777250f` (0036–0039) e `616e057` (conserto do modal) em
+> `feat/redesign-layout-nx`, empurrados para `Andreytyui/NEXUS-RPG`, e **deployados no Firebase
+> Hosting** (`nexus-rpg-app`) — `playnexusrpg.com` e `nexus-rpg-app.web.app` respondendo 200.
+> **`main` continua em `efeb973`, ATRÁS de produção** — decisão do Andre pendente (PR ou
+> fast-forward).
+>
+> **⚠ DEFEITO DE PRODUÇÃO ACHADO E CORRIGIDO NO MESMO DIA (`616e057`):** o modal do retrato abria
+> fora da vista e exigia rolar a página. O CSS estava **certo** (`position: fixed; inset: 0`) e o
+> bug existia assim mesmo: a raiz da ficha carrega a classe global `.fade`, cujo `fadeIn` termina em
+> `transform: translateY(0)` com `forwards` — e **ancestral com `transform` diferente de `none` vira
+> o bloco de contenção dos filhos `position: fixed`**. O `inset: 0` se resolvia contra a ficha
+> inteira. O `Modal` local passou a portalar para `document.body`, o que consertou os três usos
+> (matriz de NEX, retrato, retrato com IA). O teste **não** checa `position: fixed` — checa que o
+> modal está FORA da `.op-sheet`. Provado por mutação.
+> **Lição:** `position: fixed` não é confiável dentro desta ficha; modal novo aqui **nasce portalado**.
+>
+> **Verificação de deploy que quase virou relato errado:** `main.js.map` respondeu **HTTP 200** e
+> parecia vazamento de código-fonte. Não era — o `rewrite "**" → /index.html` devolve 200 para
+> qualquer caminho inexistente; o conteúdo era `<!doctype html>`. **Status code não prova ausência
+> de arquivo em SPA com fallback** — confira o conteúdo.
 
 > **2026-08-08 (3): SPEC 0039 — O DOSSIÊ DE ADMISSÃO.** Último item do Tier A. O Andre decidiu a
 > direção: *"em relação a arte, eu quero que você adapte para o visual do nexus hoje"* — então
