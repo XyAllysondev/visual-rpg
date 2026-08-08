@@ -13,6 +13,9 @@ const fs = () => require("firebase/firestore");
 /** Documento cru do Firestore: `id` e `ref` fora, dados atrás de `data()`. */
 const docOf = (id, data) => ({ id, ref: `ref/${id}`, data: () => data });
 
+/** `Timestamp` do SDK como ele chega num snapshot ao vivo — objeto com `.toMillis()`. */
+const tsSdk = (ms) => ({ toMillis: () => ms, toDate: () => new Date(ms) });
+
 let batch;
 
 // O preset Jest do CRA usa `resetMocks: true`: o que a fábrica do jest.mock instala é
@@ -120,22 +123,61 @@ describe("messagesRepo.watchRecent", () => {
     return pagina;
   };
 
-  it("entrega as mensagens em ordem cronológica, mesmo lendo as mais recentes primeiro", () => {
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5).
+     Este teste ASSEVERAVA que o documento saía do repo exatamente como veio do `data()`,
+     `timestamp` incluído — ou seja, o `Timestamp` do SDK atravessando a fronteira (dívida
+     aceita no ADR-0010). Agora ele asserta o contrário: `timestamp` sai como epoch-ms
+     NUMÉRICO. O `.reverse()` que o teste sempre cobriu continua igual. */
+  it("entrega as mensagens em ordem cronológica, com `timestamp` em epoch-ms", () => {
     // O Firestore precisa ordenar DESC para o `limit` pegar as N ÚLTIMAS; a UI, porém,
     // renderiza de cima para baixo. Sem o `.reverse()`, o chat abriria de trás para frente.
     const pagina = assinar([
-      docOf("m3", { content: "terceira" }),
-      docOf("m2", { content: "segunda" }),
-      docOf("m1", { content: "primeira" }),
+      docOf("m3", { content: "terceira", timestamp: tsSdk(3000) }),
+      docOf("m2", { content: "segunda", timestamp: tsSdk(2000) }),
+      docOf("m1", { content: "primeira", timestamp: tsSdk(1000) }),
     ]);
 
     expect(pagina.messages).toEqual([
-      { id: "m1", content: "primeira" },
-      { id: "m2", content: "segunda" },
-      { id: "m3", content: "terceira" },
+      { id: "m1", content: "primeira", timestamp: 1000 },
+      { id: "m2", content: "segunda", timestamp: 2000 },
+      { id: "m3", content: "terceira", timestamp: 3000 },
     ]);
+    // Nenhuma primitiva do SDK sobrevive à borda: nada de `.toMillis`/`.toDate` do outro lado.
+    pagina.messages.forEach((m) => expect(typeof m.timestamp).toBe("number"));
     expect(orderBy).toHaveBeenCalledWith("timestamp", "desc");
     expect(limit).toHaveBeenCalledWith(3);
+  });
+
+  /* AC-5: a data também chega como objeto cru quando o SDK não reidrata a classe (cache,
+     serialização). Antes da virada, o chat lia `.toMillis()` — que não existe nessa forma —
+     e a mensagem caía no `?? Date.now()`, ganhando a hora errada. */
+  it("normaliza também o `{seconds, nanoseconds}` cru vindo de cache", () => {
+    const pagina = assinar([docOf("m1", { timestamp: { seconds: 1700, nanoseconds: 250_000_000 } })]);
+    expect(pagina.messages[0].timestamp).toBe(1_700_250);
+  });
+
+  /* AC-5 — ESCRITA OTIMISTA. Quem envia a mensagem recebe o próprio documento de volta ANTES
+     de o servidor carimbar o `serverTimestamp()`: nesse instante `timestamp` é `null`. O
+     normalizador devolve `null` (não `0`, que jogaria a mensagem para 1970 e a faria sumir
+     pelo corte do TTL da tela). A mensagem continua na lista, e a UI aplica o `?? Date.now()`
+     que sempre aplicou. */
+  it("mensagem sem carimbo do servidor ainda (escrita otimista) sai com `timestamp: null`", () => {
+    const pagina = assinar([
+      docOf("m2", { content: "recém-enviada", timestamp: null }),
+      docOf("m1", { content: "antiga", timestamp: tsSdk(1000) }),
+    ]);
+
+    // Não some da lista, e não vira `0` nem `NaN`.
+    expect(pagina.messages).toEqual([
+      { id: "m1", content: "antiga", timestamp: 1000 },
+      { id: "m2", content: "recém-enviada", timestamp: null },
+    ]);
+    // O fallback do filtro de TTL da tela (`d.timestamp ?? Date.now()`) ainda funciona: a
+    // mensagem passa pelo corte em vez de ser descartada como se fosse de 1970.
+    const otimista = pagina.messages[1];
+    expect(otimista.timestamp ?? Date.now()).toBeGreaterThan(ttlCutoffMillis());
+    // E a formatação de hora (`typeof ts !== "number" → ""`) devolve string vazia sem quebrar.
+    expect(typeof otimista.timestamp).not.toBe("number");
   });
 
   it("lê só o que está dentro do TTL de 24 h", () => {
@@ -193,16 +235,23 @@ describe("messagesRepo.watchRecent", () => {
 });
 
 describe("messagesRepo.loadOlder", () => {
-  it("pagina a partir do cursor, também em ordem cronológica", async () => {
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5): antes este teste asseverava o documento cru, com o
+     `Timestamp` do SDK atravessando a fronteira. A página antiga passa pelo MESMO normalizador
+     da página ao vivo — se só uma das duas normalizasse, o "carregar anteriores" misturaria
+     números e `Timestamp` na mesma lista e o agrupamento de mensagens quebraria na emenda. */
+  it("pagina a partir do cursor, em ordem cronológica e com data em epoch-ms", async () => {
     getDocs.mockResolvedValue({
-      docs: [docOf("m2", { content: "segunda" }), docOf("m1", { content: "primeira" })],
+      docs: [
+        docOf("m2", { content: "segunda", timestamp: tsSdk(2000) }),
+        docOf("m1", { content: "primeira", timestamp: tsSdk(1000) }),
+      ],
     });
 
     const r = await messagesRepo.loadOlder("c1", "<cursor>", 2);
 
     expect(r.messages).toEqual([
-      { id: "m1", content: "primeira" },
-      { id: "m2", content: "segunda" },
+      { id: "m1", content: "primeira", timestamp: 1000 },
+      { id: "m2", content: "segunda", timestamp: 2000 },
     ]);
     // O novo cursor é o documento MAIS ANTIGO da página: é dele que a próxima continua.
     expect(r.cursor).toMatchObject({ id: "m1" });
@@ -229,10 +278,13 @@ describe("messagesRepo.loadOlder", () => {
 });
 
 describe("messagesRepo.watchRolls", () => {
-  it("entrega só as rolagens de dado", () => {
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5): o documento saía cru, e as duas telas de rolagem
+     (`RollFeed`, `CampaignRollDrawer`) liam `timestamp.seconds * 1000` para filtrar e ordenar.
+     Agora sai em epoch-ms e elas só comparam número. */
+  it("entrega só as rolagens de dado, com a data em epoch-ms", () => {
     let entregue;
     onSnapshot.mockImplementation((_q, next) => {
-      next({ docs: [docOf("m1", { type: "roll", total: 17 })] });
+      next({ docs: [docOf("m1", { type: "roll", total: 17, timestamp: tsSdk(1_700_000_000_000) })] });
       return () => {};
     });
 
@@ -242,8 +294,21 @@ describe("messagesRepo.watchRolls", () => {
     // inteiro só para descartá-lo no cliente.
     expect(where).toHaveBeenCalledWith("type", "==", "roll");
     expect(limit).toHaveBeenCalledWith(20);
-    expect(entregue).toEqual([{ id: "m1", type: "roll", total: 17 }]);
+    expect(entregue).toEqual([{ id: "m1", type: "roll", total: 17, timestamp: 1_700_000_000_000 }]);
     expect(query.mock.calls[0][0]).toEqual({ path: "campaigns/c1/messages" });
+  });
+
+  /* VIRADA DE COMPORTAMENTO — spec 0032 (Q2).
+     Até a spec 0031 a query era `where` + `limit` SEM `orderBy`, e o Firestore ordenava por
+     ID de documento: o corte trazia rolagens arbitrárias, não as últimas da mesa. O defeito
+     ficava invisível enquanto a campanha tinha menos rolagens que o limite. */
+  it("ordena por timestamp desc — o limite tem que cortar as MAIS ANTIGAS (Q2)", () => {
+    onSnapshot.mockImplementation(() => () => {});
+    messagesRepo.watchRolls("c1", 80, () => {});
+
+    expect(orderBy).toHaveBeenCalledWith("timestamp", "desc");
+    // Sem esta ordenação o `limit` é uma amostra aleatória. Depende do índice composto
+    // (messages: type ASC + timestamp DESC) declarado em `firestore.indexes.json`.
   });
 
   it("sem campaignId, devolve um unsubscribe inerte e não assina nada", () => {
@@ -332,17 +397,20 @@ describe("messagesRepo — 'está digitando'", () => {
     expect(console.error).toHaveBeenCalledWith("[messagesRepo.setTyping] falhou:", expect.any(Error));
   });
 
-  it("watchTyping entrega quem está digitando, com o uid do documento junto", () => {
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5): `updatedAt` também saía como `Timestamp` do SDK, e
+     o `CampaignChat` fazia `u.updatedAt?.toMillis?.()` para decidir se o "digitando" expirou
+     (5 s). Agora sai em epoch-ms. */
+  it("watchTyping entrega quem está digitando, com o uid junto e `updatedAt` em epoch-ms", () => {
     let entregue;
     onSnapshot.mockImplementation((_q, next) => {
-      next({ docs: [docOf("u2", { userName: "Bruno", isTyping: true })] });
+      next({ docs: [docOf("u2", { userName: "Bruno", isTyping: true, updatedAt: tsSdk(1_700_000_000_000) })] });
       return () => {};
     });
 
     messagesRepo.watchTyping("c1", (list) => { entregue = list; });
 
     // O `id` é o uid: sem ele a UI não conseguiria esconder o próprio "digitando".
-    expect(entregue).toEqual([{ id: "u2", userName: "Bruno", isTyping: true }]);
+    expect(entregue).toEqual([{ id: "u2", userName: "Bruno", isTyping: true, updatedAt: 1_700_000_000_000 }]);
     expect(query.mock.calls[0][0]).toEqual({ path: "campaigns/c1/typing" });
   });
 
@@ -364,5 +432,68 @@ describe("messagesRepo — retenção", () => {
     const corte = ttlCutoffMillis();
     expect(agora - corte).toBeGreaterThanOrEqual(MESSAGE_TTL_MS);
     expect(agora - corte).toBeLessThan(MESSAGE_TTL_MS + 1000);
+  });
+});
+
+/* ════════════════════════════════════════════════
+ *  FRONTEIRA VALIDADA — spec 0032 AC-6
+ * ════════════════════════════════════════════════ */
+
+describe("messagesRepo — validação de fronteira (AC-6)", () => {
+  const entrega = (docs) => {
+    let pagina;
+    onSnapshot.mockImplementation((_q, next) => { next({ docs }); return () => {}; });
+    messagesRepo.watchRecent("camp1", 50, (p) => { pagina = p; });
+    return pagina;
+  };
+
+  it("mensagem ÍNTEGRA sai idêntica, sem log", () => {
+    const aviso = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const crua = { userId: "u1", userName: "Ana", userPhoto: null, content: "oi", type: "text" };
+
+    const { messages } = entrega([docOf("m1", { ...crua, timestamp: tsSdk(1000) })]);
+
+    expect(messages).toEqual([{ id: "m1", ...crua, timestamp: 1000 }]);
+    expect(aviso).not.toHaveBeenCalled();
+  });
+
+  it("`content` gravado como OBJETO não chega à borda — ele derrubaria a árvore do React", () => {
+    /* "Objects are not valid as a React child" mata o chat inteiro, e a pilha aponta para o
+       componente da bolha, nunca para a mensagem que causou. Aqui o id sai no log. */
+    const aviso = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    const { messages } = entrega([
+      docOf("m1", { userName: "Ana", content: { texto: "oi" }, type: "text", timestamp: tsSdk(1) }),
+    ]);
+
+    expect(messages[0].content).toBe("");
+    expect(aviso.mock.calls[0][0]).toContain('[messagesRepo.saida] "m1".content');
+  });
+
+  it("`userName` numérico vira texto e a mensagem continua na lista", () => {
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+    const { messages } = entrega([docOf("m1", { userName: 42, content: "oi", timestamp: tsSdk(1) })]);
+    expect(messages[0].userName).toBe("42");
+  });
+
+  it("mensagem sem `type` (legado, antes do campo existir) atravessa intocada", () => {
+    // Ausência continua ausência: a UI já trata `type` indefinido como texto.
+    const aviso = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const { messages } = entrega([docOf("m1", { userName: "Ana", content: "oi", timestamp: tsSdk(1) })]);
+
+    expect(messages[0]).toEqual({ id: "m1", userName: "Ana", content: "oi", timestamp: 1 });
+    expect("type" in messages[0]).toBe(false);
+    expect(aviso).not.toHaveBeenCalled();
+  });
+
+  it("documento com corpo não-objeto é descartado da página, com log de erro", () => {
+    const { messages } = entrega([
+      docOf("boa", { userName: "Ana", content: "oi", timestamp: tsSdk(1) }),
+      docOf("fantasma", undefined),
+    ]);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].id).toBe("boa");
+    expect(console.error.mock.calls.map((c) => c[0]).join("\n")).toContain("fantasma");
   });
 });

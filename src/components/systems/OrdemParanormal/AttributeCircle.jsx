@@ -37,6 +37,10 @@ export default function AttributeCircle({ name, abbr, value, elementTheme, onRol
         aria-label={`${name} ${value} — rolar`}
         onClick={() => !edit && onRoll?.()}
         onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && !edit && onRoll?.()}
+        /* O tamanho vem por prop e é aplicado inline — quem decide é o
+           AttrConstellation, que lê a viewport. Tentar encolher o dial por
+           media query em ordemStyles não funciona: estilo inline vence
+           @media, e as regras de 76px/66px ficavam inertes. */
         style={{ cursor: edit ? "default" : "pointer", width: size, height: size }}
       >
         <div className="op-dial-aura" />

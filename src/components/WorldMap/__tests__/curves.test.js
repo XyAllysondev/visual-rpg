@@ -8,6 +8,7 @@ import {
   controlePadrao,
   distanciaAoSegmento,
   distanciaAteCurva,
+  partirNoProgresso,
   pontoNaFracao,
   pontosDaCurva,
 } from "../model/curves";
@@ -201,5 +202,124 @@ describe("controlePadrao", () => {
 
   it("recusa pontas inválidas", () => {
     expect(() => controlePadrao(null, B)).toThrow(/inválid/i);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════
+ *  A ROTA BICOLOR  (spec 0035 · F1 · AC-1, AC-2, AC-3)
+ * ════════════════════════════════════════════════════════════════════ */
+describe("partirNoProgresso", () => {
+  /* Segmentos de comprimentos DIFERENTES de propósito: é o que separa "cortou
+     por comprimento" de "cortou por índice de vértice". Total = 10+30+60 = 100. */
+  const IRREGULAR = [
+    { x: 0, y: 0 },
+    { x: 10, y: 0 },
+    { x: 40, y: 0 },
+    { x: 100, y: 0 },
+  ];
+
+  it("corta pelo COMPRIMENTO de arco, não pelo índice do vértice (AC-2)", () => {
+    // 40% de 100 = 40 → cai exatamente no terceiro ponto...
+    const meio = partirNoProgresso(IRREGULAR, 0.4);
+    expect(comprimentoDaCurva(meio.percorrido)).toBeCloseTo(40, 6);
+    expect(comprimentoDaCurva(meio.restante)).toBeCloseTo(60, 6);
+
+    // ...e 25% cai DENTRO do segundo segmento, longe de qualquer vértice.
+    const quarto = partirNoProgresso(IRREGULAR, 0.25);
+    expect(comprimentoDaCurva(quarto.percorrido)).toBeCloseTo(25, 6);
+    const corte = quarto.percorrido[quarto.percorrido.length - 1];
+    expect(corte).toEqual({ x: 25, y: 0 });
+    // O ponto de corte NÃO é um dos vértices originais — se fosse, teria
+    // arredondado para {x:10} ou {x:40}, e a junção pularia na tela.
+    expect(IRREGULAR.some((p) => p.x === corte.x && p.y === corte.y)).toBe(false);
+  });
+
+  it("as duas metades somam o comprimento total, em qualquer fração", () => {
+    const total = comprimentoDaCurva(IRREGULAR);
+    [0.05, 0.17, 0.33, 0.5, 0.66, 0.81, 0.99].forEach((t) => {
+      const { percorrido, restante } = partirNoProgresso(IRREGULAR, t);
+      expect(comprimentoDaCurva(percorrido) + comprimentoDaCurva(restante)).toBeCloseTo(total, 6);
+    });
+  });
+
+  it("as metades COMPARTILHAM o ponto de corte — sem vão na junção (AC-1)", () => {
+    const { percorrido, restante } = partirNoProgresso(IRREGULAR, 0.63);
+    expect(percorrido[percorrido.length - 1]).toEqual(restante[0]);
+  });
+
+  it("o corte cai onde `pontoNaFracao` põe o marcador", () => {
+    // Se divergissem, o traço trocaria de cor num lugar e o marcador estaria
+    // noutro — o defeito mais visível possível, porque é embaixo do olho.
+    [0.1, 0.4, 0.75].forEach((t) => {
+      const { percorrido } = partirNoProgresso(IRREGULAR, t);
+      const corte = percorrido[percorrido.length - 1];
+      const marcador = pontoNaFracao(IRREGULAR, t);
+      expect(corte.x).toBeCloseTo(marcador.x, 6);
+      expect(corte.y).toBeCloseTo(marcador.y, 6);
+    });
+  });
+
+  it("funciona sobre uma curva amostrada de verdade", () => {
+    const pts = pontosDaCurva(A, B, [{ x: 50, y: 80 }]);
+    const { percorrido, restante } = partirNoProgresso(pts, 0.5);
+    expect(comprimentoDaCurva(percorrido)).toBeCloseTo(comprimentoDaCurva(pts) / 2, 6);
+    expect(percorrido[0]).toEqual(A);
+    expect(restante[restante.length - 1]).toEqual(B);
+  });
+
+  it("t=0 e t=1 são as pontas, não listas vazias (AC-3)", () => {
+    const zero = partirNoProgresso(IRREGULAR, 0);
+    expect(zero.percorrido).toEqual([{ x: 0, y: 0 }]);
+    expect(zero.restante).toHaveLength(IRREGULAR.length);
+
+    const um = partirNoProgresso(IRREGULAR, 1);
+    expect(um.percorrido).toHaveLength(IRREGULAR.length);
+    expect(um.restante).toEqual([{ x: 100, y: 0 }]);
+  });
+
+  it("grampeia t fora de [0,1] e trata t inválido como 0 (AC-3)", () => {
+    expect(partirNoProgresso(IRREGULAR, -5)).toEqual(partirNoProgresso(IRREGULAR, 0));
+    expect(partirNoProgresso(IRREGULAR, 9)).toEqual(partirNoProgresso(IRREGULAR, 1));
+    expect(partirNoProgresso(IRREGULAR, NaN)).toEqual(partirNoProgresso(IRREGULAR, 0));
+    expect(partirNoProgresso(IRREGULAR, undefined)).toEqual(partirNoProgresso(IRREGULAR, 0));
+  });
+
+  it("nunca lança com entrada degenerada (AC-3)", () => {
+    expect(partirNoProgresso([], 0.5)).toEqual({ percorrido: [], restante: [] });
+    expect(partirNoProgresso(null, 0.5)).toEqual({ percorrido: [], restante: [] });
+    expect(partirNoProgresso([{ x: 3, y: 4 }], 0.5)).toEqual({
+      percorrido: [{ x: 3, y: 4 }],
+      restante: [{ x: 3, y: 4 }],
+    });
+  });
+
+  it("curva de comprimento zero não vira NaN", () => {
+    const parado = [{ x: 7, y: 7 }, { x: 7, y: 7 }, { x: 7, y: 7 }];
+    const { percorrido, restante } = partirNoProgresso(parado, 0.5);
+    expect(comprimentoDaCurva(percorrido)).toBe(0);
+    expect(comprimentoDaCurva(restante)).toBe(0);
+    [...percorrido, ...restante].forEach((p) => {
+      expect(Number.isFinite(p.x)).toBe(true);
+      expect(Number.isFinite(p.y)).toBe(true);
+    });
+  });
+
+  it("descarta ponto inválido no meio, como o resto do módulo", () => {
+    const sujo = [{ x: 0, y: 0 }, { x: NaN, y: 0 }, { x: 100, y: 0 }];
+    const { percorrido, restante } = partirNoProgresso(sujo, 0.5);
+    expect(comprimentoDaCurva(percorrido)).toBeCloseTo(50, 6);
+    expect(comprimentoDaCurva(restante)).toBeCloseTo(50, 6);
+  });
+
+  it("não devolve as referências de entrada — quem pinta não pode mutar a trilha", () => {
+    const { percorrido, restante } = partirNoProgresso(IRREGULAR, 0.5);
+    percorrido[0].x = 999;
+    restante[restante.length - 1].y = 999;
+    expect(IRREGULAR[0]).toEqual({ x: 0, y: 0 });
+    expect(IRREGULAR[IRREGULAR.length - 1]).toEqual({ x: 100, y: 0 });
+  });
+
+  it("é determinística — mesma entrada, mesma saída", () => {
+    expect(partirNoProgresso(IRREGULAR, 0.37)).toEqual(partirNoProgresso(IRREGULAR, 0.37));
   });
 });

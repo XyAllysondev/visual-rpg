@@ -51,7 +51,7 @@ import {
   useInstancias, useReveladoNaMesa, useParty, useFogDaMesa,
   publicarRevelacao, moverGrupo, atualizarParty, getFundoDaMesa,
   mestreDaInstancia, useGmDaMesa, atualizarGm,
-  atualizarViagem, concluirViagem, projecaoDaViagem, reservarPendencia, resolverPendencia,
+  atualizarViagem, concluirViagem, projecaoDaViagem, projecaoDoNo, reservarPendencia, resolverPendencia,
 } from "../mesaStore";
 import { useGrafo, useEventos } from "../worldMapStore";
 import {
@@ -60,6 +60,9 @@ import {
 import {
   aplicarDescoberta, resultadoDaDescoberta, testesDisponiveis,
 } from "../model/descoberta";
+import {
+  PERICIA_DA_ESQUIVA, bonusDaEsquiva, melhorFurtividade, resultadoDaEsquiva,
+} from "../model/esquiva";
 import { rollDice } from "../../../domain/dice";
 import { construirMapaPadrao, ehMapaPadrao } from "../model/mapaPadrao";
 import CartografiaPadrao from "../model/CartografiaPadrao";
@@ -70,7 +73,7 @@ import {
   aoConcluirViagem, destinosPossiveis, podeViajarPara,
   projecaoDoJogador, revelarManualmente, RAIO_DE_REVELACAO_PADRAO,
 } from "../model/revelacao";
-import { avancarRelogio, consumirSuprimentos, nevoaDaViagem, trechoPercorrido } from "../model/viagem";
+import { avancarRelogio, consumirSuprimentos, nevoaDaViagem, trechoPercorrido, trechoRestante } from "../model/viagem";
 import {
   chanceDeEncontro, decidirEncontro, montarPendencia, periodoDe, sortearEncontro, sorteioDeD100,
 } from "../model/encontros";
@@ -85,6 +88,8 @@ import ConsoleDoMestre from "./ConsoleDoMestre";
 import FilaDeEventos from "./FilaDeEventos";
 import EventosDoGrupo from "./EventosDoGrupo";
 import PainelDeEncontro from "./PainelDeEncontro";
+import { CartaoDeDescoberta } from "./CartaoDePergaminho";
+import { useMovimentoReduzido } from "../Editor/animacao";
 import Acampamento from "./Acampamento";
 import useViagem from "./useViagem";
 import useNevoaAoVivo, { novaSessao } from "./useNevoaAoVivo";
@@ -146,6 +151,13 @@ export default function MesaDoMapaMundi({
   altura = null,
   onSair,
   onEntrarNaCena,
+  /* As fichas compartilhadas da campanha, já lidas pela casca do app
+     (`sharedSheetsRepo.watchByCampaign`). Chegam por prop porque o
+     mapa-múndi NÃO abre listener de ficha: o acoplamento entre os dois
+     agregados tem uma porta só, e ela é pura (ADR-0012). Vazio é o caso
+     comum e não degrada nada — sem ficha, o mestre digita o bônus como
+     sempre digitou (AC-13). */
+  fichasCompartilhadas = [],
 }) {
   /* ── Qual mapa desta mesa ──────────────────────────────────────────── */
   const { instancias, loading: carregandoInstancias, error: erroInstancias } = useInstancias(campaignId);
@@ -377,6 +389,10 @@ export default function MesaDoMapaMundi({
   contexto.current = {
     campaignId, instanciaId, uid, podeVerMolde, molde, estado, revelado, party, mascara,
     eventos, gm,
+    /* As fichas compartilhadas entram no contexto (e não na lista de deps do
+       sorteio) porque o `rolarEncontroDaEstrada` roda dentro do laço da viagem:
+       recriá-lo a cada mudança de ficha reiniciaria o percurso. */
+    fichas: fichasCompartilhadas,
   };
 
   /* Os ids já disparados vivem em `gm.triggeredEventIds` (design §3), mas o
@@ -389,6 +405,60 @@ export default function MesaDoMapaMundi({
     listaDe(gm?.triggeredEventIds).forEach((id) => jaDisparados.current.add(id));
   }, [gm?.triggeredEventIds]);
 
+  /* ════════════════════════════════════════════════════════════════════
+   *  O CARTÃO DE DESCOBERTA  (spec 0035 · F3 · M5 · AC-12)
+   *  ------------------------------------------------------------------
+   *  O lugar que acabou de entrar no mapa merece mais do que acender um
+   *  ícone: merece uma carta contando o que ele é. O cartão sai do MESMO
+   *  pulso que já detecta a revelação (abaixo) — não de um gancho novo na
+   *  chegada — e por isso funciona igual nos dois clientes: o do mestre,
+   *  que revelou, e o do jogador, que viu o `revealed/` chegar.
+   *
+   *  ⚠️ **O texto passa por `projecaoDoNo` mesmo quando já veio projetado.**
+   *  No cliente do JOGADOR, `grafoVisivel` já é a projeção — reprojetar é
+   *  idempotente e não custa nada. No cliente do MESTRE, `grafoVisivel`
+   *  pode carregar o nó do MOLDE, com `gmNotes` e companhia. Projetar aqui
+   *  é o que garante que o cartão nunca imprima campo de mestre, e é o que
+   *  o AC-12 mede varrendo o DOM atrás de `CAMPOS_VENENOSOS`.
+   * ══════════════════════════════════════════════════════════════════ */
+  const [cartaoDescoberta, setCartaoDescoberta] = useState(null);
+  const semMovimento = useMovimentoReduzido();
+
+  /* A melhor Furtividade da mesa, ou `null` quando não há ficha compartilhada
+     (spec 0035 · M6 · AC-13/14). A conta inteira mora em `model/esquiva.js`;
+     aqui só se decide QUANDO recalculá-la. */
+  const bonusDeFurtividade = useMemo(
+    () => melhorFurtividade(fichasCompartilhadas),
+    [fichasCompartilhadas],
+  );
+
+  const anunciarDescoberta = useCallback((ids) => {
+    /* Só `discovered`. Um nó que subiu para `rumored` não é descoberta — e
+       dar-lhe cartão entregaria que existe algo ali, que é justamente o que
+       o rumor não pode dizer (design 0028 §3). */
+    const achado = listaDe(ids)
+      .filter((id) => estado?.nos?.[id] === "discovered")
+      .map((id) => listaDe(grafoVisivel?.nos).find((n) => n?.id === id))
+      .find(Boolean);
+    if (!achado) return;
+
+    let projetado = null;
+    try {
+      projetado = projecaoDoNo(achado, "discovered");
+    } catch (err) {
+      /* Nó sem id ou sem coordenadas: não há cartão honesto a mostrar, e
+         inventar um seria pior do que não mostrar nenhum (ADR-0011). */
+      console.warn("[mesa do mapa] descoberta sem projeção possível:", err);
+      return;
+    }
+
+    const nome = typeof projetado.name === "string" && projetado.name.trim()
+      ? projetado.name.trim()
+      : "um lugar sem nome";
+    anunciar(`Nova localização descoberta: ${nome}.`);
+    setCartaoDescoberta(projetado);
+  }, [estado, grafoVisivel, anunciar]);
+
   /* ── O pulso da revelação (design §5.4, movimento 2) ───────────────── */
   const vistos = useRef(null);
   useEffect(() => {
@@ -398,9 +468,10 @@ export default function MesaDoMapaMundi({
     vistos.current = agora;
     if (novos.length === 0) return undefined;
     setRecemRevelados(novos);
+    anunciarDescoberta(novos);
     const t = setTimeout(() => { if (vivo.current) setRecemRevelados([]); }, PISCA_DA_REVELACAO);
     return () => clearTimeout(t);
-  }, [estado]);
+  }, [estado, anunciarDescoberta]);
 
   useEffect(() => { vistos.current = null; }, [instanciaId]);
 
@@ -468,6 +539,33 @@ export default function MesaDoMapaMundi({
     );
     if (!sorteado.houve) return;
 
+    /* ── A ESQUIVA  (spec 0035 · F3 · M6 · AC-13/14/15) ────────────────
+       O mundo sorteou um encontro. Antes de ele acontecer, o grupo tenta
+       passar sem ser notado: Furtividade contra a DT do perigo da trilha.
+
+       A rolagem sai de `rollDice` — o motor único (AC-9) —, e o veredito de
+       `model/esquiva.js`, que não rola nada. O bônus vem da melhor
+       Furtividade das fichas compartilhadas; sem ficha, `bonusDaEsquiva`
+       devolve o que o mestre digitou, e o comportamento é o de sempre.
+
+       ⚠️ **O sucesso sai por `return`, exatamente como `!sorteado.houve`.**
+       Não há pendência, não há pausa, não há documento — e é por isso que
+       ele é indistinguível de "não houve sorteio". Gravar qualquer marca do
+       encontro que não aconteceu ("esquivado em tal trilha") daria ao
+       jogador o oráculo que a spec inteira existe para negar: o segredo não
+       vaza pelo dado, vaza pela DIFERENÇA. */
+    const daEsquiva = bonusDaEsquiva(c.fichas, 0);
+    const rolagemDaEsquiva = rollDice("1d20");
+    const esquiva = resultadoDaEsquiva(
+      trilha?.dangerLevel,
+      (rolagemDaEsquiva?.total ?? 0) + daEsquiva.bonus,
+    );
+    /* O anúncio é do MESTRE — a mesa inteira o vê no leitor de tela do
+       cliente dele, e só dele. É o "Camellia: Falhou no teste de
+       Furtividade" da referência, e não diz o que vinha vindo. */
+    anunciar(`${PERICIA_DA_ESQUIVA}: ${esquiva.mensagem}`);
+    if (esquiva.escapou) return;
+
     const nova = {
       ...montarPendencia({
         origem: "viagem",
@@ -495,7 +593,7 @@ export default function MesaDoMapaMundi({
     if (!reserva?.reservada) return;
     const flags = flagsComPausa(c.party?.flags, true);
     if (flags) await atualizarParty(c.campaignId, c.instanciaId, { flags });
-  }, [sessao]);
+  }, [sessao, anunciar]);
 
   /**
    * **O mestre decidiu** — terceiro degrau, e a única porta para o jogador.
@@ -1009,6 +1107,9 @@ export default function MesaDoMapaMundi({
   }, [viagem, grafoVisivel, grafoDeNavegacao, noDoGrupo, party?.x, party?.y]);
 
   const rastro = useMemo(() => (viagem ? trechoPercorrido(viagem) : []), [viagem]);
+  /* A outra metade da rota bicolor (spec 0035 · AC-1). Fora de viagem é vazia:
+     sem viagem não há "o que falta", e uma lista vazia não pinta nada. */
+  const rotaRestante = useMemo(() => (viagem ? trechoRestante(viagem) : []), [viagem]);
 
   /* ════════════════════════════════════════════════════════════════════
    *  RETOMAR A VIAGEM  (F7 · AC-10)
@@ -1440,6 +1541,7 @@ export default function MesaDoMapaMundi({
             destinos={destinos}
             marcador={marcador}
             rastro={rastro}
+            rotaRestante={rotaRestante}
             viajando={viajando}
             selecionadoId={selecionadoId}
             recemRevelados={recemRevelados}
@@ -1511,6 +1613,7 @@ export default function MesaDoMapaMundi({
                 onEntrarNaCena={onEntrarNaCena}
                 ocupado={ocupado || viajando}
                 carregando={eventosDoMolde.loading}
+                bonusDaFicha={bonusDeFurtividade}
               />
             ) : null}
 
@@ -1576,6 +1679,18 @@ export default function MesaDoMapaMundi({
           onAdiar={() => { adiada.current = assinatura; setEncontroAberto(false); }}
           ocupado={ocupado}
           falha={falha}
+          anima={!semMovimento}
+        />
+      ) : null}
+
+      {/* O CARTÃO DE DESCOBERTA (0035 · M5). Vem DEPOIS do painel do mestre
+          na ordem do documento de propósito: se os dois abrirem no mesmo
+          quadro, a decisão que trava a mesa é a que fica por cima. */}
+      {cartaoDescoberta ? (
+        <CartaoDeDescoberta
+          no={cartaoDescoberta}
+          onFechar={() => setCartaoDescoberta(null)}
+          anima={!semMovimento}
         />
       ) : null}
     </div>

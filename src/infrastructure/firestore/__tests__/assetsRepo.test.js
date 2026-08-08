@@ -9,6 +9,9 @@ const fs = () => require("firebase/firestore");
 /** Documento cru do Firestore: `id` fora, dados atrás de `data()`. */
 const docOf = (id, data) => ({ id, ref: `ref/${id}`, data: () => data });
 
+/** `Timestamp` do SDK como ele chega num snapshot ao vivo — objeto com `.toMillis()`. */
+const tsSdk = (ms) => ({ toMillis: () => ms, toDate: () => new Date(ms) });
+
 // O preset Jest do CRA usa `resetMocks: true`: o que a fábrica do jest.mock instala é
 // apagado antes de cada teste. Tudo o que o repo precisa é reinstalado aqui.
 beforeEach(() => {
@@ -31,18 +34,40 @@ describe("assetsRepo.watchAll", () => {
     expect(onSnapshot.mock.calls[0][0]).toEqual({ path: "users/u1/assets" });
   });
 
-  it("entrega o id do DOCUMENTO por cima de um campo `id` divergente no corpo", () => {
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5).
+     Este teste ASSEVERAVA o asset saindo do repo exatamente como veio do `data()` (só com o
+     `id` do documento por cima) — e `save` carimba `updatedAt` com `serverTimestamp()`, então
+     era o `Timestamp` do SDK atravessando a fronteira (dívida aceita no ADR-0010). Agora sai
+     em epoch-ms NUMÉRICO. A precedência do `id`, que é o que este teste sempre protegeu,
+     continua idêntica. */
+  it("entrega o id do DOCUMENTO por cima de um `id` divergente no corpo, e `updatedAt` em epoch-ms", () => {
     // Asset importado/copiado à mão pode ter um `id` velho no corpo; se ele vencesse, a
     // doca mandaria apagar/salvar um documento que não existe.
     let entregue;
     onSnapshot.mockImplementation((_ref, next) => {
-      next({ docs: [docOf("as_novo", { id: "as_velho", name: "Goblin" })] });
+      next({ docs: [docOf("as_novo", { id: "as_velho", name: "Goblin", updatedAt: tsSdk(2000) })] });
       return () => {};
     });
 
     assetsRepo.watchAll("u1", (list) => { entregue = list; });
 
-    expect(entregue).toEqual([{ id: "as_novo", name: "Goblin" }]);
+    expect(entregue).toEqual([{ id: "as_novo", name: "Goblin", updatedAt: 2000 }]);
+    expect(typeof entregue[0].updatedAt).toBe("number");
+  });
+
+  /* Asset gravado antes de o repositório carimbar data: o campo não existe, e normalizar NÃO
+     pode inventá-lo — a doca compara assets por igualdade de objeto ao deduplicar por hash. */
+  it("asset sem carimbo não ganha um `updatedAt` que ele não tinha", () => {
+    let entregue;
+    onSnapshot.mockImplementation((_ref, next) => {
+      next({ docs: [docOf("as_1", { name: "Goblin" })] });
+      return () => {};
+    });
+
+    assetsRepo.watchAll("u1", (list) => { entregue = list; });
+
+    expect(entregue).toEqual([{ id: "as_1", name: "Goblin" }]);
+    expect("updatedAt" in entregue[0]).toBe(false);
   });
 
   it("falha na assinatura só loga com o prefixo do repo", () => {

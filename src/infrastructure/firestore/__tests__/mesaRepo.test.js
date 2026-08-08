@@ -36,6 +36,9 @@ const docOf = (id, data) => ({ id, data: () => data });
 const snapOf = (docs) => ({ docs, empty: docs.length === 0, size: docs.length });
 const umDoc = (data) => ({ exists: () => data != null, id: "estado", data: () => data });
 
+/** `Timestamp` do SDK como ele chega num snapshot ao vivo — objeto com `.toMillis()`. */
+const tsSdk = (ms) => ({ toMillis: () => ms, toDate: () => new Date(ms) });
+
 /** O último lote criado por `writeBatch`, para inspecionar o que foi enfileirado. */
 let lotes = [];
 
@@ -111,11 +114,14 @@ describe("os caminhos de cada operação", () => {
   });
 
   it("o molde é lido no ATELIÊ privado, sob `users/`, nunca sob `campaigns/`", async () => {
-    getDoc.mockResolvedValue({ exists: () => true, id: "mapa-1", data: () => ({ name: "Coroa" }) });
+    // VIRADA DE CONTRATO — spec 0032 (AC-5): o molde saía cru; agora `updatedAt` vem em epoch-ms.
+    getDoc.mockResolvedValue({
+      exists: () => true, id: "mapa-1", data: () => ({ name: "Coroa", updatedAt: tsSdk(2000) }),
+    });
     getDocs.mockResolvedValue(snapOf([docOf("n1", { name: "Vila" })]));
 
     await expect(mesaRepo.lerMoldeDoAtelie("mestre-1", "mapa-1"))
-      .resolves.toEqual({ id: "mapa-1", name: "Coroa" });
+      .resolves.toEqual({ id: "mapa-1", name: "Coroa", updatedAt: 2000 });
     expect(getDoc.mock.calls[0][0].path).toBe("users/mestre-1/worldmaps/mapa-1");
 
     await mesaRepo.listarSubcolecaoDoMolde("mestre-1", "mapa-1", "nodes");
@@ -213,17 +219,27 @@ describe("as primitivas do SDK morrem aqui", () => {
     expect(serverTimestamp).not.toHaveBeenCalled();
   });
 
-  it("as leituras devolvem objetos planos com o id junto — nunca um QuerySnapshot", async () => {
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5).
+     Este teste ASSEVERAVA o documento revelado saindo exatamente como veio do `data()`; com um
+     carimbo dentro, era o `Timestamp` do SDK atravessando a fronteira (dívida aceita no
+     ADR-0010). Agora `createdAt`/`updatedAt`/`syncedAt` — os campos que `comCarimbo` grava —
+     saem em epoch-ms NUMÉRICO. Campo AUSENTE continua ausente, e nesta mesa isso não é
+     detalhe: segredo vaza pela DIFERENÇA, e um `updatedAt: null` inventado num documento
+     revelado mudaria o que o jogador enxerga. */
+  it("as leituras devolvem objetos planos com o id junto e a data em epoch-ms — nunca um QuerySnapshot", async () => {
     getDocs.mockResolvedValue(snapOf([
-      docOf("no_n1", { kind: "node", nodeId: "n1", state: "visited" }),
+      docOf("no_n1", { kind: "node", nodeId: "n1", state: "visited", updatedAt: tsSdk(2000) }),
       docOf("tr_e1", { kind: "edge", edgeId: "e1", state: "revealed" }),
     ]));
 
     const lista = await mesaRepo.listarRevelado(CID, IID);
     expect(lista).toEqual([
-      { id: "no_n1", kind: "node", nodeId: "n1", state: "visited" },
+      { id: "no_n1", kind: "node", nodeId: "n1", state: "visited", updatedAt: 2000 },
       { id: "tr_e1", kind: "edge", edgeId: "e1", state: "revealed" },
     ]);
+    expect(typeof lista[0].updatedAt).toBe("number");
+    // O revelado sem carimbo NÃO ganha a chave — normalizar não cria campo.
+    expect("updatedAt" in lista[1]).toBe(false);
     expect(lista[0].ref).toBeUndefined();
   });
 
@@ -352,6 +368,25 @@ describe("transacionar", () => {
     let visto = "não chamou";
     await mesaRepo.transacionar(CID, IID, "party", (atual) => { visto = atual; return {}; });
     expect(visto).toBeNull();
+  });
+
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5): `decidir` recebia o documento cru, com o
+     `Timestamp` do SDK — e `decidir` é código do STORE, do outro lado da fronteira. Agora
+     recebe epoch-ms. Nenhuma decisão repassa o documento lido para `gravar` (todas montam o
+     objeto do zero), então o que é ESCRITO continua sendo `serverTimestamp()`. */
+  it("`decidir` recebe o documento com as datas em epoch-ms, e a escrita continua com carimbo do servidor", async () => {
+    const escritas = comDocumento({ pendingEncounter: null, updatedAt: tsSdk(2000) });
+    let visto;
+
+    await mesaRepo.transacionar(CID, IID, "gm", (atual) => {
+      visto = atual;
+      return { gravar: { pendingEncounter: { id: "p1" } }, carimbar: ["updatedAt"] };
+    });
+
+    expect(visto).toEqual({ pendingEncounter: null, updatedAt: 2000 });
+    expect(typeof visto.updatedAt).toBe("number");
+    // A normalização é só da LEITURA: o que vai para o banco continua sendo a FieldValue.
+    expect(escritas[0].data.updatedAt).toBe("<serverTimestamp>");
   });
 
   it("a decisão escolhe o alvo, e `party` não é `gm`", async () => {
@@ -485,16 +520,23 @@ describe("o formato entregue pelas assinaturas", () => {
     expect(recebido).toEqual([{ id: "no_n1", kind: "node", nodeId: "n1" }]);
   });
 
-  it("`watchParty` repassa `hasPendingWrites` — o eco da própria escrita", () => {
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5): o estado do grupo saía cru, `updatedAt` incluído.
+     `docComId` é o mesmo caminho de `watchGm`, então normalizar aqui fecha os dois. O
+     `hasPendingWrites`, que este teste sempre cobriu, continua igual — e continua sendo o que
+     impede a mesa de reanimar o próprio percurso. */
+  it("`watchParty` repassa `hasPendingWrites` e entrega `updatedAt` em epoch-ms", () => {
     emitir({
       exists: () => true,
       id: "estado",
-      data: () => ({ currentNodeId: "n2" }),
+      data: () => ({ currentNodeId: "n2", updatedAt: tsSdk(2000) }),
       metadata: { hasPendingWrites: true },
     });
     let recebido;
     mesaRepo.watchParty(CID, IID, (e) => { recebido = e; });
-    expect(recebido).toEqual({ party: { id: "estado", currentNodeId: "n2" }, local: true });
+    expect(recebido).toEqual({
+      party: { id: "estado", currentNodeId: "n2", updatedAt: 2000 },
+      local: true,
+    });
   });
 
   it("`watchParty` entrega `party: null` quando o documento não existe", () => {
@@ -504,9 +546,13 @@ describe("o formato entregue pelas assinaturas", () => {
     expect(recebido).toEqual({ party: null, local: false });
   });
 
-  it("`watchNevoa` entrega os documentos CRUS — desserializar bitmap não é da infra", () => {
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5): "cru" passa a significar **o payload do bitmap**,
+     não o `Timestamp`. O `data` em base64 continua intocado — quem o desserializa é
+     `model/fogMask.js` —, mas `updatedAt`, que `salvarNevoaDelta` carimba, sai em epoch-ms
+     como em todo o resto do repositório. */
+  it("`watchNevoa` entrega o payload CRU — desserializar bitmap não é da infra — com a data em epoch-ms", () => {
     emitir(snapOf([
-      docOf("estado", { kind: "base", data: "AAA", bytes: 3 }),
+      docOf("estado", { kind: "base", data: "AAA", bytes: 3, updatedAt: tsSdk(2000) }),
       docOf("d_000001_aba1", { kind: "delta", data: "BBB" }),
     ]));
     let recebido;
@@ -515,7 +561,7 @@ describe("o formato entregue pelas assinaturas", () => {
     /* `dados` num campo próprio: o payload da névoa mora numa chave chamada `data`,
        e achatá-la ao lado de `id` só convidaria a colisão. */
     expect(recebido.docs).toEqual([
-      { id: "estado", dados: { kind: "base", data: "AAA", bytes: 3 } },
+      { id: "estado", dados: { kind: "base", data: "AAA", bytes: 3, updatedAt: 2000 } },
       { id: "d_000001_aba1", dados: { kind: "delta", data: "BBB" } },
     ]);
     expect(recebido.local).toBe(false);

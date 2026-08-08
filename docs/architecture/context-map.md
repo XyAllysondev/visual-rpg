@@ -30,16 +30,31 @@ não uma convenção: `App.jsx` e `src/hooks/` não importam mais `firebase/fire
 | **Identidade** | `usersRepo` | `users/{uid}` |
 | **Ficha** | `charactersRepo` · `publicSheetsRepo` | `users/{uid}/characters` · `publicSheets/{charId}` |
 | **Campanha** | `campaignsRepo` · `messagesRepo` · `sharedSheetsRepo` · `bestiaryRepo` | `campaigns/{id}` e subcoleções |
-| **Tabletop** | *(ainda nos stores de feature — onda 1.5, spec 0030)* | `users/{uid}/worldmaps`, `worlds/{id}`, cenas do MapEditor |
+| **Tabletop** | `worldMapsRepo` · `mesaRepo` · `fogRepo` · `mapSyncRepo` · `assetsRepo` | `users/{uid}/worldmaps` (ateliê) · `campaigns/{id}/worldmaps` (mesa) · `campaigns/{id}/map` (cenas) · `users/{uid}/assets` |
+| **Forja do Mestre** | `worldsRepo` | `worlds/{id}` + `entities`/`connections`/`folders` |
 | **Monetização** | `usersRepo.watchSubscribedSystems` + `api/` (Vercel) | `users/{uid}.subscribedSystems` |
 
 Regra de negócio **não** desce para o repositório: teto de campanhas por sistema, identidade da
-ficha (`characterKey`) e clamp de PV vivem em `src/domain/`; retry e mensagem de erro vivem nos
-hooks (camada de aplicação).
+ficha (`characterKey`), clamp de PV e a codificação RLE da névoa vivem em `src/domain/` ou nos
+stores; retry e mensagem de erro vivem na camada de aplicação.
 
-**Dívida aberta:** 7 stores de feature (`WorldMap/*Store`, `MasterSuite/worldsStore`,
-`MapEditor/sync/*`, `assetLib`) ainda falam com o SDK direto. Estão listados nominalmente na
-exceção do ESLint — a lista só pode encolher.
+**A fronteira está fechada** (specs 0030/0032, ADR-0011): nenhum arquivo fora de
+`src/infrastructure/` importa `firebase/firestore`, e a lista de exceção do ESLint está vazia.
+Nem `Timestamp`, nem `DocumentReference`, nem FieldValue atravessam — datas saem como epoch-ms.
+
+## Como a UI se organiza
+
+Desde a **spec 0031**, o `App.jsx` é só orquestrador (439 linhas). Os componentes vivem em
+`src/features/<contexto>/`, espelhando os bounded contexts desta página:
+
+```
+src/features/   auth · campanha · dashboard · ficha · institucional · mapa · monetizacao · musica · sistemas
+src/ui/         casca sem regra de negócio (Sidebar, Topbar, MobileBottomNav, ornamentos)
+src/lib/        compartilhado entre contextos (appShell, NexusLogo, useViewport, nexStats…)
+```
+
+O critério de fronteira: se tem regra de negócio, é `features/`; se é casca reusável, é `ui/`;
+se é usado por dois contextos e não é nenhum dos dois, é `lib/`.
 
 ## Relações entre contextos
 > Padrões atuais inferidos do código.

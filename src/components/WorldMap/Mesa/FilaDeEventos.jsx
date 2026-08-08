@@ -127,6 +127,9 @@ function CartaoDoEvento({ item, acoes, mostrarSegredo = true }) {
  * @param {(sceneId:string, evento:object)=>void} [props.onEntrarNaCena]
  * @param {boolean} [props.ocupado]
  * @param {boolean} [props.carregando]
+ * @param {number|null} [props.bonusDaFicha] a melhor Furtividade das fichas
+ *   compartilhadas da campanha (`model/esquiva.melhorFurtividade`), ou `null`
+ *   quando não há ficha nenhuma — ver o bloco do bônus, lá embaixo (AC-13).
  */
 export default function FilaDeEventos({
   eventos = [],
@@ -136,8 +139,14 @@ export default function FilaDeEventos({
   onEntrarNaCena,
   ocupado = false,
   carregando = false,
+  bonusDaFicha = null,
 }) {
   const [bonus, setBonus] = useState(0);
+  /* Com ficha compartilhada o número sai dela; sem ficha, do campo. Nunca dos
+     dois — somar o digitado ao da ficha deixaria o mestre alterar em silêncio
+     o teste do jogador. */
+  const temFicha = Number.isFinite(bonusDaFicha);
+  const bonusEmUso = temFicha ? bonusDaFicha : bonus;
   const fila = useMemo(() => filaDoMestre(eventos, disparados), [eventos, disparados]);
 
   const botaoDisparar = (evento) => (
@@ -249,7 +258,7 @@ export default function FilaDeEventos({
                     className="wmm-acao"
                     data-testid={`wmm-teste-${item.evento.id}`}
                     disabled={ocupado}
-                    onClick={() => onResolverTeste(item.evento, bonus)}
+                    onClick={() => onResolverTeste(item.evento, bonusEmUso)}
                     title={`Rola 1d20 + bônus contra a CD ${item.evento.triggerConfig?.check?.dc ?? "—"}`}
                     style={{ ...btnStyle("quiet", "sm") }}
                   >
@@ -266,10 +275,19 @@ export default function FilaDeEventos({
         )}
       </Gaveta>
 
-      {/* O bônus é do MESTRE e vale para as rolagens desta tela — a ficha do
-          personagem não chega aqui, e inventar um modificador seria pior do
-          que deixá-lo explícito. */}
-      {onResolverTeste ? (
+      {/* ── O BÔNUS DAS ROLAGENS  (spec 0035 · F3 · M6 · AC-13) ─────────
+          Até a 0035 este número era SEMPRE digitado: a ficha do personagem
+          não chegava até aqui, e inventar um modificador seria pior do que
+          deixá-lo explícito.
+
+          Agora, QUANDO a campanha tem ficha compartilhada, ele sai da melhor
+          Furtividade da mesa (`model/esquiva`, ADR-0012) — e o campo some,
+          porque um campo que não manda em nada é pior do que campo nenhum.
+
+          **Sem ficha, o campo continua exatamente como sempre foi.** Não é
+          um modo degradado: é o mesmo caminho de antes, e é ele que garante
+          que a mecânica nova não bloqueie mesa nenhuma. */}
+      {onResolverTeste && !temFicha ? (
         <label
           className="wmm-focus"
           style={{ display: "inline-flex", alignItems: "center", gap: SP.x2, ...T.meta }}
@@ -285,6 +303,16 @@ export default function FilaDeEventos({
             style={{ ...campoStyle(false), width: 84, minHeight: HIT.desktop, fontSize: FS.body }}
           />
         </label>
+      ) : null}
+
+      {onResolverTeste && temFicha ? (
+        <p data-testid="wmm-bonus-da-ficha" style={{ ...T.meta, margin: 0 }}>
+          Bônus nas rolagens:{" "}
+          <strong style={{ color: "var(--text)" }}>
+            {bonusEmUso >= 0 ? `+${bonusEmUso}` : bonusEmUso}
+          </strong>{" "}
+          — a melhor Furtividade das fichas compartilhadas desta campanha.
+        </p>
       ) : null}
 
       {fila.total === 0 && !carregando ? (

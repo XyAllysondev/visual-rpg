@@ -50,6 +50,68 @@ export async function silent(tag, fallback, fn) {
 }
 
 /**
+ * Converte QUALQUER forma de data vinda do Firestore em **epoch-ms numérico** (spec 0032 AC-5).
+ *
+ * Nenhum campo de data sai de um repositório como primitiva do SDK — era a última que ainda
+ * atravessava a fronteira (dívida registrada no ADR-0010). Quem consome lê `number`, e só.
+ *
+ * Aceita as três formas que existem hoje no banco:
+ * - `Timestamp` do SDK (tem `.toMillis()`) — o caminho normal de um snapshot ao vivo;
+ * - objeto cru `{seconds, nanoseconds}` ou `{_seconds, _nanoseconds}` — é assim que a data
+ *   volta de cache/serialização, quando o SDK não reidrata a classe;
+ * - `number` — campo que já nasceu epoch-ms, ou valor que passou por aqui duas vezes
+ *   (a função é IDEMPOTENTE de propósito: normalizar o normalizado devolve o mesmo número).
+ *
+ * ## "Sem data" é `null`, não `0` nem `Date.now()`
+ * O caso que manda nessa escolha é a **escrita otimista**: quem envia uma mensagem recebe o
+ * próprio documento de volta ANTES de o servidor carimbar o `serverTimestamp()`, e nesse
+ * instante o campo chega `null`. Devolver `0` colocaria a mensagem em 1970 (sumiria pelo corte
+ * do TTL); devolver `Date.now()` mentiria uma data que o repositório não tem e apagaria a
+ * informação "ainda não carimbada". `null` preserva o fato, e quem consome aplica o fallback
+ * que já aplicava — exatamente o que o `?? Date.now()` do chat sempre fez.
+ *
+ * @param {unknown} valor
+ * @returns {number|null} epoch-ms, ou `null` quando não há data legível
+ */
+export function paraEpochMs(valor) {
+  if (typeof valor === "number") return Number.isFinite(valor) ? valor : null;
+  if (!valor || typeof valor !== "object") return null;
+  if (valor instanceof Date) {
+    const ms = valor.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  if (typeof valor.toMillis === "function") {
+    const ms = valor.toMillis();
+    return typeof ms === "number" && Number.isFinite(ms) ? ms : null;
+  }
+  const seg = typeof valor.seconds === "number" ? valor.seconds
+    : typeof valor._seconds === "number" ? valor._seconds
+      : null;
+  if (seg === null || !Number.isFinite(seg)) return null;
+  const nano = typeof valor.nanoseconds === "number" ? valor.nanoseconds
+    : typeof valor._nanoseconds === "number" ? valor._nanoseconds
+      : 0;
+  return seg * 1000 + Math.floor((Number.isFinite(nano) ? nano : 0) / 1e6);
+}
+
+/**
+ * Aplica `paraEpochMs` aos campos de data de um documento já achatado.
+ *
+ * Campo AUSENTE continua ausente — normalizar criaria uma chave `timestamp: null` em documentos
+ * (`typing`, por exemplo) que nunca a tiveram, e quem faz `toEqual` na borda veria diferença.
+ *
+ * @param {object} dados
+ * @param {string[]} campos nomes dos campos de data do agregado
+ */
+export function comDatasEmMs(dados, campos) {
+  const saida = { ...dados };
+  for (const campo of campos) {
+    if (campo in saida) saida[campo] = paraEpochMs(saida[campo]);
+  }
+  return saida;
+}
+
+/**
  * Cancelamento inerte, para os `watch*` que retornam cedo (uid nulo etc.).
  * Existir evita `if (unsub) unsub()` espalhado nos `useEffect` — quem chama sempre
  * recebe uma função, e chamá-la duas vezes é seguro.

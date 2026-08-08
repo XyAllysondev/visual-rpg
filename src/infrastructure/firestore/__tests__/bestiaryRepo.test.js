@@ -120,3 +120,57 @@ describe("bestiaryRepo.setHp", () => {
     expect(console.error).toHaveBeenCalledWith("[bestiaryRepo.setHp] falhou:", expect.any(Error));
   });
 });
+
+/* ════════════════════════════════════════════════
+ *  FRONTEIRA VALIDADA — spec 0032 AC-6
+ * ════════════════════════════════════════════════ */
+
+describe("bestiaryRepo — validação de fronteira (AC-6)", () => {
+  const entrega = (docs) => {
+    let visto;
+    onSnapshot.mockImplementation((_q, next) => { next({ docs }); return () => {}; });
+    bestiaryRepo.watchByCampaign("camp1", (l) => { visto = l; });
+    return visto;
+  };
+
+  it("criatura ÍNTEGRA sai idêntica, sem log", () => {
+    const aviso = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const crua = { name: "Zumbi", system: "Ordem Paranormal", hpMax: "18", hpCurrent: 0 };
+
+    expect(entrega([{ id: "c1", data: () => ({ ...crua }) }])).toEqual([{ id: "c1", ...crua }]);
+    expect(aviso).not.toHaveBeenCalled();
+  });
+
+  it("PV como STRING LIVRE do formulário atravessa INTOCADO — é dado válido, não erro", () => {
+    /* `"18 (2d8+4)"` é o que o mestre digita, e existe assim nas fichas já cadastradas.
+       Coagir para número aqui apagaria a nota de rolagem dele. A régua do PV é
+       `domain/creature.js`, que já é total sobre string livre. */
+    const aviso = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    const lista = entrega([{ id: "c1", data: () => ({ name: "Ghoul", hpMax: "18 (2d8+4)", hpCurrent: "" }) }]);
+
+    expect(lista[0].hpMax).toBe("18 (2d8+4)");
+    expect(lista[0].hpCurrent).toBe("");
+    expect(aviso).not.toHaveBeenCalled();
+  });
+
+  it("`name` numérico vira texto — a busca do bestiário faz `.toLowerCase()` nele", () => {
+    const aviso = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    const lista = entrega([{ id: "c1", data: () => ({ name: 13, hpMax: "8" }) }]);
+
+    expect(lista[0].name).toBe("13");
+    expect(() => lista[0].name.toLowerCase()).not.toThrow();
+    expect(aviso.mock.calls[0][0]).toContain('[bestiaryRepo.saida] "c1".name');
+  });
+
+  it("documento com corpo não-objeto é descartado do bestiário, com log", () => {
+    const lista = entrega([
+      { id: "boa", data: () => ({ name: "Zumbi" }) },
+      { id: "fantasma", data: () => null },
+    ]);
+
+    expect(lista).toEqual([{ id: "boa", name: "Zumbi" }]);
+    expect(console.error.mock.calls.map((c) => c[0]).join("\n")).toContain("fantasma");
+  });
+});

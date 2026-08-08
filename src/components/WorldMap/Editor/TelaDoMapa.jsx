@@ -34,6 +34,7 @@ import {
   CORES_DA_TRILHA,
 } from "./editorUi";
 import CamadaDeNevoa from "./CamadaDeNevoa";
+import RunaDoLugar from "../model/marcadores";
 import { SP, R, FF, FS, FW, T } from "../Atelier/ui";
 
 /** Diâmetro do nó em px de TELA (não de mundo): não encolhe com o zoom. */
@@ -95,6 +96,11 @@ function NoDoMapa({
   const secreto = no.type === "secret";
   const mostrarRotulo = escala >= ZOOM_PARA_ROTULO;
 
+  /* A marca do lugar (spec 0035 · M3): o ícone que o MESTRE escolheu continua
+     mandando — só o padrão de cada tipo deixou de ser emoji e virou runa. */
+  const temIconeProprio = typeof no.icon === "string" && no.icon.trim() !== "";
+  const marca = temIconeProprio ? iconeDoNo(no) : <RunaDoLugar tipo={no.type} />;
+
   return (
     <div
       className="wme-ancora"
@@ -146,7 +152,7 @@ function NoDoMapa({
               : "0 3px 10px rgba(0,0,0,.62)",
           }}
         >
-          {iconeDoNo(no)}
+          {marca}
         </span>
 
         {mostrarRotulo ? (

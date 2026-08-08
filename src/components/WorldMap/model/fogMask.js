@@ -245,6 +245,32 @@ const lerCelula = (m, cx, cy) => {
   return (m.bits[i >> 3] >> (i & 7)) & 1;
 };
 
+/**
+ * A célula `(cx, cy)` está revelada?
+ *
+ * `estaRevelado` responde a mesma pergunta em coordenadas de MUNDO; esta
+ * responde em coordenadas de GRADE, que é o que quem varre o bitmap célula a
+ * célula tem na mão — hoje, a franja de tinta da spec 0035.
+ *
+ * Existe para que o layout do bit (`cy * colunas + cx`, byte `i >> 3`, bit
+ * `i & 7`) continue morando **só aqui**. Um segundo módulo reimplementando o
+ * índice é uma divergência esperando para acontecer.
+ *
+ * Fora da grade devolve `false` — o lado de fora do mapa é coberto, e é isso
+ * que faz a borda do bitmap virar contorno.
+ *
+ * @param {object} mascara
+ * @param {number} cx coluna.
+ * @param {number} cy linha.
+ * @returns {boolean}
+ */
+export function celulaAcesa(mascara, cx, cy) {
+  if (!mascara || !mascara.bits) return false;
+  if (!Number.isFinite(cx) || !Number.isFinite(cy)) return false;
+  if (cx < 0 || cy < 0 || cx >= mascara.colunas || cy >= mascara.linhas) return false;
+  return lerCelula(mascara, cx, cy) === 1;
+}
+
 const acenderCelula = (m, cx, cy) => {
   const i = cy * m.colunas + cx;
   m.bits[i >> 3] |= 1 << (i & 7);

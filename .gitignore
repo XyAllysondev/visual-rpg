@@ -1,6 +1,16 @@
 node_modules/
 build/
+
+# `.env` sozinho casa SÓ com o nome exato — `.env.local` e `.env.development`
+# passariam direto. `.env.production` continua versionado de propósito: tem
+# apenas `REACT_APP_API_URL` e `GENERATE_SOURCEMAP`, e variáveis `REACT_APP_*`
+# são embutidas no bundle público pelo CRA — não são segredo. Segredo de
+# verdade vai em `.env.local`, que estas linhas cobrem.
 .env
+.env.local
+.env.*.local
+.env.development
+
 .DS_Store
 
 .vercel

@@ -25,8 +25,12 @@ export const OrdemSheetStyles = () => (
     .op-stagger>*:nth-child(1){animation-delay:.04s}.op-stagger>*:nth-child(2){animation-delay:.10s}.op-stagger>*:nth-child(3){animation-delay:.16s}.op-stagger>*:nth-child(4){animation-delay:.22s}.op-stagger>*:nth-child(5){animation-delay:.28s}.op-stagger>*:nth-child(6){animation-delay:.34s}.op-stagger>*:nth-child(7){animation-delay:.40s}.op-stagger>*:nth-child(8){animation-delay:.46s}
     @keyframes op-rise{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:translateY(0); } }
 
-    /* ── ATTRIBUTE DIAL ── */
-    .op-dial{ position:relative; width:96px; height:96px; cursor:pointer; }
+    /* ── ATTRIBUTE DIAL ──
+       Largura/altura NÃO moram aqui: o AttributeCircle as escreve inline (o
+       tamanho vem do AttrConstellation, que lê a viewport). Estilo inline vence
+       @media, então regra de tamanho neste arquivo é letra morta — e foi, por
+       bastante tempo, nos dois breakpoints de celular. */
+    .op-dial{ position:relative; cursor:pointer; }
     .op-dial-rune{ transform-origin:50% 50%; animation:op-rune-spin 60s linear infinite; }
     .op-dial:hover .op-dial-rune{ animation-duration:24s; }
     @keyframes op-rune-spin{ from{ transform:rotate(0deg); } to{ transform:rotate(360deg); } }
@@ -86,9 +90,20 @@ export const OrdemSheetStyles = () => (
     /* O realce do ativo é a pílula deslizante (spec 0022) — os botões só mudam
        cor/peso; fundo e sublinhado vivem no <SlidingTabPill>. A borda transparente
        fica para o box-model não encolher 2px. */
-    .op-tabs-row{ display:flex; width:100%; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; position:relative; }
+    /* No DESKTOP as abas QUEBRAM em vez de rolar.
+       Eram 5 abas e cabiam; a "Progressão" virou a sexta e o conteúdo passou a
+       546px numa coluna de 458px. A faixa tinha overflow-x:auto sem barra e sem
+       aviso nenhum, então "Descrição" simplesmente sumia cortada no meio da
+       palavra — parecia defeito, não algo rolável. Rolagem horizontal escondida
+       é ruim no desktop (exige shift+roda ou arrastar), e aqui não é preciso:
+       a coluna tem folga VERTICAL. Quebrando, as seis ficam visíveis de uma vez.
+       A pílula deslizante acompanha porque measurePill mede top/height também,
+       não só left/width (useSlidingPill.js).
+       ATENÇÃO: nada de crase neste arquivo — ele inteiro é um template literal
+       e uma crase solta fecha a string e derruba o build. */
+    .op-tabs-row{ display:flex; flex-wrap:wrap; width:100%; position:relative; }
     .op-tabs-row::-webkit-scrollbar{ display:none; }
-    .op-tab{ flex:0 0 auto; min-width:70px; text-align:center; font-family:Inter,'Inter var',system-ui,sans-serif; font-size:11.5px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; padding:11px 14px; cursor:pointer;
+    .op-tab{ flex:0 0 auto; min-width:0; text-align:center; font-family:Inter,'Inter var',system-ui,sans-serif; font-size:11.5px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; padding:11px 12px; cursor:pointer;
       border:none; border-bottom:2px solid transparent; background:transparent; color:var(--muted2); transition:color 0.18s; white-space:nowrap; position:relative; z-index:1; }
     .op-tab:hover{ color:var(--text); background:rgba(201,168,76,0.05); }
     .op-tab.active{ color:var(--el-glow); font-weight:700; }
@@ -113,7 +128,22 @@ export const OrdemSheetStyles = () => (
     .op-emrg:hover{ background:rgba(201,168,76,0.16); box-shadow:0 0 14px var(--el-glow); transform:translateY(-1px); }
 
     /* ── PERÍCIA ROWS (PERÍCIA · DADOS · BÔNUS · TREINO · OUTROS) ── */
-    .op-col-panel{ --skill-cols:22px minmax(0,1fr) 34px 38px 42px 42px 26px; }
+    /* A coluna 3 passou a mostrar a notação de dados ("3d20", spec 0037) em vez
+       da sigla do atributo — 34px cabiam "AGI" e cortariam "3d20↓". */
+    .op-col-panel{ --skill-cols:22px minmax(0,1fr) 46px 38px 42px 42px 26px; }
+    /* Em Modo de Edição a linha ganha a 8ª coluna: o controle de ocultar
+       (spec 0038). Ela só existe com a ficha destravada — em Modo de Jogo a
+       coluna não é reservada, senão a tabela mudaria de largura ao destravar. */
+    .op-col-panel[data-edit="true"]{ --skill-cols:22px minmax(0,1fr) 46px 38px 42px 42px 26px 24px; }
+    .op-skill-oculta{ opacity:0.5; }
+    .op-eye{ background:none; border:none; cursor:pointer; padding:0; font-size:11px; line-height:1; opacity:0.5; transition:opacity 0.15s; }
+    .op-eye:hover{ opacity:1; }
+    /* Segunda linha do nome da perícia: atributo + grau de treino por extenso.
+       É onde a sigla do atributo passou a morar quando a coluna "Dados" virou
+       dados de verdade — a informação mudou de lugar, não desapareceu. */
+    .op-skill-sub{ display:block; font-family:var(--font-data,'Share Tech Mono',monospace);
+      font-size:9px; line-height:1.3; letter-spacing:0.04em; color:var(--muted);
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .op-skill,.op-skill-head{ display:grid; grid-template-columns:var(--skill-cols,22px minmax(0,1fr) 34px 38px 42px 42px 26px); gap:0 4px; align-items:center; }
     .op-skill{ padding:5px 10px; border-bottom:1px solid rgba(201,168,76,0.06); font-family:Inter,'Inter var',system-ui,sans-serif; font-size:13px; transition:background 0.15s; }
     .op-skill:hover{ background:rgba(214,184,74,0.12); }
@@ -188,12 +218,10 @@ export const OrdemSheetStyles = () => (
     .op-el-card:hover{ transform:translateY(-3px); }
     .op-el-particle{ position:absolute; width:3px; height:3px; border-radius:50%; opacity:0.6; animation:op-particle linear infinite; }
     @keyframes op-particle{ from{ transform:translateY(0); opacity:0; } 10%{ opacity:0.7; } to{ transform:translateY(-120px); opacity:0; } }
-    .op-el-transition{ position:fixed; inset:0; z-index:210; background:#000; display:flex; align-items:center; justify-content:center; animation:op-el-fade 1.5s ease forwards; }
-    /* spec 0023: o piso subiu de #000 junto com --el-deep — com o fundo grafite,
-       partir do preto puro virava um piscar visível na troca de elemento. */
-    @keyframes op-el-fade{ 0%{ background:#0a0a10; } 45%{ background:#0a0a10; } 100%{ background:var(--el-deep,#14141c); } }
-    .op-el-erupt{ animation:op-erupt 1.5s cubic-bezier(.2,.6,.2,1) forwards; }
-    @keyframes op-erupt{ 0%{ transform:scale(0) rotate(-30deg); opacity:0; } 30%{ opacity:1; } 60%{ transform:scale(1.4) rotate(8deg); } 100%{ transform:scale(8) rotate(0); opacity:0; } }
+    /* A transição pós-escolha vive em ElementoRitual.jsx (coreografia por
+       elemento, keyframes colocados lá). O piso não-preto que a spec 0023
+       pediu virou op-r-fundo lá: com o fundo grafite, partir do preto puro
+       virava um piscar visível na troca de elemento. */
 
     /* ── MOBILE SECTION NAV (Ficha | Perícias | Ações) ── */
     .op-mobile-secnav{ display:none; }
@@ -228,8 +256,15 @@ export const OrdemSheetStyles = () => (
       .op-mobile-hidden{ display:none !important; }
 
       /* Header */
-      .op-tab{ font-size:11px; padding:11px 12px; min-height:44px; -webkit-tap-highlight-color:transparent; }
-      .op-dial{ width:76px; height:76px; }
+      /* No mobile a coluna é a tela inteira: quebrar 6 abas daria 3 linhas e
+         comeria a dobra. Aqui volta a rolar — com a máscara do .forja-rail,
+         que desbota os últimos 22px para avisar que continua. Arrastar de lado
+         é gesto natural no toque, ao contrário do desktop. */
+      .op-tabs-row{ flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch;
+        scroll-snap-type:x proximity;
+        -webkit-mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 22px),transparent 100%);
+                mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 22px),transparent 100%); }
+      .op-tab{ font-size:11px; padding:11px 12px; min-height:44px; scroll-snap-align:center; -webkit-tap-highlight-color:transparent; }
       .op-photo-frame{ height:160px !important; }
 
       /* VitalSign quick-damage panel wraps on narrow screens */
@@ -237,7 +272,8 @@ export const OrdemSheetStyles = () => (
       .op-vital-quick{ flex-wrap:wrap; gap:4px !important; }
 
       /* Skills grid: tighter columns */
-      .op-col-panel{ --skill-cols:20px minmax(0,1fr) 24px 32px 34px 34px 28px; }
+      .op-col-panel{ --skill-cols:20px minmax(0,1fr) 40px 32px 34px 34px 28px; }
+      .op-col-panel[data-edit="true"]{ --skill-cols:20px minmax(0,1fr) 40px 32px 34px 34px 28px 22px; }
       .op-skill{ padding:5px 6px; font-size:11px; gap:0 3px; }
       .op-skill-head{ padding:4px 6px; font-size:9px; gap:0 3px; }
       .op-skill input{ font-size:11px; }
@@ -275,10 +311,18 @@ export const OrdemSheetStyles = () => (
     }
     @media(max-width:480px){
       .op-tab{ font-size:10px; padding:10px 8px; letter-spacing:0.05em; }
-      .op-dial{ width:66px; height:66px; }
       .op-photo-frame{ height:130px !important; }
-      /* Even tighter skill columns; hide "outros" bonus col */
-      .op-col-panel{ --skill-cols:18px minmax(0,1fr) 22px 28px 0px 30px 26px; }
+      /* Colunas ainda mais apertadas; a coluna TREINO (5ª) some — e só ela pode
+         sumir: o grau de treinamento continua editável pelo hexágono no começo
+         da linha, que cicla 0/5/10/15, enquanto o campo "outros" não tem
+         nenhum outro caminho de entrada. */
+      .op-col-panel{ --skill-cols:18px minmax(0,1fr) 38px 28px 0px 30px 26px; }
+      .op-col-panel[data-edit="true"]{ --skill-cols:18px minmax(0,1fr) 38px 28px 0px 30px 26px 22px; }
+      /* No celular a segunda linha some: com a coluna do nome já apertada, "AGI ·
+         Veterano" empurraria cada linha para duas alturas e a tabela deixaria de
+         caber na dobra. A informação continua no aria-label e no title.
+         (Sem crase neste arquivo: o CSS mora dentro de template literal.) */
+      .op-skill-sub{ display:none; }
       .op-skill{ padding:5px 4px; font-size:11px; }
       .op-skill-head{ padding:4px 4px; font-size:9.5px; }
       .op-skill>*:nth-child(5),.op-skill-head>*:nth-child(5){ display:none; }

@@ -13,21 +13,30 @@ const secLabel = {
   ...tLabel, display: "flex", alignItems: "center", gap: 10, marginBottom: 8,
 };
 
-export default function DescricaoTab({ descricao, setDescricao, isMaster }) {
+/* NÃO existe mais uma seção "Notas do Mestre" aqui, e a ausência é deliberada.
+ *
+ * Ela dependia de `character.viewerIsMaster`, prop que NENHUM lugar do código
+ * jamais preencheu — a seção nunca apareceu para ninguém. E ligá-la seria pior do
+ * que deixá-la morta: a ficha da mesa vive em `campaigns/{id}/sharedSheets/{id}`,
+ * cuja regra é `allow read: if isMember(campaignId)`. Toda nota escrita ali seria
+ * legível pelo SDK por qualquer JOGADOR da campanha — exatamente quem o rótulo
+ * "visível apenas ao Mestre" promete excluir.
+ *
+ * Fazer de verdade exige documento separado (ex.: `campaigns/{id}/gmNotes/{charId}`)
+ * com regra de leitura restrita ao mestre — decisão de fronteira, ou seja, ADR antes
+ * do código. O mapa-múndi resolveu o problema idêntico assim: ADR-0012 e a
+ * `projecaoDoNo`, que garante que campo de mestre não chega ao DOM do jogador. */
+export default function DescricaoTab({ descricao, setDescricao }) {
   const d = descricao || {};
   const set = (key, val) => setDescricao((p) => ({ ...(p || {}), [key]: val }));
 
-  const secoes = isMaster
-    ? [...SECOES, { key: "notas_mestre", label: "Notas do Mestre", hint: "Visível apenas ao Mestre…", gm: true }]
-    : SECOES;
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      {secoes.map((s) => (
+      {SECOES.map((s) => (
         <div key={s.key}>
-          <div style={{ ...secLabel, color: s.gm ? "var(--danger-text,#d85a5a)" : "var(--el-accent)" }}>
-            <span style={{ whiteSpace: "nowrap" }}>{s.label}{s.gm && " 🔒"}</span>
-            <span style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${s.gm ? "var(--danger-text,#d85a5a)" : "var(--el-border)"}, transparent)` }} />
+          <div style={{ ...secLabel, color: "var(--el-accent)" }}>
+            <span style={{ whiteSpace: "nowrap" }}>{s.label}</span>
+            <span style={{ flex: 1, height: 1, background: "linear-gradient(90deg, var(--el-border), transparent)" }} />
           </div>
           <RichTextEditor value={d[s.key]} onChange={(v) => set(s.key, v)} placeholder={s.hint} minHeight={s.key === "anotacoes" || s.key === "historico" ? 110 : 80} />
         </div>

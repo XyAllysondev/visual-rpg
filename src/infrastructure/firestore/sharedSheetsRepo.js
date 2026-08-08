@@ -17,11 +17,41 @@
  * A spec 0029 preserva comportamento (AC-7); consertar falha silenciosa é da onda 3.
  */
 import { addDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp } from "firebase/firestore";
-import { docAt, colAt, silent, NOOP_UNSUBSCRIBE } from "./client";
+import { docAt, colAt, silent, comDatasEmMs, NOOP_UNSUBSCRIBE } from "./client";
+import { criarNormalizador, mapa, texto, naoDescartado } from "./schema";
 import { sharedSheetsCol, sharedSheetDoc } from "./paths";
 import { characterKey } from "../../domain/character";
 
-const withId = (d) => ({ id: d.id, ...d.data() });
+/** Campo de data deste agregado: quando a ficha foi posta na mesa. */
+const CAMPOS_DE_DATA = ["sharedAt"];
+
+/**
+ * Tipos que a fronteira garante (spec 0032 AC-6).
+ *
+ * `characterData` é a ficha inteira e é indexada sem guarda por toda a mesa
+ * (`sheet.characterData.form.personagem`); `characterId` é usado como CHAVE de objeto no mapa
+ * de `watchLiveRefsByCharacter`, e uma chave que não é string casa com o `characterKey`
+ * (que é `String(...)`) por acidente ou não casa de jeito nenhum — e quando não casa, o
+ * "ao vivo" simplesmente para de sincronizar, sem erro nenhum na tela.
+ *
+ * `permissions`/`isLive` ficam de fora: a UI já os lê defensivamente, e `isLive` ausente é
+ * legado legítimo (fichas compartilhadas antes de o modo ao vivo existir).
+ */
+const normalizar = criarNormalizador("sharedSheetsRepo.saida", {
+  characterData: mapa,
+  characterId: texto,
+  characterName: texto,
+  ownerId: texto,
+  ownerName: texto,
+});
+
+/* Ponto único de saída: valida os tipos (AC-6) e normaliza `sharedAt` para epoch-ms (AC-5),
+   fechando a última via pela qual um `Timestamp` do SDK atravessaria a fronteira deste
+   agregado. `null` quando o documento é para descartar. */
+const withId = (d) => {
+  const dados = normalizar(d.data(), d.id);
+  return dados && { id: d.id, ...comDatasEmMs(dados, CAMPOS_DE_DATA) };
+};
 
 /** Nome exibido na mesa. O fallback é o do legado — ficha sem nome não vira `undefined`. */
 const nomeExibido = (character, fallback = "Sem nome") =>
@@ -70,7 +100,7 @@ export function watchByCampaign(campaignId, onChange, onError) {
   if (!campaignId) return NOOP_UNSUBSCRIBE;
   return onSnapshot(
     colAt(sharedSheetsCol(campaignId)),
-    (snap) => onChange(snap.docs.map(withId)),
+    (snap) => onChange(snap.docs.map(withId).filter(naoDescartado)),
     (e) => {
       console.error("[sharedSheetsRepo.watchByCampaign] falhou:", e);
       if (onError) onError(e);

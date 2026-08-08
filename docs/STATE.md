@@ -10,8 +10,604 @@ alwaysApply: true
 > todo. Diferente do **ADR** (decisão durável e imutável). Decisão estrutural → ADR; estado do
 > trabalho → aqui. Atualize ao **pausar/encerrar**; leia ao **retomar**. Use a skill `/handoff`.
 
-**Última atualização:** 2026-08-02 — DUAS SESSÕES trabalharam em paralelo neste dia: SPEC 0033
-(progressão automática de OP) e as SPECS 0029/0030/0031 (arquitetura em camadas). Ambas verdes.
+**Última atualização:** 2026-08-08 (5) — **SPEC 0041 ENTREGUE (corrige 2 regras erradas da 0040).**
+Gate: **113 suítes / 2.694 testes verdes** (`--runInBand`) e **`CI=true npm run build` compila
+limpo**.
+
+> **2026-08-08 (5): SPEC 0041 — OS VALORES DO INTERLÚDIO, DO LIVRO.** O Andre autorizou transcrever
+> a tabela de recuperação. **E a transcrição provou que a spec 0040 tinha implementado DUAS REGRAS
+> ERRADAS, já em produção.**
+>
+> **⚠ OS DOIS ERROS QUE A 0040 SUBIU:**
+> 1. **"Cada personagem escolhe UMA ação de interlúdio"** — o livro diz literalmente *"um personagem
+>    pode fazer até **DUAS** das ações a seguir"*. O AC-5 da 0040 travava em uma.
+> 2. **Faltava a ação "Exercitar-se"**, e **"Consertar" chama-se "Manutenção"**. A transcrição da
+>    spec 0026 tinha 6 ações; são **7**.
+>
+> Lição: a 0040 tratou `regras-oficiais.json` como fonte completa. Ele é uma **transcrição parcial**
+> — as entradas diziam `(Resumo — valores no livro.)` e eu li isso como "os valores faltam", quando
+> na verdade **a regra inteira estava resumida**, inclusive o número de ações. Resumo declarado é
+> aviso de que falta conferir a fonte, não só de que falta um número.
+>
+> **⚠ E OS VALORES ERAM CALCULÁVEIS DESDE SEMPRE.** O livro: dormir recupera PV e PE iguais ao
+> **limite de PE por rodada**, vezes a condição do descanso. O nosso `deriveStats().peTurno` **JÁ É
+> esse limite** — o exemplo do livro (NEX 35% → limite 7 → recupera 7 PV e 7 PE) confere exatamente
+> com `1 + nexLevel(35)` = 7. A 0040 pediu o número ao jogador quando a ficha já sabia calculá-lo.
+>
+> - **Escada de condições:** precária ½ · normal ×1 · confortável ×2 · luxuosa ×3. A ORDEM importa —
+>   o prato nutritivo/energético "sobe um degrau", e o exemplo do livro (confortável → triplicada)
+>   só fecha com essa escada.
+> - **Relaxar** usa a mesma base, mas em Sanidade, + 1 SAN por personagem que relaxou no mesmo
+>   interlúdio (inclusive o próprio — por isso o padrão é 1, não 0).
+> - **Os quatro pratos** de Alimentar-se entraram com seus efeitos condicionais.
+> - **Só Revisar o Caso repete** no mesmo interlúdio; o livro diz isso dela, e só dela.
+> - **A prévia e a aplicação chamam a MESMA função** (`calcularRecuperacao`). Se divergissem, o
+>   jogador confirmaria um número e receberia outro — há teste travando a igualdade.
+> - **Compatibilidade com o que já está gravado:** interlúdios da 0040 usam `acao` no singular e
+>   estão em PRODUÇÃO. `historicoDeInterludios` os converte, senão o jogador veria o próprio
+>   registro desaparecer depois do deploy. Há teste.
+>
+> **DECISÃO REGISTRADA, NÃO REGRA DO LIVRO:** a condição precária vale "metade", e meio PV não
+> existe — **arredondo para baixo**. O livro que temos não diz o sentido, e para cima seria mais
+> generoso do que o texto autoriza. Se a mesa preferir o contrário, é uma linha, mas é decisão de
+> produto.
+>
+> **PII:** o texto extraído do PDF carrega a marca d'água com nome e e-mail do comprador.
+> **Nada disso entrou no repo** — só regra parafraseada.
+>
+> **Arquivos:** `regras-oficiais.json` (7 ações, textos com os valores reais),
+> `interludio.js` (reescrito: escada, pratos, `calcularRecuperacao`, teto de 2 ações),
+> `Tabs/InterludioTab.jsx` (reescrito: multi-seleção, condição, prato, prévia),
+> `__tests__/investigacao-interludio.test.js` (73 testes), `OrdemParanormalSheet.jsx` (passa `peTurno`).
+>
+> **PENDENTE DO ANDRE:** validar no navegador (escolher Dormir + Alimentar-se com prato nutritivo e
+> conferir que o PV sobe um degrau; tentar uma terceira ação e ver a recusa) e **decidir o
+> arredondamento da condição precária**.
+
+> **2026-08-08 (4): SPEC 0040 — INVESTIGAÇÃO E INTERLÚDIO.** O Andre pediu as duas páginas que a
+> RPGpedia anuncia como "em breve", *"trabalhe 100% nisso"*, e sugeriu juntá-las com Descrição.
+>
+> **NÃO HAVIA O QUE COPIAR** — lá as duas são modais de "em breve". O que existe de verdade é no
+> nosso repo: **as 7 regras de interlúdio JÁ ESTAVAM transcritas** em `regras-oficiais.json`
+> (`secao: "interludio"`, spec 0026). A aba **lê de lá** e há teste comparando nome e descrição
+> **caractere a caractere** com o JSON — se alguém reescrever a regra no componente, reprova. Era o
+> risco real: o `STATE` já registra duas réguas divergentes de trilha em `opConstants.js`.
+>
+> - **⚠ OS VALORES DE RECUPERAÇÃO NÃO EXISTEM NO REPO.** As entradas dizem literalmente
+>   `(Resumo — valores no livro.)`. Então **não inventei número**: quem informa quanto recuperou é
+>   quem tem o livro, e o app aplica **a parte da regra que temos por escrito** —
+>   `interludio-geral`: *"Nenhuma recuperação ultrapassa o máximo do personagem"*. Preencher um
+>   valor "provável" seria inventar regra de sistema publicado.
+> - **O registro guarda o EFETIVAMENTE recuperado, não o pedido.** PV 18/20 com +9 informado grava
+>   `+2`. Histórico com número que não aconteceu é mentira no livro-razão — e o histórico é
+>   exatamente o que o pedido chamava de "revisar as ações".
+> - **Armadilha fechada:** sem máximo conhecido (`pvMax` 0 ou ausente) a função **não recupera
+>   nada**. Deixar passar seria a única forma de a recuperação furar o teto.
+> - **A SUGESTÃO DO ANDRE ERA O DESENHO CERTO, NÃO UM ATALHO.** A barra de abas da ficha **já
+>   quebrou com seis** (`fix(ficha): abas somem quando são seis`). Investigação e Interlúdio no topo
+>   dariam **oito** e reintroduziriam o defeito. Viraram sub-abas de um **Dossiê** (Agente ·
+>   Investigação · Interlúdio) na gramática de pílula deslizante. **Há teste travando as seis abas
+>   do topo.** `DescricaoTab` não foi tocada — virou a sub-aba "Agente".
+> - **Pista tem ESTADO, e é o ponto todo.** Aberta / confirmada / descartada, com **marca**
+>   (`?`/`✓`/`✕`) e riscado na descartada — não só cor. Numa bola de texto em "Anotações", pista
+>   descartada fica indistinguível de pista viva, e é essa confusão que faz o grupo perseguir o que
+>   já eliminou. Pista nasce **aberta**: pista que entra confirmada não foi investigada, foi assumida.
+> - **O cabeçalho conta ABERTAS, não o total** — total inclui trabalho encerrado e não diz quanto
+>   falta perseguir.
+> - **Estado fora dos três conhecidos é ignorado** — o Firestore é schemaless e uma string errada
+>   não pode virar um quarto estado.
+> - A ficha só **grava** o que o módulo puro devolveu; não reaplica `Math.min`. Segunda opinião sobre
+>   a mesma regra é como duas réguas divergem.
+>
+> **Arquivos:** `specs/0040-investigacao-e-interludio/{spec,tasks}.md`, `interludio.js` e
+> `investigacao.js` (novos, puros), `Tabs/{DossieTab,InvestigacaoTab,InterludioTab}.jsx` (novos),
+> `__tests__/investigacao-interludio.test.js` (novo, 45 testes), `OrdemParanormalSheet.jsx`.
+>
+> **FORA DE ESCOPO, declarado:** transcrever os valores de recuperação do livro (é conteúdo, spec
+> própria); Notas do Mestre (segue proibida pela regra do Firestore — precisa de documento separado
+> + ADR); ligar pista a nó do mapa-múndi ou a PNJ (acoplamento entre agregados, ADR antes).
+>
+> **PENDENTE DO ANDRE:** validar no navegador (registrar duas pistas e descartar uma; registrar um
+> interlúdio pedindo mais PV do que cabe e conferir que o histórico grava o efetivo) e **commitar/
+> deployar**.
+
+> **2026-08-08 (3): SPECS 0037, 0038 e 0039 — ENTREGUES E EM PRODUÇÃO.**
+> Commits `777250f` (0036–0039) e `616e057` (conserto do modal) em
+> `feat/redesign-layout-nx`, empurrados para `Andreytyui/NEXUS-RPG`, e **deployados no Firebase
+> Hosting** (`nexus-rpg-app`) — `playnexusrpg.com` e `nexus-rpg-app.web.app` respondendo 200.
+> **`main` continua em `efeb973`, ATRÁS de produção** — decisão do Andre pendente (PR ou
+> fast-forward).
+>
+> **⚠ DEFEITO DE PRODUÇÃO ACHADO E CORRIGIDO NO MESMO DIA (`616e057`):** o modal do retrato abria
+> fora da vista e exigia rolar a página. O CSS estava **certo** (`position: fixed; inset: 0`) e o
+> bug existia assim mesmo: a raiz da ficha carrega a classe global `.fade`, cujo `fadeIn` termina em
+> `transform: translateY(0)` com `forwards` — e **ancestral com `transform` diferente de `none` vira
+> o bloco de contenção dos filhos `position: fixed`**. O `inset: 0` se resolvia contra a ficha
+> inteira. O `Modal` local passou a portalar para `document.body`, o que consertou os três usos
+> (matriz de NEX, retrato, retrato com IA). O teste **não** checa `position: fixed` — checa que o
+> modal está FORA da `.op-sheet`. Provado por mutação.
+> **Lição:** `position: fixed` não é confiável dentro desta ficha; modal novo aqui **nasce portalado**.
+>
+> **Verificação de deploy que quase virou relato errado:** `main.js.map` respondeu **HTTP 200** e
+> parecia vazamento de código-fonte. Não era — o `rewrite "**" → /index.html` devolve 200 para
+> qualquer caminho inexistente; o conteúdo era `<!doctype html>`. **Status code não prova ausência
+> de arquivo em SPA com fallback** — confira o conteúdo.
+
+> **2026-08-08 (3): SPEC 0039 — O DOSSIÊ DE ADMISSÃO.** Último item do Tier A. O Andre decidiu a
+> direção: *"em relação a arte, eu quero que você adapte para o visual do nexus hoje"* — então
+> **copiou-se a ESTRUTURA da referência, não o acabamento**.
+>
+> **A tradução está escrita na spec, token por token:** papel amassado beige → superfície grafite
+> (`--card`) com o `op-grain` que a ficha já tem; mesa de madeira → o próprio `--bg`, sem cenário
+> novo; datilografia Courier → `IBM Plex Mono` (a fonte `data` do tema); serifa larga → `Cinzel`;
+> filete de tinta preta → filete de ouro corrompido (`--border2`). **Zero fonte nova, zero textura
+> nova, zero asset novo** — é por isso que isto virou spec de implementação e não de compra de arte.
+>
+> - **`DocPanel.jsx` (novo)** — a casca de documento: emissor `ORDO REALITAS`, natureza do documento
+>   e número de registro, filete, corpo. Cada passo do criador virou uma **página do mesmo dossiê**
+>   (`Termo de admissão` → `Anexo I · Aptidões` → `Anexo II · Vida pregressa` → `Anexo III ·
+>   Treinamento` → `Autenticação do agente`).
+> - **⚠ MOLDURA, NÃO CENÁRIO — está escrito no topo do componente.** Cenário ilustrado é o que faz a
+>   tela parecer arte gerada em vez de documento, lição que este projeto já pagou no
+>   `OrdemParanormalSheet` (o halo dourado atrás do nome, 2026-08-02).
+> - **`numeroDeDossie` é determinístico por contrato.** Hash FNV-1a do nome → `NNNNNN/NNN`. A
+>   tentação era `Math.random()`, e documento cujo número muda a cada render não é documento. Sem
+>   nome não há número: o cabeçalho desenha um traçado de **exatamente 10 caracteres** (a largura de
+>   `000000/000`) para não pular quando o nome chegar, com `aria-label` dizendo "ainda não emitido" —
+>   senão o leitor de tela leria uma fileira de travessões como conteúdo.
+> - **A série nunca começa em 0** (`h % 900000 + 100000`): `000123/456` não leria como registro.
+> - **`StepBar` reescrito sobre `useSlidingPill`.** Era a **única barra do Nexus** fora da gramática
+>   do indicador deslizante que as abas da ficha e da mesa usam desde a spec 0022. Cumprido / atual /
+>   pendente agora se distinguem por **marca** (`✓`, número em destaque, número apagado) além da cor —
+>   mesma lição do grau de treino na spec 0037. Clique só volta para passo cumprido; pular para
+>   frente contornaria o `canNext`.
+> - **Passo de Admissão novo**, com as cinco obrigações do agente. **Texto autoral** — nada
+>   transcrito da referência.
+>
+> **⚠ ACHEI UM DEFEITO MEU DA SPEC 0038 AO FAZER ESTA.** A 0038 declarou que a assinatura era o
+> **único** jeito de finalizar e removeu o botão `Finalizar Ficha` do topo do passo. **Havia um
+> segundo botão** — `Criar Agente ✦`, na barra de navegação inferior — e o teste da 0038 passou
+> porque procurava pelo rótulo do primeiro. Removido; no último passo a barra só diz "Assine ao pé
+> do documento". O teste novo assere a ausência dos **dois** rótulos em **todos** os cinco passos.
+>
+> **LIÇÃO REGISTRADA (vale mais que a spec):** *teste de ausência precisa enumerar todos os rótulos
+> possíveis e varrer todos os estados.* `queryByText("Finalizar Ficha")` provou que **aquele** botão
+> sumiu, não que **o caminho** era único — e o AC falava de unicidade. Quando o AC diz "único", a
+> asserção tem de varrer os estados e todos os nomes que a ação já teve.
+>
+> **FICOU PARA UMA PRÓXIMA ONDA** (declarado como fora de escopo): cartão-resumo do agente ao lado
+> da assinatura e a regra opcional da 0038 surgindo no ato da criação. Fora por não serem moldura:
+> polaroides de livro-fonte (não vendemos pacotes de conteúdo), abas de pasta suspensa (o app já tem
+> `SlidingTabPill`) e pentagrama como formulário (o `AttrDiagram` já é o formulário, com `+`/`−` por
+> vértice — aqui já estávamos à frente da referência).
+>
+> **Arquivos:** `specs/0039-dossie-de-admissao/{spec,tasks}.md`,
+> `features/ficha/DocPanel.jsx` (novo), `features/ficha/StepBar.jsx` (reescrito),
+> `features/ficha/__tests__/dossie-de-admissao.test.js` (novo, 21 testes),
+> `domain/character.js` (+`numeroDeDossie`), `features/ficha/CharacterCreator.jsx`.
+>
+> **PENDENTE DO ANDRE:** (1) validar no navegador — abrir "nova ficha", ler a página de admissão,
+> conferir que o número do dossiê só aparece quando o nome é digitado e que ele **não muda** ao
+> continuar digitando outras coisas, e criar um agente assinando; (2) **commitar**.
+
+> **2026-08-08 (2): SPEC 0038 — A FICHA QUE CABE NA MESA (Tier A do teardown da RPGpedia).**
+>
+> **A AUDITORIA MATOU DOIS DOS SEIS ITENS ANTES DE EU ESCREVER UMA LINHA — os dois já estavam
+> entregues e ninguém sabia:**
+> - **Limite de itens por categoria, carga, patente e prestígio** já existem em
+>   `Tabs/InventarioTab.jsx` (`limiteItens`, `patenteForPrestigio`, `cargaMaxima`, `cargaTeto`). Meu
+>   relato anterior de que "o inventário é um botão vazio" descrevia a **`FullSheet` legada**.
+> - **Carrossel mobile de três seções** já existe (`mobileSec` + `useSlidingPill`).
+>
+> **O CORTE QUE VALE MAIS QUE O CÓDIGO: três das quatro regras opcionais NÃO entraram.**
+> `regrasOpcionais` tinha **zero ocorrências no projeto**, então tudo era do zero — e ao olhar o que
+> cada interruptor ligaria: **Contagem de Munição** não tem o que contar (`municao|ammo` = 0
+> ocorrências em `rules.js` e na ficha; a própria RPGpedia ainda não entregou), e **NEX &
+> Experiência** e **Evolução por Patente** trocam o motor de progressão inteiro (spec 0033) — cada
+> uma é uma spec. Entregar quatro chaves das quais três não fazem nada é exatamente o defeito que a
+> **spec 0036** foi escrita para matar. Entrou **uma que funciona**. O AC-7 tem teste que **reprova
+> se alguém adicionar as outras três**, e o motivo está escrito no código.
+>
+> - **Jogando sem Sanidade desarma na RAIZ.** `breach` passou a nascer `!semSanidade && sanPct < 0.3`.
+>   Os cinco efeitos que ele governa (classe `op-breach`, camada `op-outrolado`, glifos, selo SURTO,
+>   botão de sussurro) já dependiam dele, então **nenhum ponto de uso precisou saber da regra** —
+>   cinco `&&` espalhados é como se esquece o sexto. O valor de `san` não é zerado nem recalculado:
+>   desligar a regra devolve o sinal vital com o mesmo número.
+> - **Ocultar perícia guarda o `base`, nunca o índice** — a ordem de `PERICIAS` pode mudar e um
+>   índice passaria a esconder a perícia errada.
+> - **A assimetria é deliberada e está escrita:** ocultar exige Modo de Edição; **descobrir o que
+>   está oculto não exige nada**. Quem abre a ficha de outra pessoa precisa ver que a lista está
+>   incompleta sem permissão de editar. A faixa "N perícias ocultas · mostrar" aparece nos dois
+>   modos, e o filtro de texto **fura** o oculto (procurar pelo nome acha, marcado) — senão a
+>   perícia pareceria apagada, e ela não está.
+> - **O teste que protege o número de combate:** Reflexos alimenta a Esquiva (10 + AGI + Reflexos).
+>   Ocultar Reflexos não pode mexer nela — seria o defeito mais caro que esta feature poderia
+>   introduzir, e tem teste travando.
+> - **A 8ª coluna do grid só existe em Modo de Edição** (`.op-col-panel[data-edit="true"]`, três
+>   faixas). Reservá-la sempre faria a tabela mudar de largura ao destravar.
+> - **A criação terminou de virar documento:** o botão "Finalizar Ficha" foi **removido** e o fecho é
+>   uma linha de assinatura em cursiva, derivada do nome (`assinaturaDe` em `domain/character.js` —
+>   "Kael de Souza Nightingale" → "Kael S. N."; partícula de ligação não vira inicial). Sem nome não
+>   há assinatura para acionar. Dois caminhos para a mesma ação é convite a manter só o feio.
+>
+> **FORA DE ESCOPO, declarado:** **criação de agente como dossiê** (papel amassado, datilografia,
+> polaroids, abas de pasta suspensa, pentagrama como formulário) — é redesign de direção de arte com
+> assets e fontes novas, **spec própria, e precisa do Andre decidir a direção**. Segue fora também o
+> texto de regra por perícia (herdado da 0037).
+>
+> **Arquivos:** `specs/0038-a-ficha-que-cabe-na-mesa/{spec,tasks}.md`,
+> `__tests__/cabe-na-mesa.test.js` (novo, 25 testes), `domain/character.js` (+`assinaturaDe`),
+> `OrdemParanormalSheet.jsx`, `ordemStyles.jsx`, `features/ficha/CharacterCreator.jsx`.
+>
+> **PENDENTE DO ANDRE:** (1) validar no navegador — ocultar duas perícias, recarregar, procurar uma
+> delas no filtro, ligar "Jogando sem Sanidade" com a SAN baixa e conferir que o surto morre, e criar
+> um agente assinando; (2) decidir a direção de arte do dossiê (spec 0039); (3) **commitar**.
+
+> **2026-08-08: SPEC 0037 — MOSTRAR A CONTA.** Andre assinou a **RPGpedia** e pediu para explorar
+> a ficha de Ordem Paranormal dela por completo e trazer o que fosse bom. Explorei o fluxo inteiro
+> (criação em 5 passos + ficha) logado na conta dele; o teardown virou
+> `memory/rpgpedia-ficha-op-referencia.md` e 20 prints em `Desktop/Nexus RPG/op-ficha-*.png`.
+> Ele escolheu começar pelo **Tier S**.
+>
+> **DOIS DOS SEIS ITENS DO TIER S JÁ EXISTIAM, e o alvo era o arquivo errado.** O plano inicial
+> mirava a `FullSheet.jsx` — que este STATE já registrava como **inalcançável em produção**. A
+> ficha real é `systems/OrdemParanormal/OrdemParanormalSheet.jsx`, e nela o **Modo de Edição**
+> (`editMode`) e a **fórmula da Defesa exposta** já estavam prontos. Sobraram quatro itens reais.
+>
+> - **O PROBLEMA CENTRAL NÃO ERA DE CSS: a ficha jogava a conta fora.** `rollSkill` fazia
+>   `result: base.result + tBonus + other`, sobrescrevendo `base.result` — **o d20 que venceu era
+>   descartado do estado**. Não havia como a tela mostrar qual dado sobreviveu porque o dado não
+>   era guardado. `fireRoll` passou a carregar `kept`, `bonus` e `conta`, com a invariante
+>   `kept + bonus === result`.
+> - **⚠ A ARMADILHA QUE JUSTIFICA `attrEfetivo` EXISTIR.** `rollOP` decide o "fica com o pior" a
+>   partir do NÚMERO que recebe (`attrVal === 0`), não de uma flag. Com dado de bônus, a tentação é
+>   mandar a contagem do bolo — e `rollOP(2)` lança 2 dados e fica com o **melhor**, o oposto da
+>   regra de atributo 0, **sem erro nenhum na tela**. `boloDeDados` devolve `n` (para exibir) e
+>   `attrEfetivo` (para rolar), separados, com o teste que prova a inversão.
+> - **DECISÃO DE REGRA QUE NÃO INVENTEI — PRECISA DO ANDRE SE DISCORDAR.** Dado de bônus sobre
+>   atributo 0: o livro que temos **não resolve o caso**. Escolhi não aplicar (a regra do
+>   pior-de-dois fica intacta) e a interface **diz em voz alta** que o bônus não entrou. A outra
+>   leitura (bônus cancela a penalidade) é decisão de produto, não efeito colateral de código.
+> - **A coluna "Dados" mostrava o atributo.** O cabeçalho dizia `Dados` (`i18n/pt.js:114`) e a
+>   célula entregava `AGI`. Agora mostra `3d20` (`2d20↓` no atributo 0); a sigla migrou para a
+>   segunda linha do nome (`.op-skill-sub`), que some no celular para não dobrar a altura da linha.
+> - **O grau de treino dependia de cor sozinha.** `treinoColor` separava Destreinado/Treinado/
+>   Veterano/Expert só por matiz. Virou 0–3 marcas + o grau no `aria-label`. Ganho de
+>   acessibilidade que veio de graça no mesmo lugar.
+> - **A trava de edição vazava.** Os dois campos numéricos e o hexágono da linha de perícia
+>   aceitavam alteração com a ficha em Modo de Jogo. Fechados. **A banca de modificadores NÃO ficou
+>   atrás da trava, de propósito** — ligar "estou em cobertura" é jogar, não montar personagem, e o
+>   motivo está escrito no código para ninguém "consertar" isso de volta.
+> - **`RollCard.jsx` novo**, consumido pelo corner card (com verso que abre a conta termo a termo) e
+>   pelo modal de crítico (que mostra a conta **aberta** — um flip lá brigaria com a animação). Dado
+>   mantido com moldura, descartados apagados **e riscados**: redundância além do matiz. Empate
+>   (`[13,13,9]`) é indistinguível por construção — o primeiro leva, e o teste trava isso.
+> - **AC-10 travado por teste:** `rollPayload` não ganhou campo. `kept`/`bonus` não atravessam para
+>   o Firestore; o contrato do feed de rolagens é o mesmo.
+>
+> **⚠ CAÍ NA ARMADILHA DAS CRASES DE NOVO** (a 4ª vez neste projeto): pus uma crase em volta de
+> `aria-label` num comentário dentro do `ordemStyles.jsx`, cujo CSS mora em **template literal** —
+> a crase fechou a string e o build quebrou. O comentário agora avisa, no próprio arquivo, para não
+> usar crase ali.
+>
+> **DOIS ACHADOS DE TESTE que valem mais que os testes:**
+> (a) **Sem provider de i18n, `t("op.pericias.Acrobacia")` devolve a própria chave.** As outras
+> suítes de OP montam a ficha assim, então é convenção do repo — mas asserção com string exata
+> passaria a reprovar por tradução quando o provider entrar. Os matchers ancoram no que não
+> depende de i18n, com o motivo escrito.
+> (b) **Um teste meu era instável e eu peguei antes do gate:** 3d20 tira 20 em ~14% das rolagens, e
+> um 20 manda a ficha para o modal de crítico, que não desenha "resultado". Fixei o dado com spy —
+> `rollOP` resolve `Math.random` a cada chamada exatamente para isso.
+>
+> **FORA DE ESCOPO, declarado na spec:** **texto de regra por perícia** ("regras na ponta do dedo"
+> da referência) — `regras-oficiais.json` tem 33 regras gerais e **zero descrição por perícia**; as
+> ~20 perícias com seus usos são conteúdo a parafrasear do livro, e conteúdo é spec própria. Também
+> fora: criação como dossiê, assinatura para finalizar, matriz de limite de itens, carrossel mobile
+> e selos de paywall (Tier A e B do teardown).
+>
+> **Arquivos:** `specs/0037-mostrar-a-conta/{spec,tasks}.md`, `RollCard.jsx` (novo),
+> `__tests__/mostrar-a-conta.test.js` (novo, 49 testes), `rules.js` (+5 exports puros),
+> `OrdemParanormalSheet.jsx`, `ordemStyles.jsx`.
+>
+> **PENDENTE DO ANDRE:** (1) validar no navegador — rolar uma perícia e virar o card, conferir a
+> coluna `3d20`, ligar um modificador com dado de bônus e checar o bolo, e testar uma perícia com
+> atributo 0; (2) decidir a leitura do dado de bônus sobre atributo 0; (3) **commitar**.
+
+> **2026-08-07 (3): a varredura dos arquivos que faltavam achou o defeito mais grave da revisão.**
+>
+> - **⚠ XSS ARMAZENADO — o texto rico voltava à tela sem sanitização.** Oito lugares usam
+>   `dangerouslySetInnerHTML` com HTML gravado pelo editor da ficha. Enquanto quem escreve é o
+>   dono, é confiança em si mesmo — mas o texto **não vem só do dono**: o link de editor da ficha
+>   pública (`/p/:id?editor=…`) deixa um convidado montar a ficha inteira e mandá-la como
+>   sugestão; na mesa, "permitir que qualquer pessoa edite" abre para qualquer membro; e a ficha
+>   pública é lida por **visitante sem login**. Um `<img src=x onerror=…>` aprovado pelo dono
+>   viraria script no navegador de todo mundo. Novo `lib/sanitizarHtml.js` com allowlist de tags,
+>   **zero atributos** e parser do navegador (`DOMParser`, inerte) — nada de regex, que erra
+>   justamente nos casos malformados onde o ataque mora. Aplicado nos 8 pontos; sanitiza na
+>   **saída**, o que protege também o que já está gravado no Firestore. 14 testes.
+> - **O "← Voltar" da ficha pública em modo editor não fazia nada** — `onBack` ia `null` e a ficha
+>   desenha o botão sempre. Agora sai, confirmando antes (o editor perderia a sugestão não enviada).
+> - **Layout:** o seletor de elemento (NEX 50%) tinha `repeat(4, 1fr)` FIXO — quatro cartões de
+>   ~78px num celular de 360px, na tela que marca o momento mais importante do personagem. E o
+>   criador de personagem tinha `repeat(3,1fr)` para as classes. Ambos viraram `auto-fit`+`minmax`:
+>   desktop igual, celular quebra em duas colunas.
+> - **O gate parou de piscar.** Duas suítes reprovaram de forma intermitente em rodadas diferentes
+>   (`WorldMap/f7-tempo-real`, `MasterSuite/forja-render`) e passavam 3/3 isoladas: o timeout de
+>   `findBy*` é 1000ms e a suíte inteira leva ~160s sob carga. Novo `src/setupTests.js` sobe
+>   `asyncUtilTimeout` para 4s (e o `jest.setTimeout` junto, senão o erro vira "Exceeded timeout"
+>   em vez de dizer QUAL elemento faltou). Gate reprovando por relógio ensina o time a reexecutar
+>   até passar — que é como uma regressão de verdade passa batida.
+>
+> **ACHADO NOVO, PARA O ANDRE DECIDIR (não mexi):** com **D&D e Tormenta em `available: false`**
+> (`features/sistemas/systems.jsx`), só Ordem Paranormal é selecionável — então a **`FullSheet`
+> legada (~1.500 linhas) ficou inalcançável na prática**, e junto dela a metade OP do
+> `opConstants.js`, que tem uma **segunda régua de trilhas divergente da `rules.js`** (combatente:
+> atirador/chefe/guerreiro lá, aniquilador/comandante/guerreiro/op_especiais/tropa_choque cá).
+> Duas fontes de verdade para a mesma regra é dívida esperando para morder — mas apagar 1.500
+> linhas é decisão de produto, não de revisão.
+>
+> **Ainda NÃO revisados linha a linha** (passaram por lint, testes e varredura dirigida por padrões
+> de defeito, sem achados): `TokenBuilder.jsx` (445), `SheetList.jsx` (232), `modalStyles.js` (144),
+> `ElementoSymbol.jsx` (101).
+
+> **2026-08-07 (2): os 5 achados que a primeira rodada deixou em aberto.**
+>
+> - **1 · A mesa passou a abrir a ficha do sistema certo.** `SharedSheetsPanel` montava a
+>   `FullSheet` legada para TODA ficha compartilhada — um agente de Ordem Paranormal aparecia
+>   para a campanha sem elemento de afinidade, sem aba de progressão e sem arsenal v2, enquanto a
+>   visão pública já roteava certo. O roteamento virou `fichaDoSistema()` em `lib/lazySystemSheets`
+>   (junto dos `lazy()`, que é quem já sabia de sistema), com `null` para "sem ficha própria" —
+>   a mesa é quem decide cair na FullSheet. **Os três ajustes de privacidade** (`isPrivate`,
+>   `allowMasterEdit`, `allowAnyEdit`) **moravam DENTRO da ficha legada**: se a troca fosse só
+>   trocar o componente, o dono perderia o único lugar do app onde mexe neles. Viraram a
+>   `BarraPrivacidade`, no topo do visualizador, visível só para o dono. O visualizador também
+>   passou a ler a versão VIVA do documento (`sharedSheets.find(...)`), senão o ajuste só
+>   apareceria ao fechar e reabrir.
+> - **2 · "Notas do Mestre" foi APAGADA, não ligada — e a regra do Firestore é o motivo.**
+>   `campaigns/{id}/sharedSheets/{id}` tem `allow read: if isMember(campaignId)`: **todo jogador da
+>   campanha lê o documento inteiro pelo SDK**. Ligar a seção (ela dependia de `viewerIsMaster`,
+>   prop que nada no código jamais produziu) seria gravar nota de mestre exatamente onde o rótulo
+>   "visível apenas ao Mestre" promete que ela não está. Fazer de verdade exige documento separado
+>   (`campaigns/{id}/gmNotes/{charId}`) com regra de leitura restrita — decisão de fronteira, ADR
+>   antes do código, como o mapa-múndi fez no ADR-0012. O motivo está escrito no topo do
+>   `DescricaoTab.jsx`, para ninguém "consertar" isso de volta sem ler.
+> - **3 · `AttrPentagon.jsx` apagado** (151 linhas, zero importadores). O
+>   `docs/architecture/assessment.md` foi atualizado.
+> - **4 · O teto de itens homebrew passou a ser cobrado.** O inventário exibia "x/50" e nunca
+>   barrava nada — a aba de Rituais já desligava o botão no limite. Agora os botões "Novo:"
+>   desligam com o motivo no `title` e o contador fica vermelho. Item da biblioteca oficial não
+>   conta para o teto.
+> - **5 · Zero avisos de lint no projeto.** `App.jsx` (8 variáveis mortas + 5 listas de dependência
+>   documentadas), `DungeonsAndDragonsSheet.jsx`, `WorldMap/Editor/CamadaDeNevoa.jsx` e
+>   `WorldMap/model/viagem.js`. No D&D o achado era real: os cantos do cartão de rolagem eram dois
+>   `map` aninhados sobre arrays de strings que ninguém lia — oito delas com `${GOLD}` **literal**
+>   dentro de aspas comuns, que nunca interpolaram nada. Mesma renderização, quatro posições ditas
+>   uma vez.
+>
+> **Testes:** `__tests__/achados-pendentes.test.js` (+9). ⚠ `f7-tempo-real.test.js` falhou UMA vez
+> numa rodada e passou isolado e em todas as seguintes — é sensível a tempo, não regressão.
+>
+> **PRÓXIMO PASSO — PENDENTE DO ANDRE:** validar no navegador (principalmente a ficha de OP aberta
+> pela mesa, que é o caminho novo) e **commitar**.
+
+> **2026-08-07: revisão total da parte de Ordem Paranormal (a pedido do Andre).**
+> Varredura de `systems/OrdemParanormal/` (ficha, regras, motor de progressão, 5 abas, arsenal),
+> `features/ficha/` e `features/campanha/`. Sete defeitos **reproduzíveis** corrigidos; cada um
+> tem um teste que falha na versão anterior (`__tests__/ficha-correcoes.test.js`, +1 suíte,
+> +9 testes; mais 6 casos de `attackSkillBonus` em `arsenal.test.js`).
+>
+> - **O ataque valia menos que a perícia, com os dois números na mesma tela.** `rollAttack`
+>   somava só `skillTreino[pericia]` e ignorava `skillOutros` — o mesmo bônus que o teste de
+>   perícia da coluna do meio soma desde sempre (e que `WorldMap/model/esquiva.js` documenta como
+>   a fórmula do sistema). Virou `attackSkillBonus()` em `rules.js`, função pura e testada.
+> - **Esquiva bônus era gravado, revisado e ignorado.** O campo aparece no painel de revisões
+>   (`buildDiff` → "Esquiva bônus"), era persistido e **não entrava na conta exibida**. O revisor
+>   aprovava um número que a ficha nunca mostrava. Agora soma e aparece na fórmula.
+> - **O ajuste "Geração de Arte com IA" não ajustava nada.** O texto promete "habilita o botão
+>   'Gerar com IA' no upload de retrato"; o botão aparecia sempre. O `CharacterCreator` já fazia
+>   certo (`aiArtEnabled`) — a ficha passou a fazer igual.
+> - **Item homebrew recém-criado sumia de "Meus Itens".** `novoItem` empurrava para a lista um
+>   objeto com `is_homebrew` e mandava para o modal uma cópia SEM a marca; como `saveItem`
+>   substitui a entrada inteira, o primeiro "Salvar" apagava a marca.
+> - **Ritual da biblioteca perdia o id oficial.** `addRitual` trocava `"amaldicoar_arma_conhecimento"`
+>   por `Date.now()+Math.random()` — e é por esse id que `progressao/motor.js` sabe o que o agente
+>   já conhece. Resultado: o motor reoferecia o ritual como pendência e ele entrava duas vezes.
+>   Agora o id do livro é preservado, ritual conhecido não entra de novo e o "+" vira "✓ já está
+>   na ficha" em vez de um botão que não faz nada.
+> - **Agente recém-criado nascia INCONSCIENTE no painel.** O criador grava só atributos, origem,
+>   classe e NEX; o `DossierCard` lia `pvMax ?? 1` e `pv ?? 0` → "PV 0/1, INCONSCIENTE" logo
+>   depois de criar o personagem. Passou a cair em `lib/nexStats` (o mesmo cálculo do card de
+>   ficha compartilhada) quando o documento ainda não tem vitais.
+> - **Com 0 PV o traçado continuava batendo.** `vitalState(pct, dead)` recebia `false` cravado
+>   nos dois sinais vitais; só o PE fazia certo. Agora 0 PV dá linha reta e o selo **MORRENDO**
+>   (nome da condição no livro, `regras-oficiais.json` › `pv-morrendo`).
+> - **Layout:** as media queries de `.op-dial` (76px em ≤768, 66px em ≤480) eram **letra morta** —
+>   o tamanho ia inline no elemento e estilo inline vence `@media`. Os dials ficavam do mesmo
+>   tamanho no desktop e no celular. O tamanho passou para o JS (`AttrConstellation` +
+>   `useIsMobile`), e o comentário do CSS de ≤480px, que dizia esconder a coluna "outros" quando
+>   esconde a de "treino", foi corrigido para descrever o que o seletor faz.
+>
+> **ACHADOS NÃO CORRIGIDOS — decisão do Andre, não defeito óbvio:**
+> - **A ficha compartilhada na mesa abre a `FullSheet` LEGADA** (`SharedSheetsPanel.jsx:193`),
+>   não a ficha-dossiê. O `PublicSheetView` já usa a nova. Trocar não é mecânico: a legada é que
+>   tem os controles de privacidade (`isPrivate`, `allowMasterEdit`, `allowAnyEdit`) que a mesa lê.
+> - **"Notas do Mestre" (aba Descrição) nunca renderiza:** depende de `character.viewerIsMaster`,
+>   que **nenhum lugar do código produz**. Ou liga-se o caminho (mestre vendo ficha de jogador) ou
+>   apaga-se a seção.
+> - **`AttrPentagon.jsx` (151 linhas) é código morto** — ninguém importa.
+> - **`HOMEBREW_LIMIT` do inventário é exibido (`x/50`) e nunca aplicado** (nos rituais é).
+> - **Avisos de lint FORA do escopo OP** (o `CI=true npm run build` segue reprovando por eles):
+>   `App.jsx` (13), `DungeonsAndDragonsSheet.jsx` (11 — incluindo 8 `${...}` dentro de string
+>   comum, que provavelmente é bug de verdade), `WorldMap/Editor/CamadaDeNevoa.jsx` (2),
+>   `WorldMap/model/viagem.js` (1).
+>
+> **PRÓXIMO PASSO — PENDENTE DO ANDRE:** validar no navegador e **commitar**.
+
+> **2026-08-05 (3): SPEC 0035 — M8 (fecha a F2) + F3 INTEIRA (M5 e M6).**
+> Partida em 100 suítes / 2.399 testes; chegada em **103 / 2.460** (+3 suítes, +61 testes).
+> **Nenhuma suíte legada foi editada** — o AC-9 chama isso de regressão, não de progresso.
+>
+> - **M8 · A carta ganhou mão.** `model/CartografiaPadrao.jsx` foi de 23,7 KB para **39,8 KB**
+>   (teto do AC-11: 60 KB, medido por `fs.statSync` no gate). Três hachuras com **gramáticas
+>   diferentes de propósito** — relevo perpendicular à crista e caindo pelo lado que desce, mata em
+>   pares inclinados sob as copas, água em fiadas horizontais interrompidas. Iguais, o olho leria
+>   "textura de preenchimento"; diferentes, ele lê "relevo, mata, água". A rosa dos ventos chapada
+>   virou pipas partidas ao meio (um lado em tinta cheia, o outro num `<pattern>` de trama), com 32
+>   rumos e **N/L/S/O** — Leste com E seria anglicismo dentro de um objeto de ficção em português.
+>   E cinco anotações em cursiva nas margens, na mão de quem USOU a carta, nunca sobre o miolo onde
+>   os doze nós moram (x 300–2130, y 200–1330) — ali brigariam com os rótulos dos lugares.
+> - **M5 · O cartão de pergaminho.** Casca única (`Mesa/CartaoDePergaminho.jsx`) com portal,
+>   armadilha de foco, Esc, título em versalete, filete duplo e UM botão. Dois consumidores: o
+>   cartão de descoberta e o `PainelDeEncontro`, cujo **comportamento não mudou uma vírgula** (os
+>   `data-testid` legados e a regra "Esc adia, nunca decide" seguem intactos; as quatro suítes que o
+>   exercitam passaram sem edição).
+> - **⚠ O CARTÃO PROJETA MESMO RECEBENDO PROJEÇÃO.** No cliente do jogador `grafoVisivel` já é a
+>   projeção; no do MESTRE ele pode carregar o nó do MOLDE, com `gmNotes`. Passar por `projecaoDoNo`
+>   é o que garante que nenhum campo de mestre chegue ao DOM — e o gate entrega um nó com todos os
+>   `CAMPOS_VENENOSOS` preenchidos com valores procuráveis e varre o DOM serializado **incluindo
+>   `document.body`**, senão o portal escaparia da varredura e o verde seria falso.
+> - **⚠ O TESTE DE CONTRASTE PEGOU UM DEFEITO MEU, E DEPOIS UMA PREMISSA MINHA.** Primeiro: o título
+>   estava mais CLARO que o corpo e caía a 4,42:1 — além de reprovar no piso, estava errado de
+>   desenho, porque num impresso o cabeçalho é onde a pena carrega mais. Depois: exigir 4,5:1 com as
+>   quatro tintas do dia compostas sobre o papel é **impossível por construção** (a tinta da
+>   madrugada é escura, e escurecer o fundo o aproxima do texto — nenhum ajuste de cor resolve). A
+>   premissa é que estava errada: o cartão é portal em `document.body`, `position:fixed`, z-index
+>   430 — acima da vinheta (6) e da barra do cartógrafo (7), **fora do palco** onde `.wmm-tinta`
+>   vive. O teste passou a travar a PREMISSA em vez de medir uma composição que não acontece.
+> - **M6 · A esquiva.** `model/esquiva.js` é clone estrutural de `descoberta.js`: **não rola dado**
+>   (o motor é `src/domain/dice.js`, AC-9 literal) e a saída do fracasso é idêntica caractere a
+>   caractere à de uma rolagem que não veio. `DT_POR_PERIGO` é tabela explícita (12/15/19/22/25),
+>   não fórmula: entre perigo 2 e 3 está a fronteira "estrada ruim → lugar errado", e uma fórmula
+>   esconderia essa intenção atrás de dois números. **O sucesso sai por `return`**, exatamente como
+>   "não houve sorteio" — sem pendência, sem pausa, sem documento. Marca de encontro que não
+>   aconteceu é oráculo.
+> - **⚠ ISTO EXIGIU UM ADR, E O BRIEFING MANDAVA PARAR ANTES DE CODAR.** O mapa-múndi só tocava
+>   `fogRepo`, `mesaRepo` e `worldMapsRepo`; ler Furtividade é **acoplamento novo entre agregados**.
+>   Virou o **[ADR-0012](architecture/adr/0012-mapa-mundi-le-fichas-compartilhadas.md)**: a leitura
+>   continua no repositório (`sharedSheetsRepo`), o mapa **não** abre listener de ficha (elas entram
+>   por prop), e a conta mora numa porta pura — `melhorFurtividade(fichas) → number|null`.
+> - **A fórmula da perícia foi LIDA, não inventada:** `skillTreino[p] + skillOutros[p]`
+>   (`OrdemParanormalSheet.jsx:429-435`). O atributo **não** entra — em OP ele decide quantos d20 o
+>   `rollOP` lança, não um modificador plano; somá-lo contaria o atributo duas vezes.
+> - **Sem ficha compartilhada, nada mudou** (AC-13): `melhorFurtividade` devolve `null`, e `null` é
+>   a instrução para o campo manual continuar na tela. Não é modo degradado — é o mesmo caminho de
+>   antes. E zero **não** é ausência: destreinado é um bônus legítimo, e confundir os dois faria uma
+>   campanha sem ficha parecer uma campanha com um personagem péssimo.
+> - **⚠ `CI=true npm run build` REPROVA, e não é por causa desta spec.** Com `CI=true` os avisos
+>   viram erro, e há avisos **pré-existentes** em `App.jsx`, `DungeonsAndDragonsSheet.jsx`,
+>   `OrdemParanormalSheet.jsx`, `Editor/CamadaDeNevoa.jsx` e `model/viagem.js`. `npm run build` sai
+>   0, e **nenhum arquivo tocado aqui produz aviso**. Limpar os outros é escopo de outra spec.
+> - **A casca do app ficou ligada, com UMA assinatura.** O `CampaignDetail` já observava
+>   `sharedSheetsRepo.watchByCampaign` para o live-sync, mas guardava o resultado num ref **filtrado
+>   pelo dono** — e a esquiva é do GRUPO. A lista inteira passou a cair também num `useState`, que
+>   desce por `CampaignMapTab` até a mesa. Abrir uma segunda assinatura seria pagar duas vezes pelo
+>   mesmo snapshot; o caminho do live-sync ficou intocado.
+> - **PRÓXIMO PASSO — PENDENTE DO ANDRE:** validar no navegador e **commitar**. Nada foi commitado
+>   em nenhuma das três sessões desta spec — são ~10 arquivos novos e ~10 tocados.
+
+> **2026-08-05 (2): SPEC 0035 — F2 (runas autorais + barra do cartógrafo).**
+> - **M3 · As runas.** `model/marcadores.jsx` novo: seis runas SVG (vila, masmorra, marco,
+>   acampamento, missão, segredo) em traço, no dialeto do `RuneIco` — **sem importar o `RuneIco`**,
+>   que mora na casca do app (`src/ui/`) e está fora da fronteira do mapa-múndi. Emoji saiu do
+>   padrão dos dois palcos (ateliê e mesa).
+>   **`ICONES_POR_TIPO` e `iconeDoNo` ficaram INTOCADOS de propósito:** `editor-modelo.test.js:337-340`
+>   trava `iconeDoNo({type:"town"})` com `.toBe("🏘️")`, e o AC-9 proíbe editar suíte legada. A runa
+>   entrou como camada nova por cima — o ícone que o MESTRE escolhe continua mandando, e o nó
+>   `rumored` continua mostrando só "?" (se ganhasse runa, o desenho entregaria o tipo do lugar que
+>   o jogador não pode conhecer).
+> - **M4 · Barra do cartógrafo.** `Mesa/BarraDoCartografo.jsx` novo: lugar à esquerda, mostrador de
+>   dia/noite girando pela hora ao centro, relógio à direita. Fica FORA da camada da câmera (não
+>   encolhe com o zoom) e ACIMA da vinheta (informação, não cenário).
+> - **⚠ O PLANO DIZIA "DATA GREGORIANA EM PT-BR". O DADO DESMENTIU O PLANO, E O DADO GANHOU.**
+>   `party.inGameDatetime` é `{dia,hora,minuto}` ou número de horas corridas — **contador de dias de
+>   campanha, não data de calendário**. Formatar como "05/08/2026" seria inventar ficção que o Nexus
+>   não tem. Reusei `formatarRelogio` ("Dia 3 · 14:05") e `periodoDoDia`, que já existiam — uma fonte
+>   só, sem tabela paralela de limites de hora. Sem relógio (`null`), a barra esconde mostrador e
+>   hora em vez de inventar data (ADR-0011).
+> - **ARMADILHA:** não existe `src/setupTests.js` neste projeto — **cada suíte de render importa
+>   `@testing-library/jest-dom` por conta própria**. Sem isso, `toHaveTextContent` e
+>   `toHaveAttribute` falham com "is not a function", que foi como 8 testes meus caíram.
+> - **M8 NÃO FOI FEITO** — a `CartografiaPadrao.jsx` (hachura de terreno, rosa dos ventos em tinta,
+>   anotações manuscritas) segue como escopo aberto da F2, junto da F3 inteira (cartão de
+>   pergaminho e esquiva do encontro por teste de Furtividade).
+> - **PENDENTE DO ANDRE:** validar no navegador e commitar. **NADA foi commitado** nas duas fases.
+
+> **2026-08-05: SPEC 0035 — CARTOGRAFIA VIVA, F1 (rota bicolor + franja de tinta + moldura).**
+> Andre gravou 48 s de *Pathfinder: WotR* e pediu o mapa-múndi "nesse nível". Achado que definiu o
+> escopo: **a spec 0028 JÁ declarava o WotR como referência** (`0028/spec.md:11`) e a mecânica toda
+> está entregue — viagem em velocidade constante na curva, relógio que avança, encontro por
+> `dangerLevel` com peso por período, névoa em cápsula, acampamento. **A distância era quase toda de
+> direção de arte.** Das 11 diferenças levantadas frame a frame, 9 são arte e 2 são mecânica.
+> - **M1 · Rota bicolor.** `partirNoProgresso(pontos, t)` novo em `model/curves.js` (corte por
+>   comprimento de arco, ponto **interpolado** dentro do segmento) e `trechoRestante` em
+>   `model/viagem.js`, irmão de `trechoPercorrido`. **As duas metades compartilham o ponto de corte**
+>   — é o que evita vão de meio pixel bem embaixo do marcador, que é onde o olho está.
+>   `pintarRotaBicolor` em `Mesa/animacaoUi.js` pinta o restante em dourado e **delega o percorrido
+>   ao `pintarRastro`**, só trocando a tinta pelo acento (parâmetro `rgb` novo, opcional) — sem
+>   reimplementar as faixas de desvanecimento e sem deixar código morto.
+> - **M2 · Franja de tinta.** `model/franja.js` novo: `contornoDaMascara` devolve só a casca
+>   (4-vizinhança; **o lado de fora da grade conta como coberto**, senão a névoa na margem terminaria
+>   sem contorno) e `tracosDaFranja` gera os riscos de pena. **A semente sai da POSIÇÃO da célula, não
+>   do índice na lista** — sem isso a franja inteira se redesenharia a cada revelação e a borda antiga
+>   piscaria. Cache por `mascara.revisao` no `CamadaDeNevoa`: varrer 240 000 células por quadro
+>   derrubaria a mesa. `celulaAcesa` foi promovida a export do `fogMask` para o layout do bit
+>   (`cy*colunas+cx`) continuar morando num lugar só.
+> - **M7 · Moldura.** Vinheta + filete dourado em `.wmm-palco::after`. Só escurece, nunca clareia —
+>   por isso não mexe nas medições de contraste do `f7-anim-tinta`.
+> - **UM TESTE MEU PEGOU UMA IMPRECISÃO MINHA:** a asserção do desvio lateral media a distância crua
+>   do meio do traço ao centro da célula, misturando o desvio lateral com a assimetria deliberada do
+>   traço (0,35 para dentro, 0,65 para fora — pena que marca fronteira morde para fora). Corrigida
+>   para projetar na perpendicular, e ganhou uma irmã que trava a assimetria.
+> - **ARMADILHA CONFIRMADA:** o canvas 2D não resolve `var(--…)`. O acento chega resolvido por
+>   `getComputedStyle`, mas resolvido pode ser `#c9a84c` **ou** `rgb(201, 168, 76)` conforme o
+>   navegador — daí `rgbDeCor` aceitar os dois e cair numa reserva em vez de devolver cor inválida.
+> - **PENDENTE DO ANDRE:** validar no navegador (viajar por uma trilha longa e conferir a rota
+>   bicolor e a franja acompanhando a névoa) e commitar. **NADA foi commitado.**
+> - **F2 e F3 NÃO foram iniciadas** — placas de local, runas autorais, barra do cartógrafo,
+>   cartão de pergaminho e esquiva do encontro por Furtividade seguem como escopo aberto na
+>   `specs/0035-cartografia-viva/tasks.md`.
+
+> **2026-08-02: AS TRÊS ONDAS DE ARQUITETURA ESTÃO FECHADAS.** Ponto de partida: `App.jsx` com
+> 11.454 linhas, 63 chamadas diretas ao Firestore e o SDK importado em 17 arquivos.
+>
+> | | Antes | Depois |
+> |---|---|---|
+> | `src/App.jsx` | 11.454 linhas | **439** |
+> | Arquivos com `firebase/firestore` fora da infraestrutura | 17 | **0** |
+> | Suítes / testes | 71 / 1.694 | **89 / 2.196** |
+>
+> - **Onda 1 (spec 0029)** — 7 repositórios por agregado, `paths.js` como única fonte de caminho,
+>   política de erro `strict`/`silent` declarada em JSDoc. Fechou o vazamento de
+>   `DocumentReference` guardado em `useRef`.
+> - **Onda 1.5 (spec 0030)** — os 7 stores de feature (264 chamadas ao SDK) atrás da fronteira.
+>   Exceção do ESLint de 7 arquivos a **zero**.
+> - **Onda 2 (spec 0031)** — `App.jsx` virou orquestrador. `src/features/` com 9 contextos,
+>   `src/ui/` com a casca, `src/lib/` com o compartilhado. **AC-1 atingido com folga (439 < 800).**
+> - **Onda 3 (spec 0032)** — os 4 quirks corrigidos, `Timestamp` fora da fronteira, validação de
+>   schema. Ver **ADR-0011**, que registra as dívidas do ADR-0010 como quitadas.
+>
+> **REGRA QUE VALE MAIS QUE O RESTO (ADR-0011):** a fronteira garante **TIPO**, nunca inventa
+> **PRESENÇA**. Campo com tipo errado é coagido; campo ausente continua ausente. Preencher
+> `system: "Genérico"` faria o `CampaignCard` (que renderiza com `{campaign.system && …}`) mostrar
+> um selo em campanha que nunca escolheu sistema. Dado inventado é indistinguível do real.
+>
+> **⚠ ORDEM DE DEPLOY OBRIGATÓRIA:** `watchRolls` agora exige índice composto
+> (`messages`: `type` ASC + `timestamp` DESC), declarado em `firestore.indexes.json`.
+> **`firebase deploy --only firestore:indexes` PRIMEIRO, o build depois** — senão o feed de
+> rolagens fica vazio.
+>
+> **BUG CRÍTICO DE 2026-07-25 FECHADO (Q4):** o autosave do mapa avançava a baseline ANTES de
+> publicar e engolia o erro do commit — alteração que falhava nunca mais entrava num diff e o
+> mestre perdia trabalho sem aviso. Agora a baseline só avança quando a escrita confirma, com
+> backoff reusando o próprio ciclo do autosave, e aviso visível após 3 falhas seguidas.
+> Cada conserto foi **provado por teste de mutação** (desfazer o conserto derruba o teste novo).
+>
+> **DÍVIDAS NOVAS, pequenas e datadas:** (a) `worldMapsRepo.observarPerfil` e
+> `mapSyncRepo.getCampaignDoc` leem agregados alheios e ainda passam data crua (sem consumidor
+> hoje); (b) `NavIco` (`src/ui/`) é **código morto** — nenhum chamador o monta, o menu usa
+> `RuneIco`; (c) a validação cobre 5 dos 13 agregados, por decisão registrada no ADR-0011.
+>
+> **PENDENTE DO ANDRE:** validar no navegador e commitar. **NADA foi commitado.**
 
 > **⚠ 2026-08-02: DUAS SESSÕES SIMULTÂNEAS NO MESMO WORKING TREE — leia isto antes de confiar
 > no histórico abaixo.** Uma sessão fazia a spec 0033 (ficha de OP) e outra as specs 0029/0030/
@@ -70,6 +666,55 @@ alwaysApply: true
 > (as 3 telas + `audioDb`, `musicaApi`, `musicaUtils`). Faltam ~63 componentes de topo; o alvo
 > do AC-1 é **< 800 linhas**. Specs 0031 e 0032 escritas e prontas para execução.
 
+> **2026-08-03 (2): SPEC 0034 — MESA DE EFEITOS + PACOTE DE VOZES.** Andre pediu efeitos sonoros
+> "lá dentro" (mulher gritando, criança chorando, criança falando oi, sons de terror).
+> - **A mesa é mecanismo DIFERENTE da trilha, e isso define o módulo:** trilha substitui o que
+>   toca; efeito dispara POR CIMA. Por isso `MesaDeEfeitos.jsx` não passa pelo player — cada
+>   disparo cria seu próprio `<audio>`, toca e morre, o que também deixa dois efeitos soarem
+>   juntos. Teclas 1-9 disparam, Esc corta tudo sem encostar na música. Volume por efeito.
+> - **`efeitos.js`** puro, 21 testes. Acervo em `nx_efeitos` (localStorage) + binário no IndexedDB
+>   `nexus_audio` já usado pelas playlists.
+> - **PACOTE INICIAL EMBUTIDO** (`public/sfx/`, 8 vozes, **539 KB**): botão "Carregar vozes" puxa
+>   para o IndexedDB do mestre com um clique. **Por que ESTES podem morar no app e as TRILHAS
+>   não:** meio mega contra ~12 MB. Arquivo em `public/` não entra no bundle JS, só engorda o
+>   artefato de deploy. Doze megas seria abuso; meio não é.
+> - **AS VOZES NÃO SAÍRAM DO MINIMAX.** O MCP dele caiu no meio da sessão e a **Higgsfield está
+>   SEM CRÉDITO** (plano free — as 8 submissões voltaram "Out of credits"). Gerei pela **Morpfix
+>   (ElevenLabs multilingual)**, que tinha saldo. Português bom, mas outro motor.
+> - **NÃO EXISTE VOZ DE CRIANÇA** em provedor nenhum — usei a feminina mais jovem (Juniper). Soa
+>   como mulher jovem. Se incomodar, tentar MiniMax ou clonagem de voz.
+> - **FOLEY CONTINUA IMPOSSÍVEL** (porta, vidro, passos, estática): nenhum provedor conectado gera
+>   efeito sonoro. Não é limitação de prompt. Saída = fonte livre de direitos.
+> - Gate: **97 suítes / 2333 testes** com `--runInBand`, build compilado, 8 arquivos em `build/sfx`.
+
+> **2026-08-03: SPEC 0034 — CENAS SONORAS DA MESA.** Andre pediu trilhas e efeitos sonoros de
+> Ordem Paranormal gerados por IA. **NÃO DÁ — e o motivo está registrado na spec para ninguém
+> tentar de novo sem checar:** a ferramenta de áudio da Higgsfield só gera FALA e manda recusar
+> pedidos de música/SFX (os modelos `sonilo_music`/`mirelo_text_to_audio` são exclusivos do
+> pipeline de jogos); a Morpfix só tem TTS da ElevenLabs; e o **MiniMax não resolve** — seu
+> `music_generation` exige LETRA obrigatória (gerador de canção, não de ambiência) e ele **não tem
+> ferramenta de efeito sonoro nenhuma**. Some-se o produto: a tela de Trilhas é um AGREGADOR
+> (playlists do YouTube/Spotify do mestre + MP3 dele no IndexedDB local, que nunca sobem ao
+> Firestore) — não há onde publicar acervo gerado.
+> - **O que foi entregue no lugar, escolhido pelo Andre:** oito **cenas** de OP (Investigação,
+>   Tensão, Terror, Combate, Perseguição, Ritual, O Outro Lado, Interlúdio — os nomes seguem o
+>   vocabulário mecânico do livro), cada uma vinculada a uma playlist que ele já tem. Um clique
+>   troca a trilha durante a narração.
+> - **`cenas.js`** é lógica pura (26 testes; metade sobre entrada suja, porque o vínculo mora no
+>   localStorage, que é editável à mão). **`CenasSonoras.jsx`** é a tira. Ligado no `MusicScreen`,
+>   acima da grade, sumindo quando o mestre entra numa playlist.
+> - **Decisão de UX que vale manter:** tocar e configurar são **modos separados**. Com a mesa
+>   rodando, clicar numa cena SÓ toca; nada revincula sem entrar em "Vincular trilhas".
+> - **Vínculo órfão avisa em vez de sumir:** playlist apagada depois de vinculada deixa a cena
+>   listada, marcada indisponível, dizendo qual se perdeu.
+> - **ARMADILHA:** `globalThis` **não passa** no ESLint do preset do CRA (`no-undef`) — quebrou o
+>   build. Módulo puro que precisa de `localStorage` resolve o padrão em chamada, com guarda de
+>   `typeof window`, e aceita storage injetado (que é o que os testes usam).
+> - **`.mcp.json` ganhou o servidor `minimax`** com `${MINIMAX_API_KEY}` (padrão do
+>   `${GITHUB_TOKEN}`; nenhum segredo no arquivo). Falta a chave no ambiente + restart. Vale para
+>   **voz do mestre** (spec 0017) e nada mais — não para trilha, não para SFX.
+> - Gate: **90 suítes / 2222 testes** com `--runInBand`, build "ready to be deployed".
+
 > **2026-08-02: SPEC 0033 — PROGRESSÃO AUTOMÁTICA DE ORDEM PARANORMAL.** Andre pediu que a evolução
 > seja automática "de acordo com as regras do livro", para o jogador não precisar preencher tudo, e
 > apontou o PDF oficial no Desktop. **Só Ordem Paranormal** (D&D e Tormenta intocados).
@@ -121,6 +766,30 @@ alwaysApply: true
 > - **Pendente do Andre:** (1) validar no navegador (subir um degrau pelo assistente, conferir
 >   PV/PE/SAN e habilidades, depois "Voltar" um degrau e conferir que a anotação própria continua
 >   lá); (2) commitar/deployar.
+>
+> **MESMA SESSÃO — PAINEL (`/painel`) + MCP DO MINIMAX.** Andre pediu para usar o MiniMax da
+> assinatura dele no layout do painel. **O MiniMax não faz isso:** o MCP oficial expõe 10
+> ferramentas (`text_to_audio`, `voice_clone`, `voice_design`, `music_generation`, `text_to_image`,
+> `generate_video`…) e **nenhuma desenha layout ou escreve código**. Registrado em `.mcp.json` mesmo
+> assim, com `${MINIMAX_API_KEY}` (padrão do `${GITHUB_TOKEN}`, nenhum segredo no arquivo) — vale
+> para o que ele É bom e está parado no roadmap: **voz do mestre** (`narracao-mestre.mp3`, item
+> aberto da 0017) e **trilhas sonoras**. Precisa da chave em env + restart do Claude Code.
+> - **ACHADO — mais um número inventado sobreviveu à limpeza anterior.** O comentário do
+>   `Dashboard.jsx` dizia que sobraram "só os três que saem de estado real"; **"Sessões" não sai**.
+>   `setSessions` NUNCA é chamado no App.jsx (só o inicializador e o efeito que regrava o mesmo
+>   array vazio no localStorage) — era 0 permanente com cara de dado. Removido; a faixa agora tem
+>   DOIS números e os dois são verdadeiros. `Dashboard` deixou de receber a prop `sessions`.
+> - **`.nx-list-cards` novo:** o DossierCard tem borda e raio próprios, mas era empilhado num
+>   `.nx-list` que separa por filete e **sem gap** — dois cartões encostados somavam bordas num
+>   traço duplo. A lista de OP passa a usar a variante com respiro; a de linhas segue sem gap.
+> - **Faixa de números não empilha mais no celular** (media query 640px): três blocos empilhados
+>   custavam ~150px de altura, jogando "Seus personagens" abaixo da dobra por causa de contadores
+>   de um dígito. Agora ficam lado a lado, com tipo e padding menores.
+> - **ARMADILHA (caí nela, e ela já estava documentada nesta mesma STATE):** pus `{/* … */}` em
+>   posição de EXPRESSÃO (depois de `) : (`), onde `{}` é objeto literal e não comentário JSX — o
+>   build quebrou com "Unexpected token, expected ','". Resolvido hoistando a classe para uma const
+>   com comentário JS normal. **Se precisar comentar ali, comente ACIMA do ternário.**
+> - Gate: **89 suítes / 2196 testes** com `--runInBand`, build "ready to be deployed".
 
 > **⚠ 2026-08-02: REVERSÃO PARCIAL ACIDENTAL DO WORKING TREE — leia antes de confiar no histórico.**
 > No meio da sessão, um conjunto de arquivos voltou a um estado anterior **sem que ninguém pedisse**.
@@ -943,6 +1612,14 @@ alwaysApply: true
 > Settings → Authorized domains → adicionar `playnexusrpg.com`). Manual do Andre.
 
 ## Em andamento / próximo passo
+- **Ritual de afinidade por elemento (2026-08-08):** a transição pós-escolha era a mesma para os
+  cinco elementos (`op-el-erupt`, scale-up do símbolo, 1,5s). Agora cada um tem coreografia
+  própria em `ElementoRitual.jsx` (Sangue pulsa e inunda · Morte desenrola espirais e vira cinza ·
+  Conhecimento converge runas e abre o olho · Energia sobrecarrega e estoura · Medo materializa
+  aos solavancos e fecha a névoa), 2,6s, SVG/CSS puro, com `prefers-reduced-motion`. `RITUAL_MS`
+  virou fonte única: a ficha agenda a persistência por ele (era `1500` solto). CSS morto removido
+  de `ordemStyles.jsx`. Gate: 108 suítes/2518 testes verdes + 6 testes novos.
+  **Pendente:** validação visual no browser (não conferida — só o gate automatizado rodou).
 - **Missão SaaS — plano F1→F7 (aprovado 2026-07-02):** F1–F6 implementadas
 - **F6 (mesa tática multiplayer, spec 0007 + ADR 0005) implementada 2026-07-04:** MapEditor é o
   mapa oficial da campanha (mestre edita → `campaigns/{id}/map/scene` + `map/img_*`; jogador vê
