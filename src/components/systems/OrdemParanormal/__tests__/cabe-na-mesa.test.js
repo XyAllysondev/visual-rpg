@@ -223,6 +223,40 @@ describe("assinaturaDe — a assinatura não inventa nome (AC-9)", () => {
   });
 });
 
+/* ════════════════════════════════════════════════════════════════════════
+ *  MODAIS FORA DA SUBÁRVORE DA FICHA (defeito de produção, 2026-08-08)
+ *
+ *  O Andre relatou que o modal do retrato abria fora da vista e exigia rolar a
+ *  página. Causa: a raiz da ficha tem a classe `.fade`, cujo `fadeIn` termina em
+ *  `transform: translateY(0)` com `forwards` — e ancestral com `transform`
+ *  diferente de `none` vira o bloco de contenção dos filhos `position: fixed`.
+ *  O `inset: 0` do modal passava a se resolver contra a ficha inteira.
+ *
+ *  ⚠ Este teste NÃO checa `position: fixed` — o CSS estava certo e o bug
+ *  existia mesmo assim. Ele checa a única coisa que resolve: o modal está FORA
+ *  da subárvore da ficha.
+ * ════════════════════════════════════════════════════════════════════════ */
+describe("Modais escapam do bloco de contenção da ficha", () => {
+  const abrirRetrato = () => {
+    const r = renderFicha({}, { defaultEditMode: true });
+    fireEvent.click(screen.getByLabelText(/Retrato do agente/i));
+    return r;
+  };
+
+  it("o modal do retrato abre", () => {
+    abrirRetrato();
+    expect(screen.getByRole("dialog", { name: "Retrato do Agente" })).toBeInTheDocument();
+  });
+
+  it("e NÃO fica dentro da .op-sheet — senão o fixed se resolve contra ela", () => {
+    const { container } = abrirRetrato();
+    const ficha = container.querySelector(".op-sheet");
+    const modal = screen.getByRole("dialog", { name: "Retrato do Agente" });
+    expect(ficha).not.toBeNull();
+    expect(ficha.contains(modal)).toBe(false);
+  });
+});
+
 describe("A criação termina numa assinatura (AC-8)", () => {
   it("o botão comum de finalizar não existe mais — um caminho só", () => {
     render(<CharacterCreator onFinish={jest.fn()} onCancel={() => {}} />);

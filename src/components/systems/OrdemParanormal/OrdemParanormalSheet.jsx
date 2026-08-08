@@ -2039,13 +2039,29 @@ function Readout({ label, value, note, onStep }) {
     </div>
   );
 }
+/* ⚠ PORTAL OBRIGATÓRIO — não troque por render inline.
+ *
+ * Sintoma que isto conserta: o modal abria fora da vista e exigia rolar a
+ * página para ser lido (relato do Andre em produção, 2026-08-08).
+ *
+ * Causa: a raiz da ficha carrega a classe global `.fade`, que roda
+ * `@keyframes fadeIn{...to{transform:translateY(0)}}` com `forwards` — o
+ * `transform` do último keyframe FICA aplicado. Ancestral com `transform`
+ * diferente de `none` passa a ser o bloco de contenção dos descendentes
+ * `position: fixed`, então o `inset: 0` daqui se resolvia contra a ficha
+ * inteira (que tem milhares de pixels de altura) em vez da viewport.
+ *
+ * `position: fixed` sozinho NÃO basta dentro desta ficha. Os cards de rolagem
+ * já nasceram portalados por este mesmo motivo, e o `:root` já carrega os
+ * fallbacks de `--el-*` justamente para o que sai da subárvore da ficha.
+ */
 function Modal({ title, children, onClose }) {
   useEffect(() => {
     const esc = (e) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", esc);
     return () => document.removeEventListener("keydown", esc);
   }, [onClose]);
-  return (
+  return createPortal(
     <div onClick={onClose} role="dialog" aria-modal="true" aria-label={title}
       style={{ position: "fixed", inset: 0, zIndex: 110, background: "rgba(3,3,7,0.82)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div onClick={(e) => e.stopPropagation()} className="op-ink op-grain" style={{ width: "min(560px,100%)", maxHeight: "86vh", overflow: "auto", padding: 20, background: "var(--surface)" }}>
@@ -2055,6 +2071,7 @@ function Modal({ title, children, onClose }) {
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
