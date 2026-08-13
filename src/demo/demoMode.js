@@ -202,7 +202,7 @@ export const FICHAS_DEMO = [
    Assinante de Ordem Paranormal: o ambiente de teste serve para percorrer o
    app, não para bater na cota de 1 ficha do plano livre a cada clique. Para
    ver o app pelos olhos de quem NÃO assina, troque para `[]`. */
-export const PLANOS_DEMO = ["op"];
+export const PLANOS_DEMO = ["op", "dnd", "tormenta"];
 
 /* ── Contagens do preparo do mundo ───────────────────────────────────────
    1 mapa e 0 mundos deixam o preparo em 3 de 4 — o passo que falta é o da

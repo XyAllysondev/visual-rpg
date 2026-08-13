@@ -11,14 +11,14 @@ export const OrdemSheetStyles = () => (
     /* Default element-theme vars at :root so portaled modals (rendered into
        document.body, outside .op-sheet's DOM subtree) still resolve --el-*
        colors instead of falling back to invalid/transparent values. */
-    :root{ --el-primary:#c9a84c; --el-accent:#e8c96d; --el-glow:#e8c96d; --el-rune:#c9a84c; --el-vital:#e8c96d;
-      --el-deep:#14141c; --el-bg:#14141c; --el-border:rgba(201,168,76,0.34); }
+    :root{ --el-primary:var(--gold); --el-accent:var(--gold2); --el-glow:var(--gold2); --el-rune:var(--gold); --el-vital:var(--gold2);
+      --el-deep:var(--bg); --el-bg:var(--bg); --el-border:var(--border2); }
     .op-sheet{ position:relative; color:var(--text); font-family:var(--font-body,'IM Fell English',serif);
-      --el-accent:#c9a84c; --el-glow:#e8c96d; --el-rune:#c9a84c; --el-vital:#c9a84c; }
+      --el-accent:var(--gold); --el-glow:var(--gold2); --el-rune:var(--gold); --el-vital:var(--gold); }
     .op-grain::before{ content:""; position:absolute; inset:0; pointer-events:none; z-index:0; opacity:0.05; mix-blend-mode:overlay;
       background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
     .op-ink{ border:1px solid var(--border2); border-radius:3px; position:relative; background:var(--card); }
-    .op-ink::after{ content:""; position:absolute; inset:3px; border:1px solid rgba(201,168,76,0.10); border-radius:2px; pointer-events:none; box-shadow:inset 0 0 22px rgba(0,0,0,0.32); }
+    .op-ink::after{ content:""; position:absolute; inset:3px; border:1px solid var(--gold-dim); border-radius:2px; pointer-events:none; box-shadow:inset 0 0 22px rgba(0,0,0,0.32); }
     .op-label{ font-family:Inter,'Inter var',system-ui,sans-serif; font-size:10px; letter-spacing:0.18em; text-transform:uppercase; color:var(--muted2); font-weight:600; }
     .op-data{ font-family:var(--font-data,'Share Tech Mono',monospace); font-size:13px; }
     .op-stagg0{ animation:op-rise 0.5s ease both; } .op-stagger>*{ animation:op-rise 0.5s ease both; }
@@ -90,7 +90,7 @@ export const OrdemSheetStyles = () => (
     .op-tabs-row::-webkit-scrollbar{ display:none; }
     .op-tab{ flex:0 0 auto; min-width:70px; text-align:center; font-family:Inter,'Inter var',system-ui,sans-serif; font-size:11.5px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; padding:11px 14px; cursor:pointer;
       border:none; border-bottom:2px solid transparent; background:transparent; color:var(--muted2); transition:color 0.18s; white-space:nowrap; position:relative; z-index:1; }
-    .op-tab:hover{ color:var(--text); background:rgba(201,168,76,0.05); }
+    .op-tab:hover{ color:var(--text); background:var(--gold-veil); }
     .op-tab.active{ color:var(--el-glow); font-weight:700; }
 
     /* ── TERMINAL DICE ──
@@ -101,22 +101,22 @@ export const OrdemSheetStyles = () => (
        outro projeto, que é exatamente a sensação de "montado por IA".
        O motivo de terminal fica: monospace, fundo afundado, brilho interno e o
        prompt "›". Só a cor passa a ser a do elemento ativo (redesign de layout 2026-08-02). */
-    .op-terminal{ font-family:var(--font-data,'Share Tech Mono',monospace); background:#0d0a04; border:1px solid var(--el-border,rgba(201,168,76,0.34)); color:var(--el-glow,#e8c96d); border-radius:4px; padding:11px 12px; width:100%; letter-spacing:0.08em; box-shadow:inset 0 0 18px rgba(0,0,0,0.7); }
-    .op-terminal::placeholder{ color:rgba(201,168,76,0.42); }
-    .op-terminal:focus{ outline:none; border-color:var(--el-accent,#c9a84c); box-shadow:inset 0 0 22px rgba(0,0,0,0.8),0 0 14px var(--el-glow,rgba(201,168,76,0.25)); }
+    .op-terminal{ font-family:var(--font-data,'Share Tech Mono',monospace); background:var(--bg); border:1px solid var(--el-border,var(--border2)); color:var(--el-glow,var(--gold2)); border-radius:4px; padding:11px 12px; width:100%; letter-spacing:0.08em; box-shadow:inset 0 0 18px rgba(0,0,0,0.7); }
+    .op-terminal::placeholder{ color:var(--muted); }
+    .op-terminal:focus{ outline:none; border-color:var(--el-accent,var(--gold)); box-shadow:inset 0 0 22px rgba(0,0,0,0.8),0 0 14px var(--el-glow,var(--gold-sel)); }
     .op-rolar{ font-family:var(--font-title,'Cinzel',serif); font-size:11px; letter-spacing:0.14em; text-transform:uppercase; font-weight:700; color:#100c03;
-      background:var(--el-accent,#c9a84c); border:none; border-radius:4px; padding:11px 18px; cursor:pointer; display:flex; align-items:center; gap:8px; transition:filter 0.2s; }
+      background:var(--el-accent,var(--gold)); border:none; border-radius:4px; padding:11px 18px; cursor:pointer; display:flex; align-items:center; gap:8px; transition:filter 0.2s; }
     .op-rolar:hover{ filter:brightness(1.12); }
     .op-rolar:active{ animation:op-shake 0.34s; }
     @keyframes op-shake{ 0%,100%{ transform:translate(0,0) rotate(0); } 20%{ transform:translate(-3px,1px) rotate(-3deg); } 40%{ transform:translate(3px,-1px) rotate(3deg); } 60%{ transform:translate(-2px,1px) rotate(-2deg); } 80%{ transform:translate(2px,0) rotate(1deg); } }
-    .op-emrg{ font-family:var(--font-title,'Cinzel',serif); font-size:11px; letter-spacing:0.08em; font-weight:600; color:var(--el-glow); background:rgba(201,168,76,0.06); border:1px solid var(--el-accent); border-radius:4px; padding:9px 4px; cursor:pointer; transition:all 0.18s; text-align:center; }
-    .op-emrg:hover{ background:rgba(201,168,76,0.16); box-shadow:0 0 14px var(--el-glow); transform:translateY(-1px); }
+    .op-emrg{ font-family:var(--font-title,'Cinzel',serif); font-size:11px; letter-spacing:0.08em; font-weight:600; color:var(--el-glow); background:var(--gold-veil); border:1px solid var(--el-accent); border-radius:4px; padding:9px 4px; cursor:pointer; transition:all 0.18s; text-align:center; }
+    .op-emrg:hover{ background:var(--gold-wash); box-shadow:0 0 14px var(--el-glow); transform:translateY(-1px); }
 
     /* ── PERÍCIA ROWS (PERÍCIA · DADOS · BÔNUS · TREINO · OUTROS) ── */
     .op-col-panel{ --skill-cols:22px minmax(0,1fr) 34px 38px 42px 42px 26px; }
     .op-skill,.op-skill-head{ display:grid; grid-template-columns:var(--skill-cols,22px minmax(0,1fr) 34px 38px 42px 42px 26px); gap:0 4px; align-items:center; }
-    .op-skill{ padding:5px 10px; border-bottom:1px solid rgba(201,168,76,0.06); font-family:Inter,'Inter var',system-ui,sans-serif; font-size:13px; transition:background 0.15s; }
-    .op-skill:hover{ background:rgba(214,184,74,0.12); }
+    .op-skill{ padding:5px 10px; border-bottom:1px solid var(--gold-veil); font-family:Inter,'Inter var',system-ui,sans-serif; font-size:13px; transition:background 0.15s; }
+    .op-skill:hover{ background:var(--gold-wash); }
     .op-skill-head{ padding:6px 10px; border-bottom:1px solid var(--border2); background:rgba(0,0,0,0.22); flex-shrink:0; }
     /* As 4 colunas numéricas somam 168px, mas "DADOS BÔNUS TREINO OUTROS" com o
        letter-spacing padrão do .op-label ocupava ~200px. Os rótulos vazavam da
@@ -135,14 +135,14 @@ export const OrdemSheetStyles = () => (
     @keyframes op-fade{ from{ opacity:0; } to{ opacity:1; } }
     .op-die{ width:88px; height:88px; position:relative; transform-style:preserve-3d; animation:op-tumble 0.8s cubic-bezier(.4,.1,.3,1); }
     @keyframes op-tumble{ 0%{ transform:rotateX(0) rotateY(0) scale(0.4); } 100%{ transform:rotateX(720deg) rotateY(540deg) scale(1); } }
-    .op-die-face{ position:absolute; inset:0; border:2px solid var(--el-glow); border-radius:10px; background:linear-gradient(135deg,rgba(201,168,76,0.22),rgba(74,14,110,0.32)); display:flex; align-items:center; justify-content:center; font-family:var(--font-display,'Cinzel Decorative',serif); font-size:34px; color:var(--el-glow); box-shadow:0 0 30px var(--el-glow); }
+    .op-die-face{ position:absolute; inset:0; border:2px solid var(--el-glow); border-radius:10px; background:linear-gradient(135deg,var(--gold-glow),rgba(74,14,110,0.32)); display:flex; align-items:center; justify-content:center; font-family:var(--font-display,'Cinzel Decorative',serif); font-size:34px; color:var(--el-glow); box-shadow:0 0 30px var(--el-glow); }
     .op-result-num{ font-family:var(--font-display,'Cinzel Decorative',serif); animation:op-result-in 0.45s ease-out; }
     @keyframes op-result-in{ from{ opacity:0; transform:scale(0.6) translateY(20px); letter-spacing:0.4em; } to{ opacity:1; transform:scale(1) translateY(0); letter-spacing:0; } }
     .op-screenshake{ animation:op-screenshake 0.4s ease; }
     @keyframes op-screenshake{ 0%,100%{ transform:translate(0,0); } 25%{ transform:translate(-5px,2px); } 50%{ transform:translate(4px,-3px); } 75%{ transform:translate(-3px,1px); } }
 
     /* ── ROLL RESULT CARD ── */
-    .op-roll-card{ position:relative; width:min(500px,93vw); background:#06060a; border:1px solid var(--el-accent); border-radius:12px; padding:18px 26px 14px; box-shadow:0 0 44px rgba(0,0,0,0.85), 0 0 22px var(--el-glow); overflow:hidden; animation:op-card-in 0.3s ease; }
+    .op-roll-card{ position:relative; width:min(500px,93vw); background:var(--bg); border:1px solid var(--el-accent); border-radius:12px; padding:18px 26px 14px; box-shadow:0 0 44px rgba(0,0,0,0.85), 0 0 22px var(--el-glow); overflow:hidden; animation:op-card-in 0.3s ease; }
     @keyframes op-card-in{ from{ opacity:0; transform:scale(0.92); } to{ opacity:1; transform:scale(1); } }
     .op-roll-card.op-crit{ border-color:var(--el-glow); box-shadow:0 0 70px var(--el-glow), inset 0 0 50px rgba(0,0,0,0.38); }
     .op-roll-x{ background:none; border:none; color:var(--muted2); font-size:18px; line-height:1; cursor:pointer; padding:2px 4px; }
@@ -166,7 +166,7 @@ export const OrdemSheetStyles = () => (
 
     /* ── CORNER CARD (rolagens normais, canto inferior direito) ── */
     .op-corner{ position:fixed; bottom:24px; right:24px; width:320px; max-width:calc(100vw - 32px); z-index:99999;
-      background:var(--el-bg,#14141c); border:1px solid var(--el-border,var(--border2)); border-radius:10px;
+      background:var(--el-bg,var(--bg)); border:1px solid var(--el-border,var(--border2)); border-radius:10px;
       box-shadow:0 0 12px var(--el-glow), 0 10px 30px rgba(0,0,0,0.42); padding:14px 16px; animation:op-corner-in 0.3s ease-out; }
     @keyframes op-corner-in{ from{ opacity:0; transform:translateX(40px); } to{ opacity:1; transform:translateX(0); } }
     .op-corner-x{ background:none; border:none; color:var(--muted); font-size:15px; line-height:1; cursor:pointer; padding:0 2px; }
@@ -183,7 +183,7 @@ export const OrdemSheetStyles = () => (
 
     /* ── ELEMENT SELECTION + TRANSITION ── */
     .op-el-veil{ position:fixed; inset:0; z-index:200; background:#020205; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:20px; overflow:auto; }
-    .op-el-title{ font-family:var(--font-display,'Cinzel Decorative',serif); font-size:clamp(26px,5vw,48px); color:var(--gold2); text-align:center; animation:op-flicker 3.4s ease-in-out infinite; text-shadow:0 0 30px rgba(201,168,76,0.4); }
+    .op-el-title{ font-family:var(--font-display,'Cinzel Decorative',serif); font-size:clamp(26px,5vw,48px); color:var(--gold2); text-align:center; animation:op-flicker 3.4s ease-in-out infinite; text-shadow:0 0 30px var(--gold-glow); }
     .op-el-card{ border:1px solid var(--border2); border-radius:6px; padding:16px; cursor:pointer; background:rgba(0,0,0,0.32); transition:all 0.25s; position:relative; overflow:hidden; }
     .op-el-card:hover{ transform:translateY(-3px); }
     .op-el-particle{ position:absolute; width:3px; height:3px; border-radius:50%; opacity:0.6; animation:op-particle linear infinite; }
@@ -191,7 +191,7 @@ export const OrdemSheetStyles = () => (
     .op-el-transition{ position:fixed; inset:0; z-index:210; background:#000; display:flex; align-items:center; justify-content:center; animation:op-el-fade 1.5s ease forwards; }
     /* spec 0023: o piso subiu de #000 junto com --el-deep — com o fundo grafite,
        partir do preto puro virava um piscar visível na troca de elemento. */
-    @keyframes op-el-fade{ 0%{ background:#0a0a10; } 45%{ background:#0a0a10; } 100%{ background:var(--el-deep,#14141c); } }
+    @keyframes op-el-fade{ 0%{ background:#0a0a10; } 45%{ background:#0a0a10; } 100%{ background:var(--el-deep,var(--bg)); } }
     .op-el-erupt{ animation:op-erupt 1.5s cubic-bezier(.2,.6,.2,1) forwards; }
     @keyframes op-erupt{ 0%{ transform:scale(0) rotate(-30deg); opacity:0; } 30%{ opacity:1; } 60%{ transform:scale(1.4) rotate(8deg); } 100%{ transform:scale(8) rotate(0); opacity:0; } }
 
@@ -287,7 +287,7 @@ export const OrdemSheetStyles = () => (
     /* ── COMBATE: histórico btn, cards de atributo, arsenal ── */
     .op-hist-btn{ display:inline-flex; align-items:center; gap:6px; font-family:var(--font-title,'Cinzel',serif); font-size:10px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase;
       color:var(--el-accent); background:rgba(255,255,255,0.03); border:1px solid var(--el-border); border-radius:4px; padding:4px 10px; cursor:pointer; transition:all 0.18s; }
-    .op-hist-btn:hover{ background:var(--el-accent); color:#0a0a0f; box-shadow:0 0 14px var(--el-glow); }
+    .op-hist-btn:hover{ background:var(--el-accent); color:var(--surface); box-shadow:0 0 14px var(--el-glow); }
     .op-attr-card{ display:flex; flex-direction:column; align-items:center; gap:3px; padding:9px 4px 8px; cursor:pointer;
       background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.08); border-radius:5px; transition:all 0.18s; }
     .op-attr-card:hover{ border-color:var(--el-border); background:rgba(255,255,255,0.05); box-shadow:0 0 16px -2px var(--el-glow); transform:translateY(-2px); }
@@ -300,7 +300,7 @@ export const OrdemSheetStyles = () => (
     /* ── CAMPAIGN ROLL DRAWER (histórico de rolagens) ── */
     .op-drawer-overlay{ position:fixed; inset:0; z-index:300; background:rgba(2,2,6,0.62); backdrop-filter:blur(2px); animation:op-fade-in 0.25s ease; }
     @keyframes op-fade-in{ from{ opacity:0; } to{ opacity:1; } }
-    .op-roll-drawer{ position:fixed; top:0; right:0; height:100vh; width:min(380px,92vw); z-index:301; background:#0a0a0f; border-left:1px solid var(--el-border);
+    .op-roll-drawer{ position:fixed; top:0; right:0; height:100vh; width:min(380px,92vw); z-index:301; background:var(--surface); border-left:1px solid var(--el-border);
       box-shadow:-12px 0 40px rgba(0,0,0,0.42); display:flex; flex-direction:column; animation:op-drawer-in 0.3s cubic-bezier(.2,.7,.2,1); }
     @keyframes op-drawer-in{ from{ transform:translateX(100%); } to{ transform:translateX(0); } }
     .op-roll-drawer-head{ flex-shrink:0; padding:16px 18px 12px; border-bottom:1px solid var(--border2); display:flex; align-items:center; justify-content:space-between; }
@@ -314,7 +314,7 @@ export const OrdemSheetStyles = () => (
     .op-add-row{ background:rgba(255,255,255,0.02); border-bottom:1px solid rgba(255,255,255,0.04); border-left:2px solid transparent; transition:background 0.15s ease, border-left-color 0.15s ease; }
     .op-add-row:hover{ background:rgba(255,255,255,0.05); border-left-color:var(--el-accent); }
     .op-add-plus{ transition:filter 0.15s ease; } .op-add-plus:hover{ filter:brightness(1.2); }
-    .op-add-search::placeholder{ color:rgba(232,228,217,0.3); }
+    .op-add-search::placeholder{ color:var(--muted); }
     .op-add-search:focus{ border-color:var(--el-border); }
 
     /* ── RICH TEXT (editor + rendered output) ── */
@@ -322,15 +322,15 @@ export const OrdemSheetStyles = () => (
     .rte-area:empty:before{ content:attr(data-placeholder); color:var(--muted); font-style:italic; pointer-events:none; }
     .rte-area b, .rte-area strong, .op-rich-render b, .op-rich-render strong{ color:var(--el-accent); font-weight:700; }
     .rte-area u, .op-rich-render u{ text-decoration-color:var(--el-accent); }
-    .rte-area i, .rte-area em, .op-rich-render i, .op-rich-render em{ color:#e8e4d9; font-style:italic; }
+    .rte-area i, .rte-area em, .op-rich-render i, .op-rich-render em{ color:var(--text); font-style:italic; }
     .op-rich-render p{ margin:0 0 6px; } .op-rich-render p:last-child{ margin-bottom:0; }
     .op-rich-render a{ color:var(--el-accent); }
     /* Select temático (spec 0020): fundo escuro sólido + seta custom; sem branco padrão do browser */
     select.op-select{ -webkit-appearance:none; -moz-appearance:none; appearance:none;
-      background-color:#12121e; color:#e8e4d9; cursor:pointer; padding-right:32px;
-      background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23c084fc' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+      background-color:var(--card); color:var(--text); cursor:pointer; padding-right:32px;
+      background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23d870f8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
       background-repeat:no-repeat; background-position:right 11px center; }
     select.op-select:focus{ border-color:var(--el-accent); outline:none; }
-    select.op-select option{ background-color:#12121e; color:#e8e4d9; }
+    select.op-select option{ background-color:var(--card); color:var(--text); }
   `}</style>
 );

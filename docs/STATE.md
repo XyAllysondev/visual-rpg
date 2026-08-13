@@ -10,10 +10,121 @@ alwaysApply: true
 > todo. Diferente do **ADR** (decisão durável e imutável). Decisão estrutural → ADR; estado do
 > trabalho → aqui. Atualize ao **pausar/encerrar**; leia ao **retomar**. Use a skill `/handoff`.
 
-**Última atualização:** 2026-08-06 — quicks 002 (Painel), 003 (modo demo) e 004 (**repaginação
-heráldica do app inteiro**).
+**Última atualização:** 2026-08-10 — quick **008 (scriptorium)**; antes, spec **0035** +
+quicks **006** e **007**.
+
+> **2026-08-10: SCRIPTORIUM (quick `008-scriptorium`).** O Andre pediu o ROSTO DO SITE
+> inteiro, "medieval, impecável", citando Pinterest. Pinterest exige login e monta por JS —
+> fui às fontes primárias (bibliotecas/universidades) e o vocabulário voltou verificável:
+> **pauta (ruling) era deixada À MOSTRA de propósito**, **picotagem** de margem alinhava as
+> páginas, **versal** é a inicial ampliada, **rubricação** é a cor de título (aqui, o ouro),
+> **iluminar** é usar ouro para parecer que há luz dentro da página. Fontes no TASK.md.
+> - **Camada global (`heraldica.jsx`)**: `.nx-h1::first-letter` = **versal iluminado** (o de
+>   maior impacto — pinta TODO título da casa sem tocar JSX), `.h-pauta`, `.h-picote`,
+>   `.nx-card` (a chapa padrão que faltava — cada tela inventava a sua) e `.h-folio`.
+> - **Telas convertidas para a gramática**: Mapas, Planos, Trilhas. **Roadmap NÃO** (canvas
+>   próprio + 146 estilos inline: é reescrita, não troca de cabeçalho).
+> - **Literais da paleta velha mortos em mais 2 lugares**: os `<h1>` de Mapas e Planos
+>   pintavam `linear-gradient(135deg,#c9a84c,#e8c96d)` — imunes à troca de tema. Restam os
+>   outros arquivos do OP (o levantamento da 0035 contou 92 em 16 arquivos).
+> - **⚠ ARMADILHA DE CSS que só a foto pega:** `radial-gradient(circle at 50% 50%)` sem raio
+>   explícito se ajusta à caixa do tile — a picotagem saiu como BARRA PRETA vertical.
+>   Use raio fixo (`circle 3.5px at …`) em furo/ponto repetido por `background-size`.
+> - Corrigido junto: o vinco do papel atravessava a FOTO do dossiê (achado do teste da 007).
+> - Suíte **2146 verdes** + a herdada. Tour headless das 8 telas refeito.
+> - **Ainda cru:** Roadmap; **Mapas segue com 80% de tela vazia** (é COMPOSIÇÃO, não pele —
+>   trocar cor não resolve tela vazia); Ajudante do Mestre inalcançável sem login real.
+
+> **2026-08-08 (depois da 006): ARQUIVO E CASCO (quick `007-arquivo-e-casco`).** O Andre
+> testou e não viu mudança fora da ficha — correto, não havia. A 007 leva a onda para fora:
+> **cards de agente viram pastas de arquivo** (aba `.h-pasta-aba` com o MESMO nº de processo
+> do dossiê — `numeroDeProcesso` importada no App.jsx) e a **topbar virou chapa**
+> (`.h-topbar`, gume ametista→ouro igual ao da sidebar). Ornamentos novos são REUSÁVEIS e
+> token-puros, na seção 12 da heraldica. Suíte 2146 verdes + herdada. Detalhe e armadilha
+> de JSX no TASK.md da quick.
+
+> **2026-08-08 (depois da 0035): DOSSIÊ A FUNDO (quick `006-dossie-a-fundo`).** O Andre viu
+> a 0035 na tela e não se surpreendeu ("força total"). Diagnóstico: o material estava certo
+> e TÍMIDO — faltava o aparato que faz o olho acreditar. A quick põe: **folha de rosto** do
+> processo (furos vazados até a mesa, agência, PROC. OP-NNNN grande, tarja CONFIDENCIAL com
+> listras, ABERTO EM ← `createdAt` real, censura ornamental, FL. 01 · rubrica), **foto 3×4**
+> (cantos de álbum, "FOTOGRAFIA NÃO ANEXADA · ANEXO I" no vazio), **grade datilografada**
+> nas perícias (réguas + sublinhado duplo, só CSS), **marca d'água** única atrás das
+> perícias, **sombra de papel** em todo `.op-ink` e a **censura** que faltava do T6.
+> - Regra mantida: processo ← id, data ← createdAt; **sem o dado, a linha some**. Censura e
+>   rubrica não afirmam dado — afirmam ausência. Ornamento é `aria-hidden`.
+> - A tela pegou de novo o que gate nenhum pega: agência truncada em reticências (tracking
+>   0.26→0.18em) e o processo DUPLICADO na mesma dobra (sticky + folha de rosto — o sticky
+>   voltou a ser só sobrancelha). Detalhe no TASK.md da quick.
+> - `onMouseLeave` do retrato: `boxShadow:""` (não `"none"`) — senão mata a sombra de papel.
+> - Fora de escopo consciente: o RESTO do site. Se o Andre quiser a onda nas outras telas,
+>   é a próxima quick, com ele escolhendo onde.
+
+> **2026-08-08: DOSSIÊ DA ORDEM (spec `0035`) — T1..T5 e T7 fechados, T6 e T8 parciais.**
+> A ficha do OP ganhou MATERIAL: `dossie.jsx` é uma camada nova, aplicada por SELETOR sobre
+> `.op-ink` (mesmo padrão do `themes/heraldica`), montada DEPOIS do `OrdemSheetStyles` —
+> a ordem é o mecanismo, não acaso. Nenhuma regra de jogo mudou.
+> - **Fibra, não ruído:** `feTurbulence type='turbulence'` com `baseFrequency` ANISOTRÓPICA
+>   (`0.012 0.62`) — é a frequência desigual que vira fibra deitada. O filtro declara
+>   `x/y/width/height` explícitos: sem isso a região padrão é 120% e o `stitchTiles` costura
+>   numa grade que **não** é a de 180px que o `background-repeat` emenda.
+> - **Decisões do Andre (2026-08-08):** carimbo **fixo em "ATIVO"** (derivar de PV/SAN
+>   inventaria vocabulário que nenhuma spec define) e nº de processo **aparece no link
+>   público** (o id já vai na URL). As duas perguntas em aberto da spec estão RESOLVIDAS.
+> - **⚠ A sessão anterior morreu no meio desta spec** — processo do Claude Code abortou com
+>   `0xC0000409` (fail-fast do Windows; assinatura de OOM do V8) logo após gravar o T5.
+>   Transcript de 26 MB, heap do V8 em 2,2 GB, máquina com 7,7 GB. **Compacte antes dos
+>   20 MB.** O `SessionStart` ainda despeja 102 KB, 99 dos quais são ESTE arquivo — está
+>   ~2× acima do orçamento de 15k tokens que o CLAUDE.md fixa. Enxugar é dívida aberta.
+> - **A verificação adversarial (28 agentes) reprovou 3 ACs que passavam a olho nu:** o
+>   pontilhado media 2,12:1 contra o piso de 3:1; o `tabular-nums` não alcançava número
+>   nenhum (os 2 `<Field>` são texto); e `.op-stagger` não era neutralizado sob
+>   reduced-motion. Todos consertados — detalhe no `tasks.md` da spec.
+> - **Dois literais da paleta velha sobreviveram à varredura do T5 por estarem em DECIMAL**
+>   (`rgba(232,228,217,…)` = `#e8e4d9`). Varredura por hex não pega decimal — se for repetir
+>   esse tipo de limpeza em outro arquivo, procure as duas formas.
+> - **Restam 92 ocorrências da paleta velha em 16 outros arquivos do OP** (fora do AC-5).
+> - **NINGUÉM OLHOU A TELA AINDA (T8).** Suíte e build passam; material, vinco e carimbo são
+>   exatamente o tipo de coisa que passa no gate e fica feia. É o próximo passo.
+> - Suíte: **2146 verdes** (2137 + 9 novos) + a falha herdada do `creature.test.js`.
+
+**Anterior:** 2026-08-06 — quicks 002 (Painel), 003 (modo demo), 004 (repaginação
+heráldica) e 005 (**obsidiana e ametista — o roxo de volta**).
+
+> **2026-08-06 (mesmo dia, DEPOIS da 004): OBSIDIANA E AMETISTA (quick
+> `005-obsidiana-ametista`).** O Andre pediu roxo — "ordem paranormal deve ter um tom roxo" —
+> e uma melhoria "extrema" no visual. **Isto SUBSTITUI a paleta e a regra de cor da 004
+> descrita logo abaixo; leia esta primeiro.** Nenhuma regra de negócio mudou.
+> - **A escala inteira virou obsidiana violeta**, não só o acento. Foi a decisão que fez a
+>   tela ler como roxa: trocar só o acento pintaria uma faixa roxa num app cinza. Os L* dos
+>   quatro degraus são os MESMOS de antes (2,27 · 7,34 · 11,64 · 16,16) — só a matiz girou,
+>   e por isso D&D e Tormenta continuaram dentro do ±1,0 da spec 0023 AC-2 sem serem tocados.
+> - **A SPEC_DEVIATION da 004 no AC-6 está RESOLVIDA por retorno.** O `cardAccent` do OP
+>   voltou ao `#b030d8` que a spec 0017 escolhia. O código voltou ao que a spec dizia — não
+>   foi a spec que mudou. Segue divergindo só o ouro de chrome (`#c9a84c` → `#c6a45c`).
+> - **A regra de cor nova** (topo de `themes/index.js`): ouro = clique/título · **ametista =
+>   identidade e atmosfera** · aço = informação fria · Outro Lado = violeta-magenta em
+>   PREENCHIMENTO SATURADO + halo. O roxo deixou de ser exclusivo do Outro Lado; o que separa
+>   agora é a INTENSIDADE (fill vs véu), não a matiz. A regra antiga ("violeta = só o Outro
+>   Lado") morreu junto com a 004 — não a cite.
+> - **Ambiente novo, e ele PARA com a aba escondida** (`usePausaSeOculto` em
+>   `themes/heraldica.jsx` → `data-parado` → `animation-play-state:paused`).
+>   `animation-play-state` não tem gatilho em CSS puro; `document.hidden` é a única fonte.
+> - **Dois defeitos meus que só a tela mostrou** (sirvam de aviso ao próximo que trocar de
+>   paleta): (1) `--gold-face` derivava de `muted2`+`text`, e com a tipografia esfriando o
+>   título gravado saiu PRATA — passou a derivar da liga do ouro; (2) o halo do selo
+>   compartilhava os keyframes do núcleo e a animação sobrescrevia o `opacity=.14` do
+>   atributo, levando um disco de 460px a opacidade 1 — **amplitude de animação é escala**,
+>   o que é discreto num núcleo de 56px é uma mancha num halo oito vezes maior.
+> - **Literais de App.jsx revertidos por script**, casando cada linha com a versão anterior à
+>   varredura (commit `4c5dac9`) para devolver o roxo EXATO que cada uma tinha — 101 linhas
+>   exatas, 7 por similaridade, 8 no padrão. Cor de regra de jogo (elementos, condições) não
+>   foi tocada. O filtro sépia do emblema do OP foi REMOVIDO: a arte original já é roxa.
+> - Suíte: **2137 verdes** + a falha herdada do `creature.test.js`. Sempre `--maxWorkers=2`.
 
 > **2026-08-06: REPAGINAÇÃO HERÁLDICA (quick `004-repaginacao-heraldica`).**
+> ⚠ **Superada pela 005 acima** no que toca a paleta e à regra de cor. O resto (a arquitetura
+> de 3 camadas, o gate de crase, o aviso do `--maxWorkers`) continua valendo.
 > O app inteiro trocou de pele: preto forjado + ouro brunido + carmesim de brasão, com
 > material (bisel, grão, cantoneiras), ornamento e movimento. **Nenhuma regra de negócio
 > mudou** — é apresentação.

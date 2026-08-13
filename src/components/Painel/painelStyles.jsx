@@ -1,19 +1,21 @@
 /* ════════════════════════════════════════════════════════════════════════
- *  PAINEL — FOLHA DE ESTILO (pele heráldica, 2026-08-05)
+ *  PAINEL — FOLHA DE ESTILO
+ *  (pele heráldica 2026-08-05 · obsidiana e ametista 2026-08-06)
  *  ------------------------------------------------------------------------
  *  Prefixo `px-` (painel). O global mora em `themes/heraldica.jsx`; aqui fica
  *  só o que é da tela de entrada.
  *
  *  Duas cores governam, e são as do registry de temas — nenhuma escrita à
- *  mão: `--px-accent` (o brasão do sistema; carmesim em Ordem Paranormal) e
- *  `--px-glow`, a mesma cor em rgba baixo. O ouro vem de `--gold`.
+ *  mão: `--px-accent` (o brasão do sistema; roxo arcano em Ordem Paranormal)
+ *  e `--px-glow`, a mesma cor em rgba baixo. O ouro vem de `--gold`.
  *
  *  A regra que separa as duas: OURO é o que responde ao clique e o que
- *  titula; CARMESIM é atmosfera e identidade. Quando as duas disputam o
- *  mesmo elemento, o ouro ganha — senão a tela vira um alarme.
+ *  titula; AMETISTA é atmosfera e identidade. Quando as duas disputam o
+ *  mesmo elemento, o ouro ganha — senão o clique some no meio do ambiente.
  *
- *  Movimento: tudo CSS, nenhum loop de JS. `prefers-reduced-motion` no fim
- *  desliga e entrega a MESMA tela, parada.
+ *  Movimento: tudo CSS, nenhum loop de JS; só transform e opacity. A tela
+ *  congela quando a aba some (`data-parado`, ver `usePausaSeOculto`) e o
+ *  `prefers-reduced-motion` no fim entrega a MESMA tela, parada.
  * ════════════════════════════════════════════════════════════════════════ */
 
 export default function PainelStyles() {
@@ -26,6 +28,7 @@ export default function PainelStyles() {
       position:relative;display:flex;flex-direction:column;gap:30px;
       width:100%;max-width:1240px;margin:0 auto;
     }
+    .px[data-parado="1"] *{animation-play-state:paused !important}
 
     @keyframes pxIn{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
     .px-in{opacity:0;animation:pxIn .68s var(--px-ease) forwards;animation-delay:var(--d,0s)}
@@ -37,15 +40,29 @@ export default function PainelStyles() {
     .px-hero{
       position:relative;isolation:isolate;overflow:hidden;
       border-radius:5px;border:1px solid var(--border2);
+      /* Extensões contidas de propósito. No primeiro corte o degradê do
+         acento cobria 122%x152% da chapa e, com o roxo (bem mais claro que
+         o carmesim que ele substituiu), virou uma lavagem magenta que
+         apagava o selo inteiro. Luz de fundo tem que deixar o desenho
+         aparecer — senão não é atmosfera, é uma mancha. */
       background:
-        radial-gradient(120% 150% at 88% -10%, var(--px-glow) 0%, transparent 52%),
-        radial-gradient(90% 120% at 6% 110%, var(--gold-dim) 0%, transparent 55%),
-        linear-gradient(168deg, var(--card) 0%, var(--surface) 62%, var(--bg) 100%);
+        radial-gradient(74% 104% at 90% -16%, var(--px-glow) 0%, transparent 58%),
+        radial-gradient(84% 116% at 2% 108%, var(--brasao-dim) 0%, transparent 60%),
+        radial-gradient(60% 88% at 48% 122%, var(--gold-dim) 0%, transparent 62%),
+        linear-gradient(168deg, var(--card) 0%, var(--surface) 58%, var(--bg) 100%);
       padding:46px 40px 34px;
       box-shadow:
         inset 0 1px 0 rgba(255,255,255,.07), inset 0 -1px 0 rgba(0,0,0,.6),
-        0 34px 70px -40px #000;
+        0 34px 70px -40px #000, 0 0 90px -50px var(--brasao-halo);
     }
+    /* Fenda: a rachadura por onde o Outro Lado entra na chapa. Um fio só,
+       inclinado, com o brilho pulsando por dentro — animação de opacity
+       apenas, o transform da inclinação fica na regra base. */
+    .px-fenda{position:absolute;top:-12%;bottom:-12%;left:37%;width:1px;z-index:-1;
+      pointer-events:none;transform:rotate(13deg);filter:blur(1px);
+      background:linear-gradient(180deg,transparent,var(--brasao2) 34%,var(--brasao) 52%,transparent 78%);
+      animation:pxFenda 13s ease-in-out infinite}
+    @keyframes pxFenda{0%,100%{opacity:.16}46%{opacity:.5}}
     /* cantoneiras: quatro esquadros de ouro, como canto de placa rebitada */
     .px-hero-canto{position:absolute;width:26px;height:26px;pointer-events:none;opacity:.55;z-index:2}
     .px-hero-canto.tl{top:12px;left:12px;border-top:1px solid var(--gold);border-left:1px solid var(--gold)}
@@ -53,23 +70,46 @@ export default function PainelStyles() {
     .px-hero-canto.bl{bottom:12px;left:12px;border-bottom:1px solid var(--gold);border-left:1px solid var(--gold)}
     .px-hero-canto.br{bottom:12px;right:12px;border-bottom:1px solid var(--gold);border-right:1px solid var(--gold)}
 
-    /* ── Esfera armilar ────────────────────────────────────────────────
-       Três anéis concêntricos girando em velocidades diferentes, com marcas
-       de graduação. É o motivo da abertura de Game of Thrones: mecanismo de
-       latão sobre preto. Fica à direita, atrás do texto, recortado. */
-    .px-armila{position:absolute;right:-90px;top:50%;translate:0 -50%;
-      width:520px;height:520px;z-index:-1;pointer-events:none;opacity:.5}
+    /* ── Sigilo do Outro Lado ──────────────────────────────────────────
+       Seis grupos girando com períodos que não são múltiplos entre si (190 ·
+       260 · 130 · 76 · 47 · 31 · 19 s) — é o que impede o conjunto de bater
+       o compasso e voltar à mesma pose. Fica à direita, atrás do texto,
+       recortado pela borda da chapa. */
+    .px-armila{position:absolute;right:-100px;top:50%;translate:0 -50%;
+      width:560px;height:560px;z-index:-1;pointer-events:none;opacity:.62}
     .px-armila svg{width:100%;height:100%;overflow:visible}
     .px-anel{transform-origin:50% 50%;transform-box:fill-box}
     .px-anel-1{animation:pxGira 190s linear infinite}
     .px-anel-2{animation:pxGira 130s linear infinite reverse}
     .px-anel-3{animation:pxGira 76s linear infinite}
+    .px-anel-4{animation:pxGira 260s linear infinite reverse}
     @keyframes pxGira{to{transform:rotate(360deg)}}
-    /* o núcleo pulsa como brasa dentro do mecanismo */
-    .px-nucleo{animation:pxBrasa 6.5s ease-in-out infinite}
-    @keyframes pxBrasa{0%,100%{opacity:.5}50%{opacity:1}}
 
-    .px-aura{position:absolute;inset:-45%;z-index:-2;pointer-events:none;filter:blur(78px);opacity:.5}
+    /* Runas: cada traço acende no seu tempo. O atraso vem do índice, então a
+       coroa nunca pisca em bloco — corre em onda. */
+    .px-runa{opacity:.18;animation:pxRuna 4.6s ease-in-out infinite;animation-delay:var(--d,0s)}
+    @keyframes pxRuna{0%,100%{opacity:.14}50%{opacity:.92}}
+
+    /* Satélites: giram em torno do CENTRO do selo, não do próprio ponto —
+       daí view-box em vez do fill-box dos anéis (a caixa de um satélite
+       é ele mesmo, e com fill-box ele giraria parado no lugar). */
+    .px-orb{transform-box:view-box;transform-origin:280px 280px}
+    .px-orb-1{animation:pxGira 47s linear infinite}
+    .px-orb-2{animation:pxGira 31s linear infinite reverse}
+    .px-orb-3{animation:pxGira 19s linear infinite}
+
+    /* o núcleo pulsa como éter preso dentro do selo */
+    .px-nucleo{animation:pxBrasa 6.5s ease-in-out infinite}
+    @keyframes pxBrasa{0%,100%{opacity:.45}50%{opacity:1}}
+    /* O halo tem keyframes PRÓPRIOS, não os do núcleo. Compartilhar o pxBrasa
+       fazia a animação sobrescrever o opacity=.14 do atributo e levar um
+       disco de 460px de éter até opacidade 1 — a lavagem magenta que apagava
+       o selo inteiro. Amplitude de animação também é escala: o que é discreto
+       num núcleo de 56px é uma mancha num halo oito vezes maior. */
+    .px-halo{animation:pxHaloSelo 11s ease-in-out infinite}
+    @keyframes pxHaloSelo{0%,100%{opacity:.1}50%{opacity:.2}}
+
+    .px-aura{position:absolute;inset:-45%;z-index:-2;pointer-events:none;filter:blur(78px);opacity:.3}
     .px-aura i{position:absolute;display:block;border-radius:50%;mix-blend-mode:screen;
       animation:pxDeriva 30s ease-in-out infinite}
     @keyframes pxDeriva{
@@ -97,19 +137,38 @@ export default function PainelStyles() {
       background:linear-gradient(90deg,var(--gold),transparent);opacity:.8}
 
     /* Título gravado: base em pergaminho + um brilho de luz de vela que corre
-       pelo metal. O degradê é SÓ o realce que passa — não uma pintura
-       colorida no texto. */
-    .px-title{
+       pelo metal, sobre um halo de ametista. O degradê é SÓ o realce que
+       passa — não uma pintura colorida no texto. */
+    .px-title-wrap{position:relative;display:inline-block;margin-top:14px}
+    .px-title,.px-title-eco{
       font-family:'Cinzel Decorative',serif;font-weight:900;
       font-size:clamp(34px,5.2vw,64px);line-height:1;letter-spacing:.045em;
-      margin-top:14px;text-transform:uppercase;color:var(--text);
+      text-transform:uppercase;display:block;white-space:nowrap;
+    }
+    .px-title{
+      color:var(--text);
       background:linear-gradient(100deg,var(--gold-face) 0%,var(--gold-face) 38%,#fffaea 47%,var(--gold2) 51%,var(--gold-face) 60%,var(--gold-face) 100%);
       background-size:300% 100%;-webkit-background-clip:text;background-clip:text;
       -webkit-text-fill-color:transparent;
-      filter:drop-shadow(0 2px 0 rgba(0,0,0,.55)) drop-shadow(0 0 26px var(--gold-glow));
+      filter:drop-shadow(0 2px 0 rgba(0,0,0,.55)) drop-shadow(0 0 30px var(--brasao-glow)) drop-shadow(0 0 16px var(--gold-glow));
       animation:pxSheen 9s ease-in-out 1.4s infinite;
     }
     @keyframes pxSheen{0%{background-position:190% 0}48%,100%{background-position:-90% 0}}
+
+    /* O eco: cópia em ametista ATRÁS do ouro, invisível quase o tempo todo.
+       A cada ciclo ela escapa por três quadros e volta — a aberração do
+       Outro Lado empurrando o metal. O steps(1) é de propósito: interpolar
+       daria um borrão suave, e o que se quer é o corte seco. */
+    .px-title-eco{position:absolute;left:0;top:0;z-index:-1;pointer-events:none;
+      user-select:none;color:var(--brasao2);opacity:0;
+      animation:pxEco 11s steps(1) 3s infinite}
+    @keyframes pxEco{
+      0%,91%,100%{opacity:0;transform:translate3d(0,0,0)}
+      92%{opacity:.6;transform:translate3d(-4px,1px,0)}
+      94%{opacity:.22;transform:translate3d(5px,-2px,0)}
+      96%{opacity:.5;transform:translate3d(-2px,0,0)}
+      98%{opacity:0;transform:translate3d(0,0,0)}
+    }
 
     .px-sub{font-size:15.5px;color:var(--muted2);line-height:1.6;margin-top:13px;max-width:52ch}
 
@@ -176,14 +235,21 @@ export default function PainelStyles() {
     .px-resume:hover .px-go,.px-alert:hover .px-go,.px-tool:hover .px-go,.px-row:hover .px-go{
       transform:translateX(6px);color:var(--gold2)}
 
-    /* Medalhão do retomar: anel de latão com brasa dentro */
-    .px-sigil{width:52px;height:52px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;
+    /* Medalhão do retomar: aro de latão com éter preso dentro. O aro é OURO
+       porque a faixa inteira é clicável; o que brilha por dentro é ametista,
+       porque a luz é do sistema. As duas cores, cada uma no seu papel. */
+    .px-sigil{position:relative;width:52px;height:52px;border-radius:50%;flex-shrink:0;
+      display:grid;place-items:center;
       color:var(--gold2);border:1px solid var(--gold);
-      background:radial-gradient(circle at 36% 30%,var(--gold-sel),rgba(0,0,0,.6) 72%);
-      box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 0 20px -6px var(--gold-glow);
+      background:radial-gradient(circle at 36% 30%,var(--brasao-nevoa),rgba(0,0,0,.72) 74%);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 0 22px -6px var(--brasao-glow);
       animation:pxHalo 4.5s ease-in-out infinite}
-    @keyframes pxHalo{0%,100%{box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 0 18px -8px var(--gold-glow)}
-      50%{box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 0 30px -4px var(--gold-glow)}}
+    @keyframes pxHalo{0%,100%{box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 0 18px -8px var(--brasao-glow)}
+      50%{box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 0 34px -4px var(--brasao-glow)}}
+    /* aro de éter que gira em volta do medalhão — tracejado, meia volta lenta */
+    .px-sigil::before{content:"";position:absolute;inset:-5px;border-radius:50%;
+      border:1px dashed var(--brasao);opacity:.55;
+      animation:pxGira 22s linear infinite}
 
     /* ══ CONVOCAÇÕES — "precisa de você" ════════════════════════════════ */
     .px-alert{display:flex;align-items:center;gap:16px;width:100%;text-align:left;cursor:pointer;
@@ -208,11 +274,16 @@ export default function PainelStyles() {
       box-shadow:inset 0 1px 0 rgba(255,255,255,.055),inset 0 -1px 0 rgba(0,0,0,.5);
       transition:transform .3s var(--px-ease),border-color .3s,box-shadow .3s}
     .px-stat::before{content:"";position:absolute;top:0;left:16%;right:16%;height:1px;opacity:.4;
-      background:linear-gradient(90deg,transparent,var(--gold),transparent);
+      background:linear-gradient(90deg,transparent,var(--brasao2) 30%,var(--gold) 70%,transparent);
       transition:opacity .3s,left .3s,right .3s}
+    /* poço de éter no canto inferior — aparece só no hover, por trás do número */
+    .px-stat::after{content:"";position:absolute;right:-30%;bottom:-60%;width:90%;height:110%;
+      pointer-events:none;opacity:0;transition:opacity .34s;
+      background:radial-gradient(circle,var(--brasao-nevoa),transparent 66%)}
     .px-stat:hover{transform:translateY(-5px);border-color:var(--gold);
-      box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 28px 52px -30px #000,0 0 38px -16px var(--gold-glow)}
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 28px 52px -30px #000,0 0 38px -16px var(--brasao-glow)}
     .px-stat:hover::before{opacity:1;left:0;right:0}
+    .px-stat:hover::after{opacity:1}
     .px-stat-ghost{position:absolute;right:-2px;bottom:-30px;pointer-events:none;
       font-family:'Cinzel',serif;font-weight:700;font-size:92px;line-height:1;
       color:var(--gold);opacity:.045}
@@ -256,7 +327,7 @@ export default function PainelStyles() {
       box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 14px 30px -22px #000;
       transition:transform .38s var(--px-ease),border-color .38s,box-shadow .38s}
     .px-camp:hover{transform:translateY(-7px);border-color:var(--gold);
-      box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 34px 60px -30px #000,0 0 46px -22px var(--gold-glow)}
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 34px 60px -30px #000,0 0 52px -20px var(--brasao-glow)}
     .px-camp-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
       transition:transform .9s var(--px-ease),filter .5s;filter:saturate(.7) contrast(1.05)}
     .px-camp:hover .px-camp-img{transform:scale(1.1);filter:saturate(1) contrast(1.1)}
@@ -275,9 +346,10 @@ export default function PainelStyles() {
       backdrop-filter:blur(6px)}
     .px-tag.l{left:11px;background:rgba(0,0,0,.6);color:rgba(255,255,255,.8);
       border:1px solid rgba(255,255,255,.14)}
-    /* selo de mestre: cera carmesim com a borda do brasão */
+    /* selo de mestre: pastilha de cera. Escurecida em 2026-08-06 — no roxo o
+       par brasao2→brasao virava neon sobre a capa da campanha. */
     .px-tag.r{right:11px;color:#fff;border:1px solid var(--brasao2);
-      background:linear-gradient(180deg,var(--brasao2),var(--brasao));
+      background:linear-gradient(180deg,var(--brasao),var(--brasao-deep));
       box-shadow:0 2px 10px -2px var(--brasao-glow),inset 0 1px 0 rgba(255,255,255,.25)}
     .px-camp-fall{position:absolute;inset:0;display:grid;place-items:center;
       background:radial-gradient(circle at 50% 34%,var(--px-glow),transparent 62%),
@@ -291,7 +363,7 @@ export default function PainelStyles() {
     .px-row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;
       background:linear-gradient(180deg,transparent,var(--gold),transparent);
       opacity:0;transition:opacity .24s}
-    .px-row:hover{background:linear-gradient(90deg,var(--gold-veil),transparent 62%);padding-left:18px}
+    .px-row:hover{background:linear-gradient(90deg,var(--brasao-veu),var(--gold-veil) 28%,transparent 64%);padding-left:18px}
     .px-row:hover::before{opacity:1}
     .px-row-t{font-family:'Cinzel',serif;font-size:15px;color:var(--text);line-height:1.25;
       letter-spacing:.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -307,12 +379,12 @@ export default function PainelStyles() {
     .px-tool{position:relative;display:flex;align-items:center;gap:15px;width:100%;text-align:left;
       cursor:pointer;padding:14px 13px;border-radius:3px;background:none;
       border:1px solid transparent;transition:background .25s,border-color .25s,transform .25s var(--px-ease)}
-    .px-tool:hover{background:linear-gradient(100deg,var(--gold-veil),transparent);
+    .px-tool:hover{background:linear-gradient(100deg,var(--brasao-veu),var(--gold-veil) 34%,transparent);
       border-color:var(--border2);transform:translateX(4px)}
     .px-tool-i{width:36px;height:36px;border-radius:3px;flex-shrink:0;display:grid;place-items:center;
       color:var(--gold2);background:rgba(0,0,0,.42);border:1px solid var(--border2);
       box-shadow:inset 0 1px 0 rgba(255,255,255,.06);transition:box-shadow .25s,border-color .25s}
-    .px-tool:hover .px-tool-i{border-color:var(--gold);box-shadow:0 0 22px -6px var(--gold-glow)}
+    .px-tool:hover .px-tool-i{border-color:var(--gold);box-shadow:0 0 24px -6px var(--brasao-glow)}
 
     /* ══ PREPARO DO MUNDO ═══════════════════════════════════════════════ */
     .px-prep{display:flex;align-items:center;gap:20px;padding:4px 0 20px}
@@ -348,7 +420,7 @@ export default function PainelStyles() {
       letter-spacing:.1em;color:var(--gold);opacity:.85;margin-bottom:7px}
     .px-empty{position:relative;padding:30px 24px 32px;border-radius:4px;
       border:1px solid var(--border);
-      background:radial-gradient(90% 130% at 10% 0%,var(--gold-veil),transparent 60%)}
+      background:radial-gradient(90% 130% at 10% 0%,var(--brasao-dim),transparent 62%)}
     .px-empty-t{font-family:'Cinzel Decorative',serif;font-size:16px;color:var(--text);margin-bottom:10px}
     .px-empty-d{font-size:14px;color:var(--muted);line-height:1.6;max-width:52ch;margin-bottom:18px}
     .px-btn{font-family:'Cinzel',serif;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
@@ -385,7 +457,12 @@ export default function PainelStyles() {
         animation-duration:.001ms!important;animation-iteration-count:1!important;
         transition-duration:.001ms!important}
       .px-in{opacity:1!important;transform:none!important}
-      .px-aura,.px-motes,.px-armila{display:none}
+      /* O que some é o que só existe por causa do movimento. A fenda e o eco
+         parados viram, respectivamente, um risco solto e um texto duplicado
+         torto — piores que ausentes. O sigilo parado seria só ruído atrás do
+         título. A tela continua a MESMA: chapa, cantoneiras, ouro, ametista. */
+      .px-aura,.px-motes,.px-armila,.px-fenda,.px-title-eco{display:none}
+      .px-sigil::before{display:none}
       .px-title{-webkit-text-fill-color:var(--text);background:none}
       .px-meter i{width:var(--w,0%)}
       .px-ring-v{stroke-dashoffset:var(--o)}

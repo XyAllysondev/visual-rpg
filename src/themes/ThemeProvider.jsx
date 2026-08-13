@@ -77,7 +77,11 @@ const toVars = (t) => {
     `--gold-cast:${rgba(c.accent, 0.8)}`,    // sombra projetada do botão
     `--gold-mid:${misturar(c.accent, c.accentDim, 0.5)}`,   // parada média da chapa
     `--gold-deep:${escurecer(c.accentDim, 0.28)}`,          // pé da chapa
-    `--gold-face:${misturar(c.muted2, c.text, 0.35)}`,       // base do texto gravado
+    /* Base do texto gravado. Derivava de `muted2`+`text` — o que funcionou
+       enquanto o texto era pergaminho quente, e quebrou na hora em que a
+       repaginação violeta esfriou a tipografia: o título saiu PRATA, não
+       ouro. Passou a sair da própria liga do metal, que é o que ele é. */
+    `--gold-face:${misturar(c.accent, c.accent2, 0.5)}`,
     `--accent:${c.accent}`,
     `--accent2:${c.accent2}`,
     `--accent-dim:${c.accentDim}`,
@@ -89,6 +93,18 @@ const toVars = (t) => {
     `--brasao2:${c.cardAccent2 || c.accent2}`,
     `--brasao-glow:${rgba(c.cardAccent || c.accent, 0.32)}`,
     `--brasao-dim:${rgba(c.cardAccent || c.accent, 0.12)}`,
+    /* Degraus do brasão (2026-08-06). A repaginação violeta promoveu a cor de
+       identidade de "pontuação" a ATMOSFERA: aurora, névoa, halo, filete de
+       hover e o preenchimento do selo. Cada um precisa de um alfa próprio, e
+       escrever esses rgba() no CSS cravaria o roxo do Ordem Paranormal na
+       camada global — trocar para D&D deixaria uma névoa roxa numa paleta
+       vermelha. Derivando aqui, a mesma névoa vira brasa no D&D e musgo no
+       Tormenta sem ninguém tocar em CSS. */
+    `--brasao-veu:${rgba(c.cardAccent || c.accent, 0.06)}`,   // véu de hover
+    `--brasao-nevoa:${rgba(c.cardAccent || c.accent, 0.19)}`, // aurora/névoa de fundo
+    `--brasao-halo:${rgba(c.cardAccent || c.accent, 0.55)}`,  // halo de partícula/selo
+    `--brasao-mid:${misturar(c.cardAccent || c.accent, c.bg, 0.42)}`, // parada média do selo
+    `--brasao-deep:${escurecer(c.cardAccent || c.accent, 0.55)}`,     // pé do selo
     `--purple:${c.secondary}`,
     `--purple2:${c.secondaryText}`,
     `--purple-glow:${rgba(c.secondary, 0.3)}`,

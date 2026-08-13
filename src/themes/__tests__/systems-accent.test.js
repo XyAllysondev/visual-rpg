@@ -7,16 +7,18 @@ import { getCardAccent, getTheme, SYSTEM_THEMES } from "../index";
  * importing App.jsx (which would drag Firebase into jsdom). */
 
 describe("getCardAccent — single source of truth (AC-6)", () => {
-  /* SPEC_DEVIATION (2026-08-05, decidida pelo Andre): a repaginação heráldica
-   * trocou a identidade de card do OP de ROXO ARCANO para CARMESIM DE BRASÃO,
-   * e o ouro de chrome de #c9a84c para #c6a45c. O AC-6 continua valendo — ele
-   * pina o MECANISMO (uma fonte só, nada de cor de card escrita à mão) e a
-   * SEPARAÇÃO entre identidade de seleção e chrome interno. Só as matizes
-   * mudaram, e por decisão consciente.
+  /* SPEC_DEVIATION RESOLVIDA (2026-08-06). A repaginação heráldica de
+   * 2026-08-05 tinha trocado a identidade de card do OP de ROXO ARCANO para
+   * carmesim, e isso foi registrado aqui como divergência consciente. Em
+   * 2026-08-06 o Andre pediu o roxo de volta ("ordem paranormal deve ter um
+   * tom roxo"), então o `cardAccent` voltou ao #b030d8 que a spec 0017 tinha
+   * escolhido. A divergência fechou por RETORNO ao que a spec dizia — não
+   * por atualização de spec. O que segue divergindo é só o ouro de chrome
+   * (#c9a84c → #c6a45c), que a repaginação escureceu de propósito.
    *
-   * Por isso este caso testa as duas coisas em camadas: primeiro a regra que
-   * sobrevive a qualquer repaginação, depois os literais atuais — que seguem
-   * aqui de propósito, para que uma troca ACIDENTAL de paleta ainda falhe. */
+   * Este caso testa em duas camadas: primeiro a regra que sobrevive a
+   * qualquer repaginação, depois os literais vigentes — que seguem aqui de
+   * propósito, para que uma troca ACIDENTAL de paleta ainda falhe. */
   it("OP mantém identidade de card distinta do chrome interno", () => {
     const cores = getTheme("op").colors;
     const { accent, accentText } = getCardAccent("op");
@@ -27,9 +29,22 @@ describe("getCardAccent — single source of truth (AC-6)", () => {
     expect(accent).not.toBe(cores.accent);
 
     // a paleta vigente
-    expect(accent).toBe("#a3282c");        // carmesim de brasão
-    expect(accentText).toBe("#e0645a");
+    expect(accent).toBe("#b030d8");        // roxo arcano (spec 0017)
+    expect(accentText).toBe("#d870f8");
     expect(cores.accent).toBe("#c6a45c");   // ouro brunido (chrome interno)
+  });
+
+  /* A escala violeta é o que faz a tela LER como roxa. Trocar só o acento
+   * pintaria uma faixa roxa num app cinza — foi exatamente o erro que a
+   * repaginação de 2026-08-06 corrigiu, e sem trava aqui ele volta na
+   * primeira vez que alguém "só clarear um pouco o fundo". */
+  it("a escala de superfícies do OP tem sopro violeta em todos os degraus", () => {
+    const c = getTheme("op").colors;
+    ["bg", "surface", "card", "card2"].forEach((k) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(c[k].slice(i, i + 2), 16));
+      expect(b).toBeGreaterThan(r);   // azul acima do vermelho…
+      expect(r).toBeGreaterThan(g);   // …e vermelho acima do verde = violeta
+    });
   });
 
   it("D&D card accent === its theme accent (red), fixing the old blue divergence", () => {

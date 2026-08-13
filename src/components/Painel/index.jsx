@@ -24,6 +24,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import PainelStyles from "./painelStyles";
+import { usePausaSeOculto } from "../../themes/heraldica";
 import DossierCard from "../systems/OrdemParanormal/DossierCard";
 import { getActiveAvatar } from "../../domain/character";
 import { isActiveCampaign } from "../../domain/campaign";
@@ -132,55 +133,96 @@ const FERRAMENTAS = [
   { id: "music",  t: "Trilhas Sonoras",    d: "Ambientação para cada cena",         Ico: IcoTrilha },
 ];
 
-/* ── Esfera armilar ──────────────────────────────────────────────────────
-   Três anéis concêntricos girando em velocidades diferentes, com marcas de
-   graduação e um núcleo em brasa. É o mecanismo de latão da abertura de
-   Game of Thrones — o único elemento puramente decorativo desta tela, e por
-   isso fica atrás do texto, recortado pela borda e em opacidade baixa.
+/* ── Sigilo do Outro Lado ────────────────────────────────────────────────
+   Substitui a esfera armilar de 2026-08-05 (repaginação violeta, 2026-08-06).
+   A esfera era um mecanismo de latão — bonita, e de outro jogo. O Ordem
+   Paranormal não é náutico: é ritual. Então o mesmo desenho de anéis
+   concêntricos virou um SELO — graduação de latão por fora, bandas orbitais
+   de ametista, coroa de runas contra-girando, engrenagem interna, hexagrama
+   e um núcleo de éter pulsando, com três satélites em órbitas próprias.
 
-   As marcas são geradas por índice (nada de aleatório) e o SVG inteiro é
-   `aria-hidden`: para quem lê a tela por leitor de tela, isto não existe. */
+   Seis grupos, seis velocidades, nenhuma delas múltipla da outra: é o que
+   impede o conjunto de "bater o compasso" e voltar à mesma pose a cada
+   volta. Tudo gira por transform (o compositor resolve, sem relayout).
+
+   Marcas geradas por índice — nada de aleatório, que re-sortearia a cada
+   render. O SVG inteiro é `aria-hidden`: para leitor de tela, não existe. */
 const marcas = (qtd, raio, comprimento) =>
   Array.from({ length: qtd }, (_, i) => {
     const a = (i * 2 * Math.PI) / qtd;
     const cos = Math.cos(a); const sen = Math.sin(a);
     return {
       k: i,
-      x1: 260 + cos * raio, y1: 260 + sen * raio,
-      x2: 260 + cos * (raio + comprimento), y2: 260 + sen * (raio + comprimento),
+      x1: 280 + cos * raio, y1: 280 + sen * raio,
+      x2: 280 + cos * (raio + comprimento), y2: 280 + sen * (raio + comprimento),
     };
   });
 
-function Armila() {
+function Sigilo() {
   const OURO = "var(--gold)";
+  const ROXO = "var(--brasao2)";
   return (
     <div className="px-armila" aria-hidden="true">
-      <svg viewBox="0 0 520 520" fill="none">
-        {/* anel externo — graduação fina, giro lentíssimo */}
-        <g className="px-anel px-anel-1" stroke={OURO} strokeWidth="1" opacity="0.55">
-          <circle cx="260" cy="260" r="238" />
-          <circle cx="260" cy="260" r="228" opacity="0.5" />
-          {marcas(72, 228, 10).map((m) => (
-            <line key={m.k} x1={m.x1} y1={m.y1} x2={m.x2} y2={m.y2} opacity={m.k % 6 === 0 ? 1 : 0.4} />
+      <svg viewBox="0 0 560 560" fill="none">
+        {/* halo de éter — o brilho que sai de trás do selo inteiro */}
+        <circle className="px-halo" cx="280" cy="280" r="230"
+          fill="var(--brasao)" opacity="0.14" style={{ filter: "blur(70px)" }} />
+
+        {/* anel externo — graduação de latão, giro lentíssimo */}
+        <g className="px-anel px-anel-1" stroke={OURO} strokeWidth="1" opacity="0.5">
+          <circle cx="280" cy="280" r="256" />
+          <circle cx="280" cy="280" r="246" opacity="0.5" />
+          {marcas(96, 246, 9).map((m) => (
+            <line key={m.k} x1={m.x1} y1={m.y1} x2={m.x2} y2={m.y2} opacity={m.k % 8 === 0 ? 1 : 0.32} />
           ))}
         </g>
-        {/* anel médio — banda orbital inclinada, giro contrário */}
-        <g className="px-anel px-anel-2" stroke={OURO} strokeWidth="1.2" opacity="0.5">
-          <ellipse cx="260" cy="260" rx="186" ry="72" />
-          <ellipse cx="260" cy="260" rx="186" ry="72" transform="rotate(60 260 260)" />
-          <ellipse cx="260" cy="260" rx="186" ry="72" transform="rotate(120 260 260)" />
+
+        {/* coroa de runas — traços grossos que acendem em sequência */}
+        <g className="px-anel px-anel-4" stroke={ROXO} strokeWidth="3" strokeLinecap="round">
+          {marcas(12, 200, 26).map((m) => (
+            <line key={m.k} className="px-runa" style={{ "--d": `${(m.k % 6) * 0.75}s` }}
+              x1={m.x1} y1={m.y1} x2={m.x2} y2={m.y2} />
+          ))}
         </g>
+
+        {/* bandas orbitais — as três elipses inclinadas, agora em ametista */}
+        <g className="px-anel px-anel-2" stroke={ROXO} strokeWidth="1.2" opacity="0.45">
+          <ellipse cx="280" cy="280" rx="204" ry="78" />
+          <ellipse cx="280" cy="280" rx="204" ry="78" transform="rotate(60 280 280)" />
+          <ellipse cx="280" cy="280" rx="204" ry="78" transform="rotate(120 280 280)" />
+        </g>
+
         {/* anel interno — dentes de engrenagem */}
-        <g className="px-anel px-anel-3" stroke={OURO} strokeWidth="1.4" opacity="0.65">
-          <circle cx="260" cy="260" r="118" />
-          {marcas(24, 118, 14).map((m) => (
+        <g className="px-anel px-anel-3" stroke={OURO} strokeWidth="1.4" opacity="0.6">
+          <circle cx="280" cy="280" r="130" />
+          {marcas(24, 130, 15).map((m) => (
             <line key={m.k} x1={m.x1} y1={m.y1} x2={m.x2} y2={m.y2} />
           ))}
         </g>
-        {/* núcleo em brasa */}
-        <circle className="px-nucleo" cx="260" cy="260" r="52"
-          fill="var(--brasao)" opacity="0.5" style={{ filter: "blur(26px)" }} />
-        <circle cx="260" cy="260" r="26" stroke={OURO} strokeWidth="1" opacity="0.6" />
+
+        {/* hexagrama — a figura fixa do selo, a única que não gira */}
+        <g stroke={ROXO} strokeWidth="1.3" opacity="0.5">
+          <path d="M280 176 L370 332 L190 332 Z" />
+          <path d="M280 384 L190 228 L370 228 Z" />
+        </g>
+
+        {/* satélites — três órbitas com períodos primos entre si */}
+        {[
+          { c: "px-orb-1", r: 246, cor: ROXO, raio: 4.5 },
+          { c: "px-orb-2", r: 200, cor: OURO, raio: 3.5 },
+          { c: "px-orb-3", r: 130, cor: ROXO, raio: 3 },
+        ].map((o) => (
+          <g key={o.c} className={`px-orb ${o.c}`}>
+            <circle cx="280" cy={280 - o.r} r={o.raio} fill={o.cor} opacity="0.9" />
+            <circle cx="280" cy={280 - o.r} r={o.raio * 3} fill={o.cor} opacity="0.16" />
+          </g>
+        ))}
+
+        {/* núcleo de éter */}
+        <circle className="px-nucleo" cx="280" cy="280" r="56"
+          fill="var(--brasao)" opacity="0.55" style={{ filter: "blur(28px)" }} />
+        <circle cx="280" cy="280" r="30" stroke={OURO} strokeWidth="1" opacity="0.6" />
+        <circle className="px-nucleo" cx="280" cy="280" r="9" fill="var(--brasao2)" opacity="0.8" />
       </svg>
     </div>
   );
@@ -339,8 +381,12 @@ export default function Painel({
 
   const abrirCampanhas = () => onNav?.("party");
 
+  /* O selo, a fenda, o éter e a aura continuariam girando com a aba em
+     segundo plano. Um data-attribute e o CSS congela a tela inteira. */
+  const raiz = usePausaSeOculto();
+
   return (
-    <div className="px fade" style={{ "--px-accent": acento, "--px-glow": brilho }}>
+    <div className="px fade" ref={raiz} style={{ "--px-accent": acento, "--px-glow": brilho }}>
       <PainelStyles />
 
       {/* ══ HERO ══════════════════════════════════════════════════════════ */}
@@ -348,12 +394,15 @@ export default function Painel({
         {["tl", "tr", "bl", "br"].map((c) => (
           <span key={c} className={`px-hero-canto ${c}`} aria-hidden="true" />
         ))}
-        <Armila />
+        <Sigilo />
         <div className="px-aura" aria-hidden="true">
-          <i style={{ right: "4%", top: "18%", width: 440, height: 440, background: acento, opacity: 0.42 }} />
-          <i style={{ left: "6%",  top: "8%",  width: 360, height: 360, background: "var(--gold)", opacity: 0.26, animationDelay: "-11s" }} />
-          <i style={{ left: "40%", top: "64%", width: 300, height: 300, background: acento, opacity: 0.18, animationDelay: "-19s" }} />
+          <i style={{ right: "4%", top: "18%", width: 440, height: 440, background: acento, opacity: 0.34 }} />
+          <i style={{ left: "6%",  top: "8%",  width: 360, height: 360, background: "var(--gold)", opacity: 0.22, animationDelay: "-11s" }} />
+          <i style={{ left: "40%", top: "64%", width: 320, height: 320, background: acento, opacity: 0.2, animationDelay: "-19s" }} />
         </div>
+        {/* Fenda: a rachadura por onde o Outro Lado entra na chapa. Duas
+            linhas finíssimas em diagonal, com o brilho correndo por dentro. */}
+        <span className="px-fenda" aria-hidden="true" />
         <div className="px-grao" aria-hidden="true" />
         <div className="px-motes" aria-hidden="true">
           {brasas.map((esq, i) => (
@@ -361,13 +410,21 @@ export default function Painel({
               left: `${esq}%`,
               animationDuration: `${10 + (i % 5) * 3}s`,
               animationDelay: `${-(i * 1.9)}s`,
-              background: i % 3 === 0 ? acento : "var(--gold2)",
+              background: i % 3 === 0 ? "var(--gold2)" : acento,
+              boxShadow: i % 3 === 0 ? "none" : `0 0 8px 1px ${brilho}`,
             }} />
           ))}
         </div>
 
         <div className="px-eyebrow">{sT("dashboard.welcome")} · {saudacao}</div>
-        <h1 className="px-title">Painel</h1>
+        {/* O eco é uma CÓPIA do título deslocada em ametista, atrás do ouro.
+            Fica quase invisível e escapa por um instante de vez em quando —
+            a aberração do Outro Lado empurrando o metal. Só transform e
+            opacity, e some inteiro com movimento reduzido. */}
+        <div className="px-title-wrap">
+          <span className="px-title-eco" aria-hidden="true">Painel</span>
+          <h1 className="px-title">Painel</h1>
+        </div>
         {system?.desc ? <p className="px-sub">{system.desc}</p> : null}
 
         <div className="px-orn" aria-hidden="true"><i /><b>◈</b><i /></div>

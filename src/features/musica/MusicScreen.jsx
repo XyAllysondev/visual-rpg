@@ -348,10 +348,13 @@ export default function MusicScreen({ nowPlaying, onNowPlaying, musicTokens, onM
           >←</button>
         )}
         <div style={{ fontSize: 24, color: gold }}>♪</div>
+        {/* quick 008 — o título passa a ser .nx-h1: ouro gravado, halo de
+            ametista, versal na inicial. Era um <div> em Cinzel Decorative de
+            17px, que fazia a tela de Trilhas ter cabeçalho de outro app. */}
         <div>
-          <div style={{ fontFamily: "Cinzel Decorative,serif", fontSize: 17, color: gold, letterSpacing: 2 }}>
+          <h1 className="nx-h1" style={{ margin: 0 }}>
             {selectedPlaylist ? selectedPlaylist.name : "Trilhas Sonoras"}
-          </div>
+          </h1>
           <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 2 }}>
             {selectedPlaylist
               ? `${tracks.length || selectedPlaylist.count || 0} faixas · ${selectedPlaylist.svc === "youtube" ? "YouTube" : selectedPlaylist.svc === "spotify" ? "Spotify" : "Local"}`

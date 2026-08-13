@@ -9,6 +9,9 @@ import { useSlidingPill } from "./hooks/useSlidingPill";
 import SlidingTabPill from "./components/SlidingTabPill";
 import { ELEMENTOS, getElementTheme } from "./components/systems/OrdemParanormal/elementos";
 import ElementoSymbol from "./components/systems/OrdemParanormal/ElementoSymbol";
+/* quick 007 — a aba da pasta na listagem carrega o MESMO nº de processo que
+   o dossiê mostra por dentro (mesma função, mesmo id ⇒ mesmo número). */
+import { numeroDeProcesso } from "./components/systems/OrdemParanormal/dossie";
 import { DEMO_ON, PLANOS_DEMO } from "./demo/demoMode";
 /* Painel (a tela "dashboard"). Saiu de dentro deste arquivo no redesenho de
    2026-08-05 — a tela tem hero animado, retomar, pendências e preparo do mundo,
@@ -211,7 +214,7 @@ function CoverPreviewModal({ image: initialImage, onConfirm, onClose }) {
                 transform:`translate(calc(-50% + ${pos.x}px), calc(-50% + ${pos.y}px)) scale(${totalScale})`,
                 transformOrigin:"center center"}}
             />
-            <div style={{position:"absolute",inset:0,border:"2px solid rgba(163,40,44,0.4)",borderRadius:8,pointerEvents:"none"}}/>
+            <div style={{position:"absolute",inset:0,border:"2px solid rgba(176,48,216,0.4)",borderRadius:8,pointerEvents:"none"}}/>
           </div>
 
           {/* Zoom */}
@@ -261,23 +264,32 @@ const G = () => (
     html{-webkit-text-size-adjust:100%}
     /* Fallback de boot (spec 0023). O registry (themes/index.js, via <ThemeStyles/>)
        vence por especificidade — :root[data-nexus-system] é (0,2,0) contra (0,1,0).
-       Estes valores espelham a escala grafite do sistema padrão (op) para que o
-       primeiro frame e a IntroScreen (que não monta este bloco) não pisquem escuro. */
+       Estes valores espelham a escala do sistema padrão (op) para que o primeiro
+       frame e a IntroScreen (que não monta este bloco) não pisquem noutra cor.
+       Estavam no grafite antigo e por isso o boot piscava cinza antes de virar
+       obsidiana violeta — sincronizados com o registry em 2026-08-06. */
     :root{
-      --bg:#14141c;
-      --surface:#1c1c26;
-      --card:#24242f;
-      --card2:#2c2c39;
-      --border:rgba(201,168,76,0.18);
-      --border2:rgba(201,168,76,0.34);
-      --gold:#c9a84c;
-      --gold2:#e8c96d;
-      --gold3:#a07830;
-      --gold-glow:rgba(201,168,76,0.22);
-      --gold-dim:rgba(201,168,76,0.09);
-      --text:#e8e4d9;
-      --muted:#a89a7c;
-      --muted2:#c8b48e;
+      --bg:#0a070f;
+      --surface:#191326;
+      --card:#231a35;
+      --card2:#2d2245;
+      --border:rgba(176,48,216,0.26);
+      --border2:rgba(198,164,92,0.38);
+      --gold:#c6a45c;
+      --gold2:#f2ddab;
+      --gold3:#8a6b2c;
+      --gold-glow:rgba(198,164,92,0.22);
+      --gold-dim:rgba(198,164,92,0.09);
+      --brasao:#b030d8;
+      --brasao2:#d870f8;
+      --brasao-glow:rgba(176,48,216,0.32);
+      --brasao-dim:rgba(176,48,216,0.12);
+      --brasao-veu:rgba(176,48,216,0.06);
+      --brasao-nevoa:rgba(176,48,216,0.19);
+      --brasao-halo:rgba(176,48,216,0.55);
+      --text:#ede7f6;
+      --muted:#9c95ad;
+      --muted2:#cbc2dc;
       --danger:#8b2020;
       --purple:#5d7896;
       --purple2:#e0c9a0;
@@ -1619,7 +1631,7 @@ function CreateCampaignModal({ onClose, onCreate }) {
     {createPortal(
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.78)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px"}}>
       <div onClick={e=>e.stopPropagation()} style={{background:"var(--surface)",border:"1px solid var(--border2)",borderRadius:12,padding:"28px",width:"100%",maxWidth:440,display:"flex",flexDirection:"column",gap:20,boxShadow:"0 24px 64px rgba(0,0,0,0.48)"}}>
-        <div style={{fontFamily:"'Cinzel Decorative',serif",fontSize:18,background:"linear-gradient(135deg,#a3282c,#e0c9a0)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
+        <div style={{fontFamily:"'Cinzel Decorative',serif",fontSize:18,background:"linear-gradient(135deg,#b030d8,#e0c9a0)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
           Nova Campanha
         </div>
         {error && <div style={{padding:"10px 14px",background:"rgba(139,32,32,0.18)",border:"1px solid rgba(139,32,32,0.4)",borderRadius:6,fontFamily:"Cinzel,serif",fontSize:11,color:"#e07070",letterSpacing:1}}>{error}</div>}
@@ -1630,9 +1642,9 @@ function CreateCampaignModal({ onClose, onCreate }) {
           onClick={()=>coverInputRef.current?.click()}
           onDragOver={e=>e.preventDefault()}
           onDrop={e=>{e.preventDefault();e.dataTransfer.files?.[0]&&handleCoverFile(e.dataTransfer.files[0]);}}
-          style={{position:"relative",width:"100%",height:140,borderRadius:10,overflow:"hidden",cursor:"pointer",border:`2px dashed ${coverImage?"transparent":"rgba(163,40,44,0.3)"}`,background:coverImage?"transparent":"rgba(163,40,44,0.04)",transition:"all 0.2s",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:6}}
-          onMouseEnter={e=>{if(!coverImage)e.currentTarget.style.borderColor="rgba(163,40,44,0.6)";}}
-          onMouseLeave={e=>{if(!coverImage)e.currentTarget.style.borderColor="rgba(163,40,44,0.3)";}}>
+          style={{position:"relative",width:"100%",height:140,borderRadius:10,overflow:"hidden",cursor:"pointer",border:`2px dashed ${coverImage?"transparent":"rgba(176,48,216,0.3)"}`,background:coverImage?"transparent":"rgba(176,48,216,0.04)",transition:"all 0.2s",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:6}}
+          onMouseEnter={e=>{if(!coverImage)e.currentTarget.style.borderColor="rgba(176,48,216,0.6)";}}
+          onMouseLeave={e=>{if(!coverImage)e.currentTarget.style.borderColor="rgba(176,48,216,0.3)";}}>
           {coverImage
             ? <>
                 <img src={coverImage} alt="capa" style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover"}}/>
@@ -1644,10 +1656,10 @@ function CreateCampaignModal({ onClose, onCreate }) {
                 </div>
               </>
             : coverLoading
-              ? <div style={{width:22,height:22,border:"2px solid rgba(163,40,44,0.3)",borderTopColor:"#a3282c",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+              ? <div style={{width:22,height:22,border:"2px solid rgba(176,48,216,0.3)",borderTopColor:"#b030d8",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
               : <>
                   <div style={{fontSize:28,opacity:0.4}}>🖼</div>
-                  <div style={{fontFamily:"Cinzel,serif",fontSize:10,color:"rgba(163,40,44,0.7)",letterSpacing:1}}>Clique ou arraste uma imagem de capa</div>
+                  <div style={{fontFamily:"Cinzel,serif",fontSize:10,color:"rgba(176,48,216,0.7)",letterSpacing:1}}>Clique ou arraste uma imagem de capa</div>
                   <div style={{fontSize:11,color:"var(--muted)"}}>JPG, PNG, WEBP</div>
                 </>
           }
@@ -1703,7 +1715,7 @@ function JoinCampaignModal({ onClose, onJoin }) {
   return createPortal(
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.78)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px"}}>
       <div onClick={e=>e.stopPropagation()} style={{background:"var(--surface)",border:"1px solid var(--border2)",borderRadius:12,padding:"28px",width:"100%",maxWidth:360,display:"flex",flexDirection:"column",gap:20,boxShadow:"0 24px 64px rgba(0,0,0,0.48)"}}>
-        <div style={{fontFamily:"'Cinzel Decorative',serif",fontSize:18,background:"linear-gradient(135deg,#a3282c,#e0c9a0)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
+        <div style={{fontFamily:"'Cinzel Decorative',serif",fontSize:18,background:"linear-gradient(135deg,#b030d8,#e0c9a0)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
           Entrar em Campanha
         </div>
         <div style={{fontFamily:"'Crimson Pro',serif",fontSize:15,color:"var(--muted2)",lineHeight:1.65}}>
@@ -1745,7 +1757,7 @@ function CampaignCard({ campaign, uid, onClick }) {
         border:"1px solid var(--border)",
         boxShadow:"0 4px 16px rgba(0,0,0,0.35)",
       }}
-        onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 12px 32px rgba(0,0,0,0.55)";e.currentTarget.style.borderColor="rgba(163,40,44,0.45)";}}
+        onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 12px 32px rgba(0,0,0,0.55)";e.currentTarget.style.borderColor="rgba(176,48,216,0.45)";}}
         onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,0.35)";e.currentTarget.style.borderColor="var(--border)";}}>
         {/* Cover image */}
         <div style={{width:"100%",height:160,position:"relative",overflow:"hidden"}}>
@@ -1758,7 +1770,7 @@ function CampaignCard({ campaign, uid, onClick }) {
             </span>
           </div>
           {isMaster && (
-            <div style={{position:"absolute",top:8,right:8,padding:"3px 8px",borderRadius:4,background:"rgba(163,40,44,0.7)",border:"1px solid rgba(163,40,44,0.5)",fontFamily:"Cinzel,serif",fontSize:8,letterSpacing:1,color:"#f2ddab",textTransform:"uppercase"}}>
+            <div style={{position:"absolute",top:8,right:8,padding:"3px 8px",borderRadius:4,background:"rgba(176,48,216,0.7)",border:"1px solid rgba(176,48,216,0.5)",fontFamily:"Cinzel,serif",fontSize:8,letterSpacing:1,color:"#f2ddab",textTransform:"uppercase"}}>
               Mestre
             </div>
           )}
@@ -1799,15 +1811,15 @@ function CampaignCard({ campaign, uid, onClick }) {
       padding:"18px 18px 16px",cursor:"pointer",transition:"all 0.2s",
       position:"relative",overflow:"hidden",
     }}
-      onMouseEnter={e=>{e.currentTarget.style.borderColor="rgba(163,40,44,0.45)";e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 24px rgba(163,40,44,0.14)";}}
+      onMouseEnter={e=>{e.currentTarget.style.borderColor="rgba(176,48,216,0.45)";e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 24px rgba(176,48,216,0.14)";}}
       onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="none";}}>
-      <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,transparent,rgba(163,40,44,0.55),transparent)"}}/>
+      <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,transparent,rgba(176,48,216,0.55),transparent)"}}/>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
         <div style={{fontFamily:"Cinzel,serif",fontSize:15,fontWeight:700,color:"var(--text)",flex:1,lineHeight:1.3}}>
           {campaign.name}
         </div>
         {isMaster && (
-          <div style={{padding:"3px 8px",borderRadius:4,background:"rgba(163,40,44,0.15)",border:"1px solid rgba(163,40,44,0.3)",fontFamily:"Cinzel,serif",fontSize:8,letterSpacing:1,color:"#e0c9a0",textTransform:"uppercase",flexShrink:0}}>
+          <div style={{padding:"3px 8px",borderRadius:4,background:"rgba(176,48,216,0.15)",border:"1px solid rgba(176,48,216,0.3)",fontFamily:"Cinzel,serif",fontSize:8,letterSpacing:1,color:"#e0c9a0",textTransform:"uppercase",flexShrink:0}}>
             Mestre
           </div>
         )}
@@ -1839,7 +1851,7 @@ function CampaignList({ uid, userName, campaigns, loading, onOpenCampaign, onCre
 
   if (loading) return (
     <div className="fade" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:320}}>
-      <div style={{width:32,height:32,border:"2px solid rgba(163,40,44,0.3)",borderTopColor:"#a3282c",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+      <div style={{width:32,height:32,border:"2px solid rgba(176,48,216,0.3)",borderTopColor:"#b030d8",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
     </div>
   );
 
@@ -1925,8 +1937,8 @@ function ChatMessage({ msg, uid, formatTime }) {
         fontFamily:"'Crimson Pro',serif",fontSize:14,
         color:"rgba(210,190,230,0.75)",fontStyle:"italic",
         padding:"5px 18px",
-        background:"rgba(163,40,44,0.08)",
-        borderRadius:20,border:"1px solid rgba(163,40,44,0.16)"
+        background:"rgba(176,48,216,0.08)",
+        borderRadius:20,border:"1px solid rgba(176,48,216,0.16)"
       }}>
         {msg.content}
       </span>
@@ -1938,7 +1950,7 @@ function ChatMessage({ msg, uid, formatTime }) {
       <div style={{
         width:36,height:36,borderRadius:"50%",flexShrink:0,
         background: isOwn
-          ? "linear-gradient(135deg,rgba(163,40,44,0.55),rgba(110,30,180,0.45))"
+          ? "linear-gradient(135deg,rgba(176,48,216,0.55),rgba(110,30,180,0.45))"
           : "linear-gradient(135deg,rgba(255,255,255,0.14),rgba(255,255,255,0.07))",
         border: isOwn
           ? "1.5px solid rgba(224,100,90,0.55)"
@@ -1973,7 +1985,7 @@ function ChatMessage({ msg, uid, formatTime }) {
               ? "rgba(148,52,210,0.40)"
               : "rgba(255,255,255,0.10)",
           border: isRoll
-            ? "1px solid rgba(163,40,44,0.50)"
+            ? "1px solid rgba(176,48,216,0.50)"
             : isOwn
               ? "1px solid rgba(190,100,255,0.42)"
               : "1px solid rgba(255,255,255,0.14)",
@@ -2111,7 +2123,7 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
       {hasMore && (
         <div style={{textAlign:"center",padding:"8px 0",flexShrink:0}}>
           <button onClick={loadMore} style={{
-            background:"rgba(163,40,44,0.10)",border:"1px solid rgba(163,40,44,0.28)",
+            background:"rgba(176,48,216,0.10)",border:"1px solid rgba(176,48,216,0.28)",
             borderRadius:20,cursor:"pointer",
             color:"#e0c9a0",fontFamily:"Cinzel,serif",fontSize:9,letterSpacing:1,
             textTransform:"uppercase",padding:"6px 18px",transition:"all 0.18s",
@@ -2123,11 +2135,11 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
       <div style={{
         flex:1,overflowY:"auto",padding:"14px 8px",
         display:"flex",flexDirection:"column",gap:4,minHeight:0,
-        scrollbarWidth:"thin",scrollbarColor:"rgba(163,40,44,0.25) transparent",
+        scrollbarWidth:"thin",scrollbarColor:"rgba(176,48,216,0.25) transparent",
       }}>
         {loading && (
           <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flex:1,gap:12,padding:"40px 0"}}>
-            <div style={{width:28,height:28,border:"2.5px solid rgba(163,40,44,0.2)",borderTopColor:"#a3282c",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+            <div style={{width:28,height:28,border:"2.5px solid rgba(176,48,216,0.2)",borderTopColor:"#b030d8",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
             <span style={{fontFamily:"'Crimson Pro',serif",fontSize:14,color:"rgba(200,175,225,0.5)",fontStyle:"italic"}}>Carregando mensagens…</span>
           </div>
         )}
@@ -2156,7 +2168,7 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
               {[0,1,2].map(i=>(
                 <div key={i} style={{
                   width:6,height:6,borderRadius:"50%",
-                  background:"rgba(163,40,44,0.55)",
+                  background:"rgba(176,48,216,0.55)",
                   animation:`pulse 1.2s ${i*0.2}s infinite`
                 }}/>
               ))}
@@ -2170,7 +2182,7 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
       </div>
       <div style={{
         padding:"12px 8px 10px",
-        borderTop:"1px solid rgba(163,40,44,0.18)",
+        borderTop:"1px solid rgba(176,48,216,0.18)",
         display:"flex",flexDirection:"column",gap:8,flexShrink:0,
         background:"rgba(0,0,0,0.18)",
       }}>
@@ -2184,7 +2196,7 @@ function CampaignChat({ campaignId, uid, userName, userPhoto, isMaster }) {
               style={{
                 paddingRight:46,paddingLeft:14,height:42,
                 background:"rgba(255,255,255,0.07)",
-                border:"1px solid rgba(163,40,44,0.30)",
+                border:"1px solid rgba(176,48,216,0.30)",
                 borderRadius:10,
                 color:"#ede5f8",
                 fontFamily:"'Crimson Pro',serif",
@@ -2246,7 +2258,7 @@ function SharedSheetCard({ sheet, uid, isMaster, onView, onRemove }) {
         </div>
       )}
       <div style={{display:"flex",gap:12,alignItems:"center"}}>
-        <div style={{width:48,height:48,borderRadius:8,background:"rgba(163,40,44,0.1)",border:"1px solid rgba(163,40,44,0.22)",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",flexShrink:0,fontSize:22}}>
+        <div style={{width:48,height:48,borderRadius:8,background:"rgba(176,48,216,0.1)",border:"1px solid rgba(176,48,216,0.22)",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",flexShrink:0,fontSize:22}}>
           {getActiveAvatar(char)?<img src={getActiveAvatar(char)} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:"🕵️"}
         </div>
         <div style={{flex:1,minWidth:0}}>
@@ -2374,8 +2386,8 @@ function SharedSheetsPanel({ campaignId, uid, userName, isMaster, characters }) 
           </div>
           <div style={{
             padding:"2px 9px",borderRadius:20,
-            background: atLimit ? "rgba(224,112,112,0.12)" : "rgba(163,40,44,0.1)",
-            border: `1px solid ${atLimit ? "rgba(224,112,112,0.3)" : "rgba(163,40,44,0.25)"}`,
+            background: atLimit ? "rgba(224,112,112,0.12)" : "rgba(176,48,216,0.1)",
+            border: `1px solid ${atLimit ? "rgba(224,112,112,0.3)" : "rgba(176,48,216,0.25)"}`,
             fontFamily:"Cinzel,serif",fontSize:9,letterSpacing:1,
             color: atLimit ? "#e07070" : "var(--purple2)",
           }}>
@@ -2405,7 +2417,7 @@ function SharedSheetsPanel({ campaignId, uid, userName, isMaster, characters }) 
 
       {/* No characters hint */}
       {!sharing && characters.length === 0 && (
-        <div style={{padding:"10px 14px",background:"rgba(163,40,44,0.06)",border:"1px solid rgba(163,40,44,0.18)",borderRadius:8,fontFamily:"'Crimson Pro',serif",fontSize:13,color:"var(--muted)",fontStyle:"italic",textAlign:"center"}}>
+        <div style={{padding:"10px 14px",background:"rgba(176,48,216,0.06)",border:"1px solid rgba(176,48,216,0.18)",borderRadius:8,fontFamily:"'Crimson Pro',serif",fontSize:13,color:"var(--muted)",fontStyle:"italic",textAlign:"center"}}>
           Crie um personagem na aba <strong style={{fontStyle:"normal",color:"var(--purple2)"}}>Fichas</strong> para poder compartilhar nesta campanha.
         </div>
       )}
@@ -2420,7 +2432,7 @@ function SharedSheetsPanel({ campaignId, uid, userName, isMaster, characters }) 
           ) : availableChars.map(c=>(
             <div key={c.id||c.createdAt} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"var(--card2)",borderRadius:6,border:"1px solid var(--border)",flexWrap:"wrap",gap:8}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:36,height:36,borderRadius:6,background:"rgba(163,40,44,0.1)",border:"1px solid rgba(163,40,44,0.22)",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",fontSize:18}}>
+                <div style={{width:36,height:36,borderRadius:6,background:"rgba(176,48,216,0.1)",border:"1px solid rgba(176,48,216,0.22)",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",fontSize:18}}>
                   {getActiveAvatar(c)?<img src={getActiveAvatar(c)} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:"🕵️"}
                 </div>
                 <div>
@@ -2440,7 +2452,7 @@ function SharedSheetsPanel({ campaignId, uid, userName, isMaster, characters }) 
 
       {loading && (
         <div style={{display:"flex",justifyContent:"center",padding:"40px 0"}}>
-          <div style={{width:24,height:24,border:"2px solid rgba(163,40,44,0.3)",borderTopColor:"#a3282c",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+          <div style={{width:24,height:24,border:"2px solid rgba(176,48,216,0.3)",borderTopColor:"#b030d8",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
         </div>
       )}
 
@@ -2500,7 +2512,7 @@ function MembersPanel({ campaign, uid, isMaster }) {
        olho não fechava a associação. Isso não é espaço, é dispersão. */
     <div style={{overflowY:"auto",minHeight:0,padding:"16px 4px 28px",maxWidth:880,width:"100%",display:"flex",flexDirection:"column",gap:12}}>
       {isMaster && (
-        <div style={{padding:"14px 16px",background:"var(--card)",border:"1px solid rgba(163,40,44,0.3)",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+        <div style={{padding:"14px 16px",background:"var(--card)",border:"1px solid rgba(176,48,216,0.3)",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
           <div>
             <div style={{fontFamily:"Cinzel,serif",fontSize:9,letterSpacing:2,color:"var(--muted)",textTransform:"uppercase",marginBottom:4}}>Código de Convite</div>
             <div style={{fontFamily:"Cinzel,serif",fontSize:24,letterSpacing:10,color:"#e0c9a0",userSelect:"all"}}>{campaign.inviteCode}</div>
@@ -2520,7 +2532,7 @@ function MembersPanel({ campaign, uid, isMaster }) {
         const name          = memberNames[memberId]||"Agente";
         return (
           <div key={memberId} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",background:"var(--card)",borderRadius:8,border:"1px solid var(--border)"}}>
-            <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,rgba(163,40,44,0.28),rgba(163,40,44,0.08))",border:"1px solid rgba(163,40,44,0.22)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Cinzel,serif",fontSize:14,color:"#e0c9a0",flexShrink:0}}>
+            <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,rgba(176,48,216,0.28),rgba(176,48,216,0.08))",border:"1px solid rgba(176,48,216,0.22)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Cinzel,serif",fontSize:14,color:"#e0c9a0",flexShrink:0}}>
               {name.charAt(0).toUpperCase()}
             </div>
             <div style={{flex:1,minWidth:0}}>
@@ -2630,7 +2642,7 @@ function MasterSettings({ campaign, onBack, isMaster=true }) {
             onClick={()=>coverInputRef.current?.click()}
             onDragOver={e=>e.preventDefault()}
             onDrop={e=>{e.preventDefault();e.dataTransfer.files?.[0]&&handleCoverFile(e.dataTransfer.files[0]);}}
-            style={{position:"relative",width:"100%",height:120,borderRadius:8,overflow:"hidden",cursor:"pointer",border:`2px dashed ${coverImage?"transparent":"rgba(163,40,44,0.3)"}`,background:coverImage?"transparent":"rgba(163,40,44,0.04)",transition:"all 0.2s",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:4}}>
+            style={{position:"relative",width:"100%",height:120,borderRadius:8,overflow:"hidden",cursor:"pointer",border:`2px dashed ${coverImage?"transparent":"rgba(176,48,216,0.3)"}`,background:coverImage?"transparent":"rgba(176,48,216,0.04)",transition:"all 0.2s",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:4}}>
             {coverImage
               ? <>
                   <img src={coverImage} alt="capa" style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover"}}/>
@@ -2642,10 +2654,10 @@ function MasterSettings({ campaign, onBack, isMaster=true }) {
                   </div>
                 </>
               : coverLoading
-                ? <div style={{width:20,height:20,border:"2px solid rgba(163,40,44,0.3)",borderTopColor:"#a3282c",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+                ? <div style={{width:20,height:20,border:"2px solid rgba(176,48,216,0.3)",borderTopColor:"#b030d8",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
                 : <>
                     <span style={{fontSize:24,opacity:0.4}}>🖼</span>
-                    <span style={{fontFamily:"Cinzel,serif",fontSize:9,color:"rgba(163,40,44,0.7)",letterSpacing:1}}>Clique ou arraste uma imagem</span>
+                    <span style={{fontFamily:"Cinzel,serif",fontSize:9,color:"rgba(176,48,216,0.7)",letterSpacing:1}}>Clique ou arraste uma imagem</span>
                   </>
             }
           </div>
@@ -2769,8 +2781,8 @@ function RollFeed({ campaignId, uid }) {
           <button key={v} onClick={()=>setFilter(v)} style={{
             padding:"5px 16px",borderRadius:6,border:"1px solid",cursor:"pointer",
             fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:1,transition:"all 0.18s",
-            background:filter===v?"#a3282c":"transparent",
-            borderColor:filter===v?"#a3282c":"rgba(255,255,255,0.12)",
+            background:filter===v?"#7c3aed":"transparent",
+            borderColor:filter===v?"#7c3aed":"rgba(255,255,255,0.12)",
             color:filter===v?"#fff":"rgba(255,255,255,0.5)",
           }}>{l}</button>
         ))}
@@ -2792,10 +2804,10 @@ function RollFeed({ campaignId, uid }) {
           const total = rd.total ?? "?";
           const sides = rd.sides || 20;
           return (
-            <div key={r.id} style={{border:"1px solid rgba(163,40,44,0.35)",borderRadius:8,padding:"11px 13px",background:"rgba(163,40,44,0.06)"}}>
+            <div key={r.id} style={{border:"1px solid rgba(176,48,216,0.35)",borderRadius:8,padding:"11px 13px",background:"rgba(176,48,216,0.06)"}}>
               <div style={{fontFamily:"Cinzel,serif",fontSize:11,color:"rgba(255,255,255,0.85)",marginBottom:8,fontWeight:600}}>{r.userName}</div>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:38,height:38,background:"#a3282c",borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                <div style={{width:38,height:38,background:"#7c3aed",borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
                   <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.5"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/></svg>
                 </div>
                 <div style={{flex:1,minWidth:0}}>
@@ -2974,25 +2986,34 @@ function MapaScreen({ uid, plan = 'free', onBack }) {
     if (id) setAba(id);
   };
 
+  /* quick 008 — a chapa da casa (.nx-card) sobre pauta de escriba, com a
+     picotagem de margem. Era um botão com raio 14 e um degradê do acento:
+     card de outro app, e o hover reescrevia borda/sombra à mão, o que
+     apagava o bisel. Agora o CSS governa material e hover; aqui fica só o
+     que é DESTA tela — o acento do item e o espaço da margem picotada. */
   const Card = ({ icone, titulo, texto, cor, onClick }) => (
-    <button onClick={onClick} style={{
-      flex:'1 1 260px', maxWidth:340, padding:'28px 24px', borderRadius:14, cursor:'pointer', textAlign:'left',
-      background:`linear-gradient(160deg, ${cor}18, transparent)`, border:`1px solid ${cor}44`, transition:'all .18s',
-    }}
-      onMouseEnter={e=>{ e.currentTarget.style.transform='translateY(-3px)'; e.currentTarget.style.borderColor=`${cor}99`; e.currentTarget.style.boxShadow=`0 8px 26px rgba(0,0,0,0.45)`; }}
-      onMouseLeave={e=>{ e.currentTarget.style.transform='none'; e.currentTarget.style.borderColor=`${cor}44`; e.currentTarget.style.boxShadow='none'; }}>
-      <div style={{ fontSize:40, marginBottom:12 }}>{icone}</div>
-      <div style={{ fontFamily:'Cinzel Decorative,serif', fontSize:18, color:cor, marginBottom:8 }}>{titulo}</div>
-      <div style={{ fontFamily:"var(--font-body,'Crimson Pro',serif)", fontSize:15, color:'var(--muted2)', lineHeight:1.6 }}>{texto}</div>
+    <button className="nx-card h-pauta h-picote" onClick={onClick} style={{
+      flex:'1 1 260px', maxWidth:340, padding:'26px 24px 24px 34px', cursor:'pointer', textAlign:'left',
+    }}>
+      <div style={{ fontSize:40, marginBottom:12, position:'relative', zIndex:1 }}>{icone}</div>
+      <div className="nx-card-t" style={{ color:cor }}>{titulo}</div>
+      <div style={{ fontFamily:"var(--font-body,'Crimson Pro',serif)", fontSize:15, color:'var(--muted2)', lineHeight:1.6, position:'relative', zIndex:1 }}>{texto}</div>
     </button>
   );
 
   return (
     <div className="fade" style={{ display:'flex', flexDirection:'column', gap:18 }}>
-      <div>
-        <div style={{ fontFamily:'Cinzel,serif', fontSize:11, letterSpacing:'0.14em', color:'var(--muted)', textTransform:'uppercase', marginBottom:6 }}>Ateliê do Mestre</div>
-        <h1 style={{ fontFamily:"'Cinzel Decorative',serif", fontSize:'clamp(20px,2.4vw,26px)', fontWeight:700,
-          background:'linear-gradient(135deg,#c9a84c,#e8c96d)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text' }}>Mapas</h1>
+      {/* quick 008 — cabeçalho na gramática da casa. Era sobrancelha + h1 com
+          linear-gradient(135deg,#c9a84c,#e8c96d) cravado: os literais da
+          paleta de DUAS repaginações atrás (os mesmos que o AC-5 da spec 0035
+          expurgou da ficha). Agora herda ouro gravado, halo de ametista, régua
+          dupla e o versal — e repinta sozinho ao trocar de sistema. */}
+      <div className="nx-head">
+        <div className="nx-head-txt">
+          <div className="nx-eyebrow">Ateliê do Mestre</div>
+          <h1 className="nx-h1">Mapas</h1>
+          <p className="nx-sub">Mesas táticas, mapas-múndi e tokens do seu mundo.</p>
+        </div>
       </div>
 
       {/* ── Sub-abas (pill deslizante — o padrão da casa, spec 0017 AC-4) ── */}
@@ -3031,7 +3052,7 @@ function MapaScreen({ uid, plan = 'free', onBack }) {
 
         {aba === 'mesas' && (
           <div style={{ display:'flex', gap:14, flexWrap:'wrap' }}>
-            <Card icone="🗺️" titulo="Mesa Tática" cor="#a3282c" onClick={()=>setMesaAberta(true)}
+            <Card icone="🗺️" titulo="Mesa Tática" cor="#b030d8" onClick={()=>setMesaAberta(true)}
               texto="Monte o mapa com imagens, tokens, camadas de névoa e grade — tudo sincronizado com a mesa." />
           </div>
         )}
@@ -3153,7 +3174,7 @@ function CampaignMapTab({ campaignId, uid, isMaster }) {
             {[
               { id:'mesa',  onClick:()=>setMesaAberta(true),  emoji:'🗺️', titulo:'Mesa tática',
                 linha:'Imagens, tokens, camadas e névoa, ao vivo para a mesa.',
-                cor:'rgba(163,40,44,0.5)', texto:'#e0c8ff' },
+                cor:'rgba(176,48,216,0.5)', texto:'#e0c8ff' },
               { id:'mundi', onClick:()=>setMundoAberto(true), emoji:'🧭', titulo:'Mapa-múndi',
                 linha:'A viagem entre lugares, com relógio, suprimentos e névoa.',
                 cor:'rgba(201,168,76,0.5)', texto:'var(--gold2)' },
@@ -3210,7 +3231,7 @@ const EMPTY_OP_CREATURE = {
 const OP_CONDICOES = [
   { nome:'Abalado', cor:'#e09050', descricao:'-2 em testes de perícia. Se ficar abalado novamente, fica Apavorado.' },
   { nome:'Agarrado', cor:'#e09050', descricao:'Fica desprevenido e imóvel, sofre -2 em testes de ataque e só pode atacar com armas leves.' },
-  { nome:'Alquebrado', cor:'#a3282c', descricao:'O custo em PE das habilidades e rituais aumenta em +1.' },
+  { nome:'Alquebrado', cor:'#b030d8', descricao:'O custo em PE das habilidades e rituais aumenta em +1.' },
   { nome:'Apavorado', cor:'#e07070', descricao:'-5 em testes de perícia e deve fugir da fonte do medo. Se não puder fugir, pode agir, mas não pode se aproximar dela voluntariamente.' },
   { nome:'Atordoado', cor:'#e07070', descricao:'Fica desprevenido e não pode fazer ações.' },
   { nome:'Caído', cor:'#e09050', descricao:'Deitado. -5 em ataques corpo a corpo; deslocamento 1,5m. Ataques CaC contra você recebem +5; à distância, -5. Levantar custa metade do deslocamento.' },
@@ -3229,7 +3250,7 @@ const OP_CONDICOES = [
   { nome:'Morrendo', cor:'#e07070', descricao:'PV em 0. Se iniciar 3 turnos morrendo na mesma cena, morre. Encerrado por Medicina DT 20 ou efeito específico.' },
   { nome:'Paralisado', cor:'#e07070', descricao:'Fica imóvel e indefeso; só pode realizar ações puramente mentais.' },
   { nome:'Pasmo', cor:'#e09050', descricao:'Perde a próxima ação padrão. [homebrew]' },
-  { nome:'Perturbado', cor:'#a3282c', descricao:'SAN abaixo da metade. Alucinações e percepção distorcida. [homebrew]' },
+  { nome:'Perturbado', cor:'#b030d8', descricao:'SAN abaixo da metade. Alucinações e percepção distorcida. [homebrew]' },
   { nome:'Petrificado', cor:'#e07070', descricao:'Fica inconsciente e recebe resistência a dano 10.' },
   { nome:'Sangrando', cor:'#e07070', descricao:'No início do turno, faça um teste de Vigor (DT 15): se falhar, perde 1d6 PV e continua sangrando; se passar, remove a condição.' },
   { nome:'Enlouquecendo', cor:'#e07070', descricao:'SAN chegou a 0. Removido da cena; pode se tornar criatura paranormal a critério do mestre. [homebrew]' },
@@ -3248,7 +3269,7 @@ const OP_CONDICOES = [
 const TOKEN_FX = {
   Conhecimento: { c:'#f0c040', glyphs:['✦','◈','⟡','ᚱ','ᛟ','ᚨ'], mode:'rise' },
   Energia:      { c:'#57a0ff', glyphs:['✦','•','•'],             mode:'rise', flicker:true },
-  Medo:         { c:'#a3282c', glyphs:['•','•'],                 mode:'rise', fog:true },
+  Medo:         { c:'#b030d8', glyphs:['•','•'],                 mode:'rise', fog:true },
   Morte:        { c:'#a8b0b8', glyphs:['•','•','•'],             mode:'rise' },
   Sangue:       { c:'#e04040', glyphs:['●','•','•'],             mode:'fall', beat:true },
   Extras:       { c:'#c9a84c', glyphs:['✦','•'],                 mode:'rise' },
@@ -3352,8 +3373,8 @@ function BestiaryTab({ campaignId }) {
   const [tokenVariant, setTokenVariant]= useState(0);      // variante de token selecionada
   const [tokenTab,     setTokenTab]    = useState('tokens'); // 'tokens' | 'moldes' (variantes MOLDE separadas)
 
-  const SYS_COLORS = { 'Genérico':'#8888aa', 'Ordem Paranormal':'#a3282c', 'Tormenta 20':'#d4621e', 'D&D 5e':'#4a6fa5' };
-  const OPC = '#a3282c';
+  const SYS_COLORS = { 'Genérico':'#8888aa', 'Ordem Paranormal':'#b030d8', 'Tormenta 20':'#d4621e', 'D&D 5e':'#4a6fa5' };
+  const OPC = '#b030d8';
   const isOP = sys => sys === 'Ordem Paranormal';
 
   useEffect(() => {
@@ -3479,7 +3500,7 @@ function BestiaryTab({ campaignId }) {
   );
   const SecH  = ({children}) => <div style={{ fontFamily:'Cinzel Decorative,serif', fontSize:14, color:'var(--text)', margin:'14px 0 7px' }}>{children}</div>;
   const InfoL = ({children}) => <div style={{ fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1, color:'rgba(255,255,255,0.65)', textTransform:'uppercase', marginBottom:3 }}>{children}</div>;
-  const SecF  = ({children}) => <div style={{ fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:2, textTransform:'uppercase', color:OPC, borderBottom:`1px solid rgba(163,40,44,0.3)`, paddingBottom:5, marginBottom:8, marginTop:6 }}>{children}</div>;
+  const SecF  = ({children}) => <div style={{ fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:2, textTransform:'uppercase', color:OPC, borderBottom:`1px solid rgba(176,48,216,0.3)`, paddingBottom:5, marginBottom:8, marginTop:6 }}>{children}</div>;
 
   const vc = viewCreature;
   const vcHpMax = vc ? parseInt(vc.hpMax)||0 : 0;
@@ -3488,7 +3509,7 @@ function BestiaryTab({ campaignId }) {
   const OP_PERICIAS = [['PERCEPÇÃO','perPercepcao'],['INICIATIVA','perIniciativa'],['FORTITUDE','perFortitude'],['REFLEXOS','perReflexos'],['VONTADE','perVontade']];
   const OP_ATTRS    = [['AGI','agi'],['FOR','atFor'],['INT','atInt'],['PRE','pre'],['VIG','vig']];
 
-  const ELEM_COLORS = { Conhecimento:'#f0c040', Energia:'#4080e0', Morte:'#808080', Sangue:'#e04040', Medo:'#a3282c' };
+  const ELEM_COLORS = { Conhecimento:'#f0c040', Energia:'#4080e0', Morte:'#808080', Sangue:'#e04040', Medo:'#b030d8' };
   /* Biblioteca consome os MESMOS dados oficiais da ficha (spec 0025 — fonte única). */
   const CUSTO_CIRCULO = { 1:1, 2:3, 3:6, 4:10 };
   const capElem = s => s ? s.charAt(0).toUpperCase()+s.slice(1) : s;
@@ -3716,7 +3737,7 @@ function BestiaryTab({ campaignId }) {
             {[...new Set(creatures.map(c=>c.system).filter(Boolean))].map(s=><option key={s}>{s}</option>)}
           </select>
           <button onClick={openNew}
-            style={{ padding:'7px 16px', borderRadius:6, border:`1px solid rgba(163,40,44,0.5)`, background:'rgba(163,40,44,0.15)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1, whiteSpace:'nowrap' }}>
+            style={{ padding:'7px 16px', borderRadius:6, border:`1px solid rgba(176,48,216,0.5)`, background:'rgba(176,48,216,0.15)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1, whiteSpace:'nowrap' }}>
             + Adicionar Criatura
           </button>
         </div>
@@ -3733,7 +3754,7 @@ function BestiaryTab({ campaignId }) {
             const hpColor = hpC<=hpM*0.25?'#e07070':hpC<=hpM*0.5?'#e0a050':'#70c870';
             return (
               <div key={c.id} style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:8, overflow:'hidden', flexShrink:0, transition:'border-color .15s' }}
-                onMouseEnter={e=>e.currentTarget.style.borderColor='rgba(163,40,44,0.3)'}
+                onMouseEnter={e=>e.currentTarget.style.borderColor='rgba(176,48,216,0.3)'}
                 onMouseLeave={e=>e.currentTarget.style.borderColor='var(--border)'}>
                 <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', cursor: isOP(c.system)?'pointer':'default' }}
                   onClick={()=>{ if(isOP(c.system)){ setOpTab('STATUS'); setOpCombTab('AÇÕES'); setOpExpAcao(null); setViewCreature(c); } }}>
@@ -4210,7 +4231,7 @@ function BestiaryTab({ campaignId }) {
                   {fld('Presença Perturbadora','presencaPerturbadora',{textarea:true,rows:2,placeholder:'ex: DT 45 - 10d8 mental'})}
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                     <span style={sL}>AÇÕES</span>
-                    <button onClick={opAddAcao} style={{ padding:'3px 10px', borderRadius:5, border:`1px solid rgba(163,40,44,0.4)`, background:'rgba(163,40,44,0.12)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1 }}>+ Ação</button>
+                    <button onClick={opAddAcao} style={{ padding:'3px 10px', borderRadius:5, border:`1px solid rgba(176,48,216,0.4)`, background:'rgba(176,48,216,0.12)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1 }}>+ Ação</button>
                   </div>
                   {(form.acoes||[]).map((acao,i)=>(
                     <div key={i} style={{ background:'var(--card2)', border:'1px solid var(--border)', borderRadius:8, padding:10 }}>
@@ -4260,7 +4281,7 @@ function BestiaryTab({ campaignId }) {
                   ))}
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:4 }}>
                     <span style={sL}>PODERES</span>
-                    <button onClick={opAddPod} style={{ padding:'3px 10px', borderRadius:5, border:`1px solid rgba(163,40,44,0.4)`, background:'rgba(163,40,44,0.12)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1 }}>+ Poder</button>
+                    <button onClick={opAddPod} style={{ padding:'3px 10px', borderRadius:5, border:`1px solid rgba(176,48,216,0.4)`, background:'rgba(176,48,216,0.12)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1 }}>+ Poder</button>
                   </div>
                   {(form.poderes||[]).map((p,i)=>(
                     <div key={i} style={{ background:'var(--card2)', border:'1px solid var(--border)', borderRadius:8, padding:10 }}>
@@ -4275,7 +4296,7 @@ function BestiaryTab({ campaignId }) {
                   {fld('Texto de Lore','descricaoTexto',{textarea:true,rows:5})}
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                     <span style={sL}>SEÇÕES / ENIGMAS</span>
-                    <button onClick={opAddEni} style={{ padding:'3px 10px', borderRadius:5, border:`1px solid rgba(163,40,44,0.4)`, background:'rgba(163,40,44,0.12)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1 }}>+ Seção</button>
+                    <button onClick={opAddEni} style={{ padding:'3px 10px', borderRadius:5, border:`1px solid rgba(176,48,216,0.4)`, background:'rgba(176,48,216,0.12)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:9, letterSpacing:1 }}>+ Seção</button>
                   </div>
                   {(form.enigmas||[]).map((e,i)=>(
                     <div key={i} style={{ background:'var(--card2)', border:'1px solid var(--border)', borderRadius:8, padding:10 }}>
@@ -4319,7 +4340,7 @@ function BestiaryTab({ campaignId }) {
             <div style={{ display:'flex', gap:8, justifyContent:'flex-end', flexShrink:0, marginTop:4 }}>
               <button onClick={()=>setModal(null)} style={{ padding:'7px 16px', borderRadius:6, border:'1px solid var(--border)', background:'transparent', color:'var(--muted)', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11 }}>Cancelar</button>
               <button onClick={saveCreature} disabled={saving||!form.name.trim()}
-                style={{ padding:'7px 16px', borderRadius:6, border:`1px solid rgba(163,40,44,0.5)`, background:'rgba(163,40,44,0.2)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, opacity:saving||!form.name.trim()?0.5:1 }}>
+                style={{ padding:'7px 16px', borderRadius:6, border:`1px solid rgba(176,48,216,0.5)`, background:'rgba(176,48,216,0.2)', color:'#e0c8ff', cursor:'pointer', fontFamily:'Cinzel,serif', fontSize:11, opacity:saving||!form.name.trim()?0.5:1 }}>
                 {saving?'Salvando…':'Salvar'}
               </button>
             </div>
@@ -4567,7 +4588,7 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
       <div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <span style={lbl}>Agentes nesta campanha ({sheets.length})</span>
-          <span style={{ ...lbl, color: "rgba(163,40,44,0.8)" }}>Código: {campaign.inviteCode}</span>
+          <span style={{ ...lbl, color: "rgba(176,48,216,0.8)" }}>Código: {campaign.inviteCode}</span>
         </div>
         {sheets.length === 0 ? (
           <div style={{ ...card, color: "rgba(255,255,255,0.5)", fontFamily: "'Crimson Pro',serif" }}>Nenhuma ficha compartilhada ainda. Peça aos jogadores para compartilhar suas fichas na aba Agentes.</div>
@@ -4581,7 +4602,7 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
               return (
                 <div key={s.id} style={card}>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                    <div style={{ width: 40, height: 40, borderRadius: "50%", overflow: "hidden", background: "rgba(163,40,44,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: "50%", overflow: "hidden", background: "rgba(176,48,216,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                       {getActiveAvatar(cd) ? <img src={getActiveAvatar(cd)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "#c89bff" }}>◈</span>}
                     </div>
                     <div style={{ flex: 1, minWidth: 140 }}>
@@ -4600,7 +4621,7 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
                         </span>
                       ) : <span style={{ fontFamily: "'Crimson Pro',serif", fontStyle: "italic", fontSize: 12, color: "rgba(255,255,255,0.35)" }}>Não definido</span>}
                       <button onClick={() => setEditing(editing === s.id ? null : s.id)}
-                        style={{ background: "rgba(163,40,44,0.15)", border: "1px solid rgba(163,40,44,0.4)", borderRadius: 5, color: "#d8a8ff", padding: "5px 9px", fontFamily: "'Cinzel',serif", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                        style={{ background: "rgba(176,48,216,0.15)", border: "1px solid rgba(176,48,216,0.4)", borderRadius: 5, color: "#d8a8ff", padding: "5px 9px", fontFamily: "'Cinzel',serif", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
                         Elemento ▾
                       </button>
                     </div>
@@ -4627,10 +4648,10 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
 
         {/* ── Dados do Mestre ── */}
-        <div style={{ background:"linear-gradient(135deg,rgba(30,10,50,0.7),rgba(10,5,20,0.9))", border:"1px solid rgba(163,40,44,0.2)", borderRadius:12, padding:16, display:"flex", flexDirection:"column", gap:10 }}>
+        <div style={{ background:"linear-gradient(135deg,rgba(30,10,50,0.7),rgba(10,5,20,0.9))", border:"1px solid rgba(176,48,216,0.2)", borderRadius:12, padding:16, display:"flex", flexDirection:"column", gap:10 }}>
           <div style={{ display:"flex", alignItems:"center", gap:8, paddingBottom:10, borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(163,40,44,0.8)" strokeWidth="1.8"><polygon points="12 2 19 7 19 17 12 22 5 17 5 7 12 2"/><path d="M5 7l7 5 7-5M12 12v10" opacity="0.5"/></svg>
-            <span style={{ fontFamily:"Cinzel,serif", fontSize:10, letterSpacing:"0.14em", textTransform:"uppercase", color:"rgba(163,40,44,0.9)" }}>Dados do Mestre</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(176,48,216,0.8)" strokeWidth="1.8"><polygon points="12 2 19 7 19 17 12 22 5 17 5 7 12 2"/><path d="M5 7l7 5 7-5M12 12v10" opacity="0.5"/></svg>
+            <span style={{ fontFamily:"Cinzel,serif", fontSize:10, letterSpacing:"0.14em", textTransform:"uppercase", color:"rgba(176,48,216,0.9)" }}>Dados do Mestre</span>
           </div>
           <div style={{ display:"flex", gap:6 }}>
             <input value={dice} onChange={e => setDice(e.target.value)} onKeyDown={e => e.key==="Enter" && doRoll(false)}
@@ -4639,7 +4660,7 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
           </div>
           <div style={{ display:"flex", gap:6 }}>
             <button onClick={() => doRoll(false)} style={{ flex:1, padding:"7px", borderRadius:7, border:"1px solid rgba(255,255,255,0.14)", background:"rgba(255,255,255,0.05)", color:"rgba(255,255,255,0.6)", fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1, textTransform:"uppercase", cursor:"pointer" }}>🔒 Privado</button>
-            <button onClick={() => doRoll(true)} style={{ flex:1, padding:"7px", borderRadius:7, border:"1px solid rgba(163,40,44,0.55)", background:"rgba(163,40,44,0.2)", color:"#d8a8ff", fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1, textTransform:"uppercase", cursor:"pointer" }}>📢 Revelar</button>
+            <button onClick={() => doRoll(true)} style={{ flex:1, padding:"7px", borderRadius:7, border:"1px solid rgba(176,48,216,0.55)", background:"rgba(176,48,216,0.2)", color:"#d8a8ff", fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1, textTransform:"uppercase", cursor:"pointer" }}>📢 Revelar</button>
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:4, maxHeight:130, overflowY:"auto" }}>
             {gmLog.length === 0 && <div style={{ fontFamily:"'Crimson Pro',serif", fontSize:12, color:"rgba(255,255,255,0.25)", textAlign:"center", padding:"8px 0" }}>Nenhuma rolagem ainda</div>}
@@ -4653,17 +4674,17 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
         </div>
 
         {/* ── Narração Global ── */}
-        <div style={{ background:"linear-gradient(135deg,rgba(20,5,35,0.8),rgba(8,4,18,0.95))", border:"1px solid rgba(163,40,44,0.25)", borderRadius:12, padding:16, display:"flex", flexDirection:"column", gap:10 }}>
+        <div style={{ background:"linear-gradient(135deg,rgba(20,5,35,0.8),rgba(8,4,18,0.95))", border:"1px solid rgba(176,48,216,0.25)", borderRadius:12, padding:16, display:"flex", flexDirection:"column", gap:10 }}>
           <div style={{ display:"flex", alignItems:"center", gap:8, paddingBottom:10, borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(163,40,44,0.8)" strokeWidth="1.8"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
-            <span style={{ fontFamily:"Cinzel,serif", fontSize:10, letterSpacing:"0.14em", textTransform:"uppercase", color:"rgba(163,40,44,0.9)" }}>Narração Global</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(176,48,216,0.8)" strokeWidth="1.8"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+            <span style={{ fontFamily:"Cinzel,serif", fontSize:10, letterSpacing:"0.14em", textTransform:"uppercase", color:"rgba(176,48,216,0.9)" }}>Narração Global</span>
           </div>
 
           {/* Destino */}
           <div style={{ display:"flex", background:"rgba(0,0,0,0.3)", borderRadius:8, padding:3, gap:3 }}>
             {[["all","🌐 Todos"],["specific","👤 Específicos"]].map(([v,l]) => (
               <button key={v} onClick={() => setNarrTarget(v)}
-                style={{ flex:1, padding:"6px", borderRadius:6, border:"none", background: narrTarget===v?"rgba(163,40,44,0.35)":"transparent",
+                style={{ flex:1, padding:"6px", borderRadius:6, border:"none", background: narrTarget===v?"rgba(176,48,216,0.35)":"transparent",
                   color: narrTarget===v?"#e8c8ff":"rgba(255,255,255,0.4)", fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1,
                   textTransform:"uppercase", cursor:"pointer", transition:"all 0.2s" }}>{l}</button>
             ))}
@@ -4682,15 +4703,15 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
                   return (
                     <label key={id} onClick={() => toggleNarrTarget(id)}
                       style={{ display:"flex", alignItems:"center", gap:7, cursor:"pointer", padding:"5px 10px 5px 6px",
-                        borderRadius:20, border:`1px solid ${sel?"rgba(163,40,44,0.7)":"rgba(255,255,255,0.1)"}`,
-                        background: sel?"rgba(163,40,44,0.18)":"rgba(255,255,255,0.03)", transition:"all 0.18s" }}>
+                        borderRadius:20, border:`1px solid ${sel?"rgba(176,48,216,0.7)":"rgba(255,255,255,0.1)"}`,
+                        background: sel?"rgba(176,48,216,0.18)":"rgba(255,255,255,0.03)", transition:"all 0.18s" }}>
                       <div style={{ width:22, height:22, borderRadius:"50%", overflow:"hidden", flexShrink:0,
-                        border:`1.5px solid ${sel?"rgba(163,40,44,0.8)":"rgba(255,255,255,0.2)"}`,
-                        background:"rgba(163,40,44,0.1)", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                        border:`1.5px solid ${sel?"rgba(176,48,216,0.8)":"rgba(255,255,255,0.2)"}`,
+                        background:"rgba(176,48,216,0.1)", display:"flex", alignItems:"center", justifyContent:"center" }}>
                         {char?.avatar ? <img src={char.avatar} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }}/> : <span style={{ fontSize:10 }}>👤</span>}
                       </div>
                       <span style={{ fontFamily:"Cinzel,serif", fontSize:9, color: sel?"#e8c8ff":"rgba(255,255,255,0.55)", whiteSpace:"nowrap" }}>{name}</span>
-                      {sel && <span style={{ fontSize:9, color:"#a3282c" }}>✓</span>}
+                      {sel && <span style={{ fontSize:9, color:"#b030d8" }}>✓</span>}
                     </label>
                   );
                 })}
@@ -4725,7 +4746,7 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
           {narrImage && (
             <img src={narrImage} alt="preview"
               style={{ maxWidth:"100%", maxHeight:110, borderRadius:7, objectFit:"contain",
-                border:"1px solid rgba(163,40,44,0.25)", background:"rgba(0,0,0,0.3)" }}/>
+                border:"1px solid rgba(176,48,216,0.25)", background:"rgba(0,0,0,0.3)" }}/>
           )}
 
           {/* Botões */}
@@ -4741,12 +4762,12 @@ function MestrePanel({ campaign, uid, userName, userPhoto }) {
             </button>
             <button onClick={() => sendNarr(false)} disabled={!narr.trim() && !narrImage}
               style={{ flex:2, padding:"9px", borderRadius:8,
-                border:`1px solid ${(narr.trim()||narrImage)?"rgba(163,40,44,0.6)":"rgba(255,255,255,0.07)"}`,
-                background:(narr.trim()||narrImage)?"linear-gradient(135deg,rgba(120,20,180,0.4),rgba(163,40,44,0.25))":"rgba(255,255,255,0.02)",
+                border:`1px solid ${(narr.trim()||narrImage)?"rgba(176,48,216,0.6)":"rgba(255,255,255,0.07)"}`,
+                background:(narr.trim()||narrImage)?"linear-gradient(135deg,rgba(120,20,180,0.4),rgba(176,48,216,0.25))":"rgba(255,255,255,0.02)",
                 color:(narr.trim()||narrImage)?"#e8c8ff":"rgba(255,255,255,0.25)",
                 fontFamily:"Cinzel,serif", fontSize:10, letterSpacing:1, textTransform:"uppercase",
                 cursor:(narr.trim()||narrImage)?"pointer":"default",
-                boxShadow:(narr.trim()||narrImage)?"0 0 12px rgba(163,40,44,0.2)":"none" }}>
+                boxShadow:(narr.trim()||narrImage)?"0 0 12px rgba(176,48,216,0.2)":"none" }}>
               {narrSent ? "✓ Transmitido" : "📡 Transmitir"}
             </button>
           </div>
@@ -4828,15 +4849,15 @@ function NarracaoOverlay({ campaign, uid, isMaster }) {
         </div>
       )}
       <svg width="44" height="44" viewBox="0 0 64 64" fill="none" style={{ marginBottom:image?14:24, opacity:0.8 }}>
-        <path d="M3 32c8-14 18-20 29-20s21 6 29 20c-8 14-18 20-29 20S11 46 3 32z" stroke="#a3282c" strokeWidth="1.6"/>
-        <circle cx="32" cy="32" r="9" stroke="#a3282c" strokeWidth="1.6"/>
-        <circle cx="32" cy="32" r="3.5" fill="#a3282c"/>
+        <path d="M3 32c8-14 18-20 29-20s21 6 29 20c-8 14-18 20-29 20S11 46 3 32z" stroke="#b030d8" strokeWidth="1.6"/>
+        <circle cx="32" cy="32" r="9" stroke="#b030d8" strokeWidth="1.6"/>
+        <circle cx="32" cy="32" r="3.5" fill="#b030d8"/>
       </svg>
       {image && (
-        <img src={image} alt="" style={{ maxWidth:"min(680px,88vw)", maxHeight:"38vh", objectFit:"contain", borderRadius:8, marginBottom:20, boxShadow:"0 0 40px rgba(163,40,44,0.3)" }}/>
+        <img src={image} alt="" style={{ maxWidth:"min(680px,88vw)", maxHeight:"38vh", objectFit:"contain", borderRadius:8, marginBottom:20, boxShadow:"0 0 40px rgba(176,48,216,0.3)" }}/>
       )}
       {text && (
-        <div style={{ fontFamily:"'Crimson Pro',serif", fontSize:"clamp(18px,3.2vw,30px)", color:"#e8e0f0", textAlign:"center", maxWidth:760, lineHeight:1.6, textShadow:"0 0 24px rgba(163,40,44,0.4)", minHeight:40 }}>
+        <div style={{ fontFamily:"'Crimson Pro',serif", fontSize:"clamp(18px,3.2vw,30px)", color:"#e8e0f0", textAlign:"center", maxWidth:760, lineHeight:1.6, textShadow:"0 0 24px rgba(176,48,216,0.4)", minHeight:40 }}>
           {typed}<span style={{ opacity:0.6 }}>▌</span>
         </div>
       )}
@@ -5024,8 +5045,8 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
         style={{position:"relative",width:"100%",height:alturaHero,borderRadius:12,overflow:"hidden",flexShrink:0,
         display:heroCompacto?"flex":"block",alignItems:"center",gap:8,padding:heroCompacto?"0 12px":0,
         transition:"height .22s cubic-bezier(.22,1,.36,1)",
-        border:"1px solid rgba(163,40,44,0.18)",
-        background:campaign.coverImage?"transparent":"radial-gradient(120% 160% at 20% 0%,rgba(163,40,44,0.22),rgba(163,40,44,0.03) 60%),linear-gradient(180deg,rgba(20,14,26,0.9),rgba(10,8,14,0.95))"}}>
+        border:"1px solid rgba(176,48,216,0.18)",
+        background:campaign.coverImage?"transparent":"radial-gradient(120% 160% at 20% 0%,rgba(176,48,216,0.22),rgba(176,48,216,0.03) 60%),linear-gradient(180deg,rgba(20,14,26,0.9),rgba(10,8,14,0.95))"}}>
         {campaign.coverImage && <img className="camp-hero-img" src={campaign.coverImage} alt=""
           style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",display:"block",
             opacity:heroCompacto?0.4:1,transition:"opacity .22s ease"}}/>}
@@ -5090,7 +5111,7 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
               </span>
               {isMaster&&(
                 <span style={{fontFamily:"Cinzel,serif",fontSize:8.5,letterSpacing:1.2,color:"#e0c8ff",textTransform:"uppercase",
-                  padding:"3px 9px",background:"rgba(163,40,44,0.4)",border:"1px solid rgba(200,140,255,0.4)",borderRadius:20,backdropFilter:"blur(4px)"}}>
+                  padding:"3px 9px",background:"rgba(176,48,216,0.4)",border:"1px solid rgba(200,140,255,0.4)",borderRadius:20,backdropFilter:"blur(4px)"}}>
                   ✦ Mestre
                 </span>
               )}
@@ -5101,7 +5122,7 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
           <button onClick={()=>setShowInvite(v=>!v)}
             title={`Mostrar o código de convite · ${campaign.members?.length||1}/${campaign.maxPlayers||6} jogadores`}
             style={{display:"flex",alignItems:"center",gap:7,flexShrink:0,
-              background:showInvite?"rgba(163,40,44,0.5)":"linear-gradient(135deg,rgba(163,40,44,0.55),rgba(120,30,180,0.55))",
+              background:showInvite?"rgba(176,48,216,0.5)":"linear-gradient(135deg,rgba(176,48,216,0.55),rgba(120,30,180,0.55))",
               border:"1px solid rgba(200,140,255,0.5)",borderRadius:9,cursor:"pointer",
               color:"#f0e4ff",padding:"8px 16px",fontFamily:"Cinzel,serif",fontSize:10,
               letterSpacing:"0.08em",textTransform:"uppercase",backdropFilter:"blur(6px)",
@@ -5116,20 +5137,20 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
       {/* ── Painel código de convite ── */}
       {showInvite && (
         <div className="fade" style={{padding:"14px 18px",marginTop:10,
-          background:"linear-gradient(135deg,rgba(163,40,44,0.10),rgba(163,40,44,0.03))",
-          border:"1px solid rgba(163,40,44,0.28)",borderRadius:10,
+          background:"linear-gradient(135deg,rgba(176,48,216,0.10),rgba(176,48,216,0.03))",
+          border:"1px solid rgba(176,48,216,0.28)",borderRadius:10,
           display:"flex",alignItems:"center",gap:16,flexShrink:0,flexWrap:"wrap"}}>
           <div>
             <div style={{fontFamily:"Cinzel,serif",fontSize:9,color:"var(--muted)",letterSpacing:1.5,textTransform:"uppercase",marginBottom:5}}>
               Código de convite · compartilhe com seus jogadores
             </div>
-            <div style={{fontFamily:"Cinzel,serif",fontSize:24,letterSpacing:9,color:"#d4b0ff",fontWeight:700,textShadow:"0 0 18px rgba(163,40,44,0.4)"}}>
+            <div style={{fontFamily:"Cinzel,serif",fontSize:24,letterSpacing:9,color:"#d4b0ff",fontWeight:700,textShadow:"0 0 18px rgba(176,48,216,0.4)"}}>
               {campaign.inviteCode||"------"}
             </div>
           </div>
           <button onClick={copyInviteCode} style={{
-            marginLeft:"auto",padding:"9px 20px",background:inviteCopied?"rgba(106,170,122,0.18)":"rgba(163,40,44,0.18)",
-            border:`1px solid ${inviteCopied?"rgba(106,170,122,0.45)":"rgba(163,40,44,0.45)"}`,
+            marginLeft:"auto",padding:"9px 20px",background:inviteCopied?"rgba(106,170,122,0.18)":"rgba(176,48,216,0.18)",
+            border:`1px solid ${inviteCopied?"rgba(106,170,122,0.45)":"rgba(176,48,216,0.45)"}`,
             borderRadius:8,cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:1,
             color:inviteCopied?"#7bc48b":"#d4b0ff",transition:"all 0.2s",textTransform:"uppercase",
           }}>{inviteCopied?"✓ Copiado!":"⧉ Copiar código"}</button>
@@ -5147,7 +5168,7 @@ function CampaignDetail({ campaign, uid, userName, userPhoto, characters, onBack
           maskImage:"linear-gradient(to right,#000 0,#000 calc(100% - 28px),transparent 100%)",
           WebkitMaskImage:"linear-gradient(to right,#000 0,#000 calc(100% - 28px),transparent 100%)",
         } : {})}}>
-        <SlidingTabPill pill={tabsPill.pill} radius={8} background="rgba(163,40,44,0.14)" underline="#a3282c"/>
+        <SlidingTabPill pill={tabsPill.pill} radius={8} background="rgba(176,48,216,0.14)" underline="#b030d8"/>
         {tabs.map(tab=>{
           const active = activeTab===tab.id;
           return (
@@ -5244,7 +5265,9 @@ function PlansScreen({ userPlans = [], currentUser }) {
         <div style={{ fontFamily: "Cinzel,serif", fontSize: 10, letterSpacing: "0.25em", color: "var(--gold)", textTransform: "uppercase", marginBottom: 10 }}>
           ◈ Nexus RPG · Planos
         </div>
-        <h1 style={{ fontFamily: "'Cinzel Decorative',serif", fontSize: 28, background: "linear-gradient(135deg,#c9a84c,#e8c96d)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", marginBottom: 12 }}>
+        {/* quick 008 — mesmo motivo do título de Mapas: o gradiente
+            #c9a84c→#e8c96d era literal da paleta velha, imune à troca de tema. */}
+        <h1 className="nx-h1" style={{ marginBottom: 12 }}>
           Escolha seu Sistema
         </h1>
         <p style={{ fontFamily: "'Crimson Pro',serif", fontSize: 17, color: "var(--muted2)", maxWidth: 480, margin: "0 auto" }}>
@@ -5257,19 +5280,20 @@ function PlansScreen({ userPlans = [], currentUser }) {
         {PLAN_DEFS.map((plan, i) => {
           const active = userPlans.includes(plan.systemId);
           const isHov = hov === plan.systemId;
+          /* quick 008 — .nx-card + .h-pauta: a chapa padrão da casa (bisel,
+             filete iluminado na aresta, sombra de folha) sobre a pauta do
+             escriba. O acento do sistema continua governando borda e halo —
+             é ele que separa OP de Tormenta e D&D nesta tela. */
           return (
-            <div key={plan.systemId}
+            <div key={plan.systemId} className="nx-card h-pauta"
               onMouseEnter={() => setHov(plan.systemId)}
               onMouseLeave={() => setHov(null)}
               style={{
-                background: `linear-gradient(160deg, rgba(14,12,24,0.98) 0%, rgba(10,8,18,0.99) 100%)`,
-                border: `1px solid ${isHov || active ? plan.accent + "80" : "rgba(255,255,255,0.07)"}`,
-                borderRadius: 14,
+                borderColor: isHov || active ? plan.accent + "80" : undefined,
                 padding: "28px 24px 24px",
                 display: "flex", flexDirection: "column", gap: 0,
-                position: "relative", overflow: "hidden",
-                boxShadow: isHov ? `0 0 40px ${plan.accentGlow}` : "none",
-                transition: "all 0.22s",
+                overflow: "hidden",
+                boxShadow: isHov ? `0 0 40px ${plan.accentGlow}` : undefined,
                 animation: `statCardIn 0.4s ease ${i * 0.1}s both`,
               }}>
 
@@ -5454,18 +5478,27 @@ function SheetList({ characters, system, onCreateChar, onSelectChar, onDeleteCha
         </div>
       )}
 
-      {/* Cards grid */}
+      {/* Cards grid — quick 007: cada card é uma PASTA DE ARQUIVO. A aba
+          carrega o mesmo nº de processo que o dossiê mostra por dentro
+          (mesma função sobre o mesmo id), então a estante e o documento se
+          reconhecem. O gap vertical maior é o headroom da aba; overflow
+          fica NA pasta (hidden) e a aba vive FORA dela, no wrapper. */}
       {filtered.length > 0 && (
-        <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:18}}>
+        <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:"30px 18px", paddingTop:20}}>
           {filtered.map((c, i) => (
-            <div key={i} style={{
-              background:"var(--card)", borderRadius:14,
+            <div key={i} className="h-pasta">
+            {numeroDeProcesso(String(c.id || c.createdAt || "")) && (
+              <span className="h-pasta-aba" aria-hidden="true">OP-{numeroDeProcesso(String(c.id || c.createdAt || ""))}</span>
+            )}
+            <div style={{
+              background:"var(--card)", borderRadius:"0 4px 4px 4px",
               border:"1px solid rgba(255,255,255,0.07)",
               position:"relative", overflow:"hidden",
+              boxShadow:"inset 0 1px 0 rgba(255,255,255,0.035), 0 12px 26px -16px rgba(0,0,0,0.6)",
               transition:"border-color 0.22s, transform 0.22s, box-shadow 0.22s",
             }}
-              onMouseEnter={e=>{e.currentTarget.style.borderColor="rgba(163,40,44,0.5)"; e.currentTarget.style.transform="translateY(-3px)"; e.currentTarget.style.boxShadow="0 12px 40px rgba(163,40,44,0.18)"}}
-              onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255,255,255,0.07)"; e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="none"}}>
+              onMouseEnter={e=>{e.currentTarget.style.borderColor="rgba(176,48,216,0.5)"; e.currentTarget.style.transform="translateY(-3px)"; e.currentTarget.style.boxShadow="0 12px 40px rgba(176,48,216,0.18)"}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255,255,255,0.07)"; e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="inset 0 1px 0 rgba(255,255,255,0.035), 0 12px 26px -16px rgba(0,0,0,0.6)"}}>
 
               {/* Gear + menu */}
               <div style={{position:"absolute", top:12, right:14, zIndex:3}}>
@@ -5489,7 +5522,7 @@ function SheetList({ characters, system, onCreateChar, onSelectChar, onDeleteCha
               {/* Avatar (full-width top) */}
               <div style={{
                 width:"100%", height:180,
-                background:"rgba(163,40,44,0.10)",
+                background:"rgba(176,48,216,0.10)",
                 borderBottom:"1px solid rgba(255,255,255,0.06)",
                 display:"flex", alignItems:"center", justifyContent:"center",
                 fontSize:56, overflow:"hidden", position:"relative",
@@ -5520,7 +5553,7 @@ function SheetList({ characters, system, onCreateChar, onSelectChar, onDeleteCha
                         const key = c.id||c.createdAt;
                         setCharAdjust(prev => ({...prev, [key]: +e.target.value}));
                       }}
-                      style={{width:"72%", accentColor:"#a3282c", cursor:"pointer"}}
+                      style={{width:"72%", accentColor:"#7c3aed", cursor:"pointer"}}
                     />
                     <div style={{display:"flex", gap:8}}>
                       <button onClick={e => {
@@ -5529,7 +5562,7 @@ function SheetList({ characters, system, onCreateChar, onSelectChar, onDeleteCha
                         const newY = charAdjust[key] ?? c.form?.avatarPosY ?? 50;
                         onUpdateChar?.({ ...c, form: { ...c.form, avatarPosY: newY } });
                         setAdjustCard(null); setHoverCard(null);
-                      }} style={{background:"#a3282c", border:"none", color:"#fff", borderRadius:5, padding:"5px 14px", fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1, cursor:"pointer"}}>Salvar</button>
+                      }} style={{background:"#7c3aed", border:"none", color:"#fff", borderRadius:5, padding:"5px 14px", fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:1, cursor:"pointer"}}>Salvar</button>
                       <button onClick={e => {
                         e.stopPropagation();
                         const key = c.id||c.createdAt;
@@ -5562,7 +5595,7 @@ function SheetList({ characters, system, onCreateChar, onSelectChar, onDeleteCha
                 </div>
               </div>
 
-              {/* Footer — o botão era um bloco roxo #a3282c preenchido, largura
+              {/* Footer — o botão era um bloco roxo #7c3aed preenchido, largura
                   total: um segundo botão primário POR CARD. Com cinco fichas na
                   grade eram cinco blocos roxos gritando ao mesmo tempo, e nenhum
                   deles usava a linguagem de botão do resto do app. Vira o botão
@@ -5573,6 +5606,7 @@ function SheetList({ characters, system, onCreateChar, onSelectChar, onDeleteCha
                   Acessar ficha
                 </button>
               </div>
+            </div>
             </div>
           ))}
         </div>
@@ -5888,7 +5922,7 @@ function Topbar({ screen, system, onChangeSystem, onLogout }) {
 
   return (
     <>
-    <div style={{
+    <div className="h-topbar" style={{
       height:56, background:"var(--surface)", borderBottom:"1px solid var(--border)",
       display:"flex", alignItems:"center", padding:"0 24px",
       position:"sticky", top:0, zIndex:50, gap:0,
@@ -6235,11 +6269,11 @@ function Topbar({ screen, system, onChangeSystem, onLogout }) {
    ficando roxo era o unico ponto da interface que nao acompanhou a troca. */
 const OPEnergyIcon = ({ size = 48, glow = false }) => (
   <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg"
-    style={{ display:"block", filter: glow ? "drop-shadow(0 0 8px rgba(198,164,92,0.9)) drop-shadow(0 0 20px rgba(163,40,44,0.5))" : "drop-shadow(0 0 4px rgba(198,164,92,0.5))" }}>
+    style={{ display:"block", filter: glow ? "drop-shadow(0 0 8px rgba(198,164,92,0.9)) drop-shadow(0 0 20px rgba(176,48,216,0.5))" : "drop-shadow(0 0 4px rgba(198,164,92,0.5))" }}>
     <defs>
       <radialGradient id="opGrad" cx="50%" cy="45%" r="55%">
         <stop offset="0%" stopColor="#f2ddab" />
-        <stop offset="50%" stopColor="#a3282c" />
+        <stop offset="50%" stopColor="#b030d8" />
         <stop offset="100%" stopColor="#3d0c10" />
       </radialGradient>
       <radialGradient id="opGlow" cx="50%" cy="50%" r="50%">
@@ -6264,13 +6298,13 @@ const OPEnergyIcon = ({ size = 48, glow = false }) => (
     <path d="M50 76 Q42 72 35 72" stroke="url(#opGrad)" strokeWidth="1" strokeLinecap="round" opacity="0.4"/>
     <path d="M50 76 Q58 72 65 72" stroke="url(#opGrad)" strokeWidth="1" strokeLinecap="round" opacity="0.4"/>
     {/* Pétalas esquerda */}
-    <ellipse cx="35" cy="68" rx="5" ry="3" fill="none" stroke="#a3282c" strokeWidth="1" opacity="0.6" transform="rotate(-30,35,68)"/>
+    <ellipse cx="35" cy="68" rx="5" ry="3" fill="none" stroke="#b030d8" strokeWidth="1" opacity="0.6" transform="rotate(-30,35,68)"/>
     <ellipse cx="38" cy="65" rx="4" ry="2.5" fill="none" stroke="#c6a45c" strokeWidth="0.8" opacity="0.5" transform="rotate(20,38,65)"/>
     {/* Pétalas direita */}
-    <ellipse cx="65" cy="68" rx="5" ry="3" fill="none" stroke="#a3282c" strokeWidth="1" opacity="0.6" transform="rotate(30,65,68)"/>
+    <ellipse cx="65" cy="68" rx="5" ry="3" fill="none" stroke="#b030d8" strokeWidth="1" opacity="0.6" transform="rotate(30,65,68)"/>
     <ellipse cx="62" cy="65" rx="4" ry="2.5" fill="none" stroke="#c6a45c" strokeWidth="0.8" opacity="0.5" transform="rotate(-20,62,65)"/>
     {/* Botão floral central base */}
-    <circle cx="50" cy="88" r="2.5" fill="#a3282c" opacity="0.7" filter="url(#opBlur)"/>
+    <circle cx="50" cy="88" r="2.5" fill="#b030d8" opacity="0.7" filter="url(#opBlur)"/>
     <circle cx="38" cy="70" r="2" fill="#7d1d22" opacity="0.6"/>
     <circle cx="62" cy="70" r="2" fill="#7d1d22" opacity="0.6"/>
 
@@ -6297,9 +6331,9 @@ const OPEnergyIcon = ({ size = 48, glow = false }) => (
     {/* Traço horizontal/asa direita */}
     <path d="M56 40 L68 40" stroke="#e0a44a" strokeWidth="2" strokeLinecap="round" opacity="0.8" filter="url(#opBlur)"/>
     {/* Gancho esquerdo */}
-    <path d="M32 40 Q28 46 32 52" stroke="#a3282c" strokeWidth="1.5" strokeLinecap="round" fill="none" opacity="0.7"/>
+    <path d="M32 40 Q28 46 32 52" stroke="#b030d8" strokeWidth="1.5" strokeLinecap="round" fill="none" opacity="0.7"/>
     {/* Gancho direito */}
-    <path d="M68 40 Q72 46 68 52" stroke="#a3282c" strokeWidth="1.5" strokeLinecap="round" fill="none" opacity="0.7"/>
+    <path d="M68 40 Q72 46 68 52" stroke="#b030d8" strokeWidth="1.5" strokeLinecap="round" fill="none" opacity="0.7"/>
 
     {/* Ponto central brilhante */}
     <circle cx="50" cy="54" r="3" fill="#f2ddab" filter="url(#opBlur)"/>
@@ -6465,7 +6499,11 @@ const SYSTEMS = [
     desc: "A aventura épica de fantasia mais jogada do mundo. Masmorras, dragões e heróis lendários.",
     tags: ["Fantasia","Combate","Épico"],
     /* accent derived from theme registry (dragon red) — getCardAccent overlay (spec 0017 AC-6) */
-    available: false,   // decisão do Andre (2026-07-25): fica em "EM BREVE" até liberar
+    /* LIBERADO em 2026-08-06 (decisão do Andre, revoga a de 2026-07-25 que o mantinha
+       em "EM BREVE"). A ficha de D&D já existia — DungeonsAndDragonsSheet e o
+       DnDCharacterCreator estão implementados e roteados; o que travava era só esta
+       flag. O tema dnd do registry também já está completo. */
+    available: true,
   },
   {
     id: "tormenta",
@@ -6695,7 +6733,7 @@ function SystemSelect({ onSelect, onLogout }) {
                         fontSize:24, overflow:"hidden",
                         boxShadow: isHov && sys.available
                           ? sys.svgIcon
-                            ? "0 0 20px rgba(198,164,92,0.5), 0 0 40px rgba(163,40,44,0.25)"
+                            ? "0 0 20px rgba(198,164,92,0.5), 0 0 40px rgba(176,48,216,0.25)"
                             : `0 0 16px ${sys.accentGlow}`
                           : "none",
                         transition:"box-shadow 0.25s", position:"relative",
@@ -7726,7 +7764,7 @@ function CharacterCreator({ onFinish, onCancel }) {
         <NexusLogo size={28}/>
         <div style={{fontFamily:"Cinzel,serif", fontSize:13, color:"var(--gold2)", letterSpacing:1}}>Nova Ficha de Agente</div>
         <div style={{height:1, flex:1, background:"var(--border2)"}}/>
-        <span style={{fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:2, color:"#e0645a", textTransform:"uppercase", textShadow:"0 0 10px rgba(180,50,220,0.7)"}}>
+        <span style={{fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:2, color:"#d870f8", textTransform:"uppercase", textShadow:"0 0 10px rgba(180,50,220,0.7)"}}>
           🌀 Ordem Paranormal · 2ª Ed.
         </span>
         <button onClick={onCancel} style={{background:"none", border:"1px solid var(--border2)", borderRadius:4, color:"var(--muted2)", cursor:"pointer", fontFamily:"Cinzel,serif", fontSize:9, letterSpacing:2, textTransform:"uppercase", padding:"6px 14px", transition:"all 0.2s"}}
@@ -8490,8 +8528,8 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
             <div style={{display:"flex",justifyContent:"flex-end",gap:12,padding:"16px 24px",borderTop:"1px solid #222"}}>
               <button onClick={()=>setShowSkillModal(false)} style={{padding:"10px 24px",background:"none",border:"1px solid var(--border2)",borderRadius:8,cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:11,letterSpacing:1,color:"#888",transition:"all 0.2s"}}
                 onMouseEnter={e=>e.currentTarget.style.borderColor="#555"} onMouseLeave={e=>e.currentTarget.style.borderColor="#333"}>Cancelar</button>
-              <button onClick={confirmSkill} style={{padding:"10px 28px",background:"#a3282c",border:"none",borderRadius:8,cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:11,letterSpacing:1,color:"#fff",transition:"all 0.2s"}}
-                onMouseEnter={e=>e.currentTarget.style.background="#6d28d9"} onMouseLeave={e=>e.currentTarget.style.background="#a3282c"}>Adicionar</button>
+              <button onClick={confirmSkill} style={{padding:"10px 28px",background:"#7c3aed",border:"none",borderRadius:8,cursor:"pointer",fontFamily:"Cinzel,serif",fontSize:11,letterSpacing:1,color:"#fff",transition:"all 0.2s"}}
+                onMouseEnter={e=>e.currentTarget.style.background="#6d28d9"} onMouseLeave={e=>e.currentTarget.style.background="#7c3aed"}>Adicionar</button>
             </div>
           </div>
         </div>
@@ -8587,12 +8625,12 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
                     <span style={{fontFamily:"Cinzel,serif",fontSize:13,color:"#e0e0e0"}}>Dano extra:</span>
                     <button onClick={()=>setD(x=>({...x,extraDmg:[...(x.extraDmg||[]),{dmg:"1d6",type:"Balístico"}]}))}
-                      style={{background:"#a3282c",border:"none",borderRadius:4,color:"#fff",fontFamily:"Cinzel,serif",fontSize:10,padding:"5px 12px",cursor:"pointer"}}>
+                      style={{background:"#7c3aed",border:"none",borderRadius:4,color:"#fff",fontFamily:"Cinzel,serif",fontSize:10,padding:"5px 12px",cursor:"pointer"}}>
                       Adicionar
                     </button>
                   </div>
                   {(d.extraDmg||[]).map((ex,ei)=>(
-                    <div key={ei} style={{display:"flex",gap:10,alignItems:"center",marginBottom:8,padding:"10px 12px",borderLeft:"3px solid #a3282c",background:"rgba(163,40,44,0.05)",borderRadius:"0 4px 4px 0"}}>
+                    <div key={ei} style={{display:"flex",gap:10,alignItems:"center",marginBottom:8,padding:"10px 12px",borderLeft:"3px solid #b030d8",background:"rgba(176,48,216,0.05)",borderRadius:"0 4px 4px 0"}}>
                       <div style={{flex:1}}>
                         <label style={labelStyle}>Dano*</label>
                         <input value={ex.dmg} onChange={e=>setD(x=>({...x,extraDmg:x.extraDmg.map((v,j)=>j===ei?{...v,dmg:e.target.value}:v)}))} style={inputStyle}/>
@@ -8604,7 +8642,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                         </select>
                       </div>
                       <button onClick={()=>setD(x=>({...x,extraDmg:x.extraDmg.filter((_,j)=>j!==ei)}))}
-                        style={{background:"#a3282c",border:"none",borderRadius:4,color:"#fff",fontFamily:"Cinzel,serif",fontSize:10,padding:"5px 10px",cursor:"pointer",alignSelf:"flex-end",marginBottom:0}}>
+                        style={{background:"#7c3aed",border:"none",borderRadius:4,color:"#fff",fontFamily:"Cinzel,serif",fontSize:10,padding:"5px 10px",cursor:"pointer",alignSelf:"flex-end",marginBottom:0}}>
                         Remover
                       </button>
                     </div>
@@ -8679,7 +8717,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
               {/* Footer */}
               <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:10,padding:"14px 22px",borderTop:"1px solid #1e1e1e"}}>
                 <button onClick={()=>setAtkModal(null)} style={{background:"none",border:"none",color:"rgba(255,255,255,0.5)",fontFamily:"Cinzel,serif",fontSize:12,cursor:"pointer",padding:"8px 16px"}}>Cancelar</button>
-                <button onClick={save} style={{background:"#a3282c",border:"none",borderRadius:4,color:"#fff",fontFamily:"Cinzel,serif",fontSize:12,padding:"8px 20px",cursor:"pointer"}}>
+                <button onClick={save} style={{background:"#7c3aed",border:"none",borderRadius:4,color:"#fff",fontFamily:"Cinzel,serif",fontSize:12,padding:"8px 20px",cursor:"pointer"}}>
                   {atkModal.mode==="create"?"Adicionar":"Salvar"}
                 </button>
               </div>
@@ -9112,11 +9150,11 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
             })()}
             {onTogglePanel && (
               <button onClick={onTogglePanel} title={showPanel ? "Fechar histórico de dados" : "Histórico de dados da campanha"}
-                style={{flexShrink:0,background:showPanel?"rgba(163,40,44,0.18)":"none",
-                  border:showPanel?"1px solid rgba(163,40,44,0.5)":"1px solid transparent",
+                style={{flexShrink:0,background:showPanel?"rgba(176,48,216,0.18)":"none",
+                  border:showPanel?"1px solid rgba(176,48,216,0.5)":"1px solid transparent",
                   borderRadius:6,cursor:"pointer",
                   padding:"5px 8px",color:showPanel?"#a78bfa":"var(--muted2)",display:"flex",alignItems:"center",transition:"all 0.2s",margin:"4px 0 4px 4px"}}
-                onMouseEnter={e=>{ if(!showPanel){ e.currentTarget.style.color="#a78bfa"; e.currentTarget.style.background="rgba(163,40,44,0.1)"; }}}
+                onMouseEnter={e=>{ if(!showPanel){ e.currentTarget.style.color="#a78bfa"; e.currentTarget.style.background="rgba(176,48,216,0.1)"; }}}
                 onMouseLeave={e=>{ if(!showPanel){ e.currentTarget.style.color="var(--muted2)"; e.currentTarget.style.background="none"; }}}
               >
                 <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -9429,10 +9467,10 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                     style={{flex:1,fontSize:12,padding:"7px 10px"}}
                   />
                   <button onClick={openSkillModal}
-                    style={{padding:"7px 16px",background:"#a3282c",border:"1px solid #a3282c",borderRadius:6,cursor:"pointer",
+                    style={{padding:"7px 16px",background:"#7c3aed",border:"1px solid #7c3aed",borderRadius:6,cursor:"pointer",
                       fontFamily:"Cinzel,serif",fontSize:10,letterSpacing:1,color:"#fff",whiteSpace:"nowrap",transition:"all 0.2s"}}
                     onMouseEnter={e=>e.currentTarget.style.background="#6d28d9"}
-                    onMouseLeave={e=>e.currentTarget.style.background="#a3282c"}>
+                    onMouseLeave={e=>e.currentTarget.style.background="#7c3aed"}>
                     + Adicionar
                   </button>
                 </div>
@@ -9452,7 +9490,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                         {/* Row header */}
                         <div onClick={()=>setOpenSkillId(open ? null : skill.id)}
                           style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px",cursor:"pointer",userSelect:"none"}}>
-                          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="#a3282c" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
                             style={{transition:"transform 0.2s",transform:open?"rotate(0deg)":"rotate(-90deg)",flexShrink:0}}>
                             <polyline points="6 9 12 15 18 9"/>
                           </svg>
@@ -9542,7 +9580,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
                               <div key={r.id} style={{background:"var(--card2)",border:"1px solid rgba(122,95,212,0.2)",borderRadius:6,overflow:"hidden",marginBottom:3}}>
                                 <div onClick={()=>setOpenSkillId(open?null:`ritual_${r.id}`)}
                                   style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",cursor:"pointer",userSelect:"none"}}>
-                                  <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="#a3282c" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                                  <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
                                     style={{transition:"transform 0.2s",transform:open?"rotate(0deg)":"rotate(-90deg)",flexShrink:0}}>
                                     <polyline points="6 9 12 15 18 9"/>
                                   </svg>
