@@ -8833,7 +8833,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
               onChange={e=>setForm(f=>({...f,personagem:e.target.value}))}
               style={{
                 display:"block", width:"100%", boxSizing:"border-box",
-                background:"transparent", border:"none", outline:"none",
+                border:"none", outline:"none",
                 fontFamily:"'Cinzel Decorative',serif", fontSize:22, fontWeight:700,
                 letterSpacing:2, lineHeight:1.1, marginBottom:10,
                 background:"linear-gradient(135deg,#c9a84c,#e8c96d,#c9a84c)",
@@ -9133,7 +9133,7 @@ function FullSheet({ character, onBack, onUpdate, onRoll, showPanel, onTogglePan
               const TLBLS = { combate:"Combate", poderes:"Poderes", habilidades:"Skills", rituais:"Rituais", "inventário":"Itens", "descrição":"Diário" };
               return tabs.map(t=>(
                 <button key={t} onClick={()=>setActiveTab(t)} style={{
-                  flex:1,padding:"10px 2px 9px",background:"none",border:"none",cursor:"pointer",
+                  flex:1,padding:"10px 2px 9px",border:"none",cursor:"pointer",
                   display:"flex",flexDirection:"column",alignItems:"center",gap:3,
                   fontFamily:"Cinzel,serif",fontSize:7.5,letterSpacing:0.8,textTransform:"uppercase",
                   color:activeTab===t?"var(--gold)":"rgba(255,255,255,0.28)",
