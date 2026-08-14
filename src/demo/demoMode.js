@@ -5,13 +5,20 @@
  *  sem rede e sem tocar no banco de produção. É ambiente de teste visual,
  *  não um "modo convidado" do produto.
  *
- *  COMO LIGA: `http://localhost:3000/?demo=1` — fica ligado no resto da aba
- *  (sessionStorage). `?demo=0` desliga e limpa os dados semeados.
+ *  COMO LIGA — depende de como o build foi feito:
+ *    · Build normal (`npm start`, CI): DESLIGADO até você pedir `?demo=1`,
+ *      que o liga no resto da aba (sessionStorage).
+ *    · Build de vitrine (`REACT_APP_DEMO=1` no .env.production): já abre
+ *      LIGADO, sem parâmetro nenhum. É o site publicado servindo de
+ *      mostruário do visual — pedido do Andre em 2026-08-13.
  *
- *  ONDE NÃO LIGA: num build de produção. `NODE_ENV === "production"` só
- *  aceita o modo se o build tiver sido feito de propósito com
- *  `REACT_APP_DEMO=1`. Sem isso, o `?demo=1` no site publicado não faz nada
- *  — é a trava que impede alguém de entrar sem conta na Vercel.
+ *  COMO SAI: `?demo=0` desliga, limpa a semente e a escolha GRUDA na aba —
+ *  então dá para alcançar a tela de login real mesmo no build de vitrine.
+ *
+ *  ⚠ O QUE O BUILD DE VITRINE ABRE: quem tiver a URL entra sem conta e com
+ *  todos os planos liberados (PLANOS_DEMO). Nenhum dado real fica exposto
+ *  — nada toca o Firestore —, mas a cota do plano livre fica contornável.
+ *  Para fechar de novo: remova `REACT_APP_DEMO` do .env.production.
  *
  *  ONDE ELE TOCA (os quatro pontos, todos com o mesmo `if (DEMO_ON)`):
  *    · `hooks/useAuth`      — usuário falso, sem `onAuthStateChanged`
@@ -34,18 +41,27 @@ const CHAVE_SESSAO = "nx_demo";
 const permitido =
   process.env.NODE_ENV !== "production" || process.env.REACT_APP_DEMO === "1";
 
+/* Build de vitrine: abre em demo SEM precisar de `?demo=1` na URL.
+   Amarrado ao `REACT_APP_DEMO` e não ao `permitido` de propósito — se
+   usasse `permitido`, todo `npm start` passaria a cair em demo por padrão,
+   que é o contrário do que o desenvolvimento precisa. */
+const PADRAO_LIGADO = process.env.REACT_APP_DEMO === "1";
+
 const leQuery = () => {
   try { return new URLSearchParams(window.location.search).get("demo"); }
   catch { return null; }
 };
 
+/* TRÊS estados, não dois: "1" (entrou), "0" (saiu de propósito) e null
+   (ainda não escolheu). O "0" precisa ficar GRAVADO — se sair apenas
+   apagasse a chave, o build de vitrine leria null no carregamento seguinte
+   e jogaria a pessoa de volta para dentro da demo, tornando impossível
+   alcançar a tela de login. */
 const sessao = {
-  get: () => { try { return sessionStorage.getItem(CHAVE_SESSAO) === "1"; } catch { return false; } },
+  get: () => { try { return sessionStorage.getItem(CHAVE_SESSAO); } catch { return null; } },
   set: (v) => {
-    try {
-      if (v) sessionStorage.setItem(CHAVE_SESSAO, "1");
-      else sessionStorage.removeItem(CHAVE_SESSAO);
-    } catch { /* aba sem storage */ }
+    try { sessionStorage.setItem(CHAVE_SESSAO, v ? "1" : "0"); }
+    catch { /* aba sem storage */ }
   },
 };
 
@@ -67,7 +83,12 @@ export const DEMO_ON = (() => {
   const q = leQuery();
   if (q === "1") { sessao.set(true);  return true;  }
   if (q === "0") { sessao.set(false); limparSemente(); return false; }
-  return sessao.get();
+  /* Sem parâmetro na URL: a escolha já feita nesta aba manda; se não houve
+     escolha nenhuma, quem decide é o build. */
+  const escolha = sessao.get();
+  if (escolha === "1") return true;
+  if (escolha === "0") return false;
+  return PADRAO_LIGADO;
 })();
 
 /* ── Usuário ─────────────────────────────────────────────────────────────*/
