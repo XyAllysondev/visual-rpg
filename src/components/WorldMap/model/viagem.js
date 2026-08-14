@@ -30,7 +30,7 @@
  *  Gate: `__tests__/viagem.test.js`.
  * ════════════════════════════════════════════════════════════════════ */
 
-import { comprimentoDaCurva, pontoNaFracao, pontosDaCurva } from "./curves";
+import { comprimentoDaCurva, partirNoProgresso, pontoNaFracao, pontosDaCurva } from "./curves";
 import { revelarAoLongoDe } from "./fogMask";
 import { pontasDaTrilha, vizinhos } from "./graph";
 
@@ -38,7 +38,6 @@ import { pontasDaTrilha, vizinhos } from "./graph";
 export const HORAS_POR_DIA = 24;
 
 const listaDe = (v) => (Array.isArray(v) ? v : []);
-const idValido = (v) => typeof v === "string" && v.trim() !== "";
 const ehPonto = (p) => !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
 const grampear01 = (t) => Math.min(1, Math.max(0, Number.isFinite(t) ? t : 0));
 const naoNegativo = (n) => (Number.isFinite(n) && n > 0 ? n : 0);
@@ -189,6 +188,30 @@ export function trechoPercorrido(viagem, ate) {
   const ultimo = trecho[trecho.length - 1];
   if (ultimo.x !== atual.x || ultimo.y !== atual.y) trecho.push(atual);
   return trecho;
+}
+
+/**
+ * O trecho da trilha que **falta andar**, da posição atual até o destino.
+ *
+ * Irmão de `trechoPercorrido`, e existe pelo mesmo motivo que ele: a rota
+ * bicolor da spec 0035 (AC-1) precisa das duas metades para pintá-las em cores
+ * diferentes — o que já foi andado numa, o que falta na outra.
+ *
+ * O corte vem de `partirNoProgresso`, a mesma régua de comprimento de arco que
+ * `trechoPercorrido` usa. **Não é uma segunda implementação do corte**: as duas
+ * metades compartilham o ponto exato onde o marcador está, e por isso não
+ * aparece vão na junção.
+ *
+ * @param {object} viagem
+ * @param {number} [de] fração; padrão é o progresso da viagem.
+ * @returns {Array<{x:number,y:number}>} sempre termina no destino.
+ */
+export function trechoRestante(viagem, de) {
+  const pontos = listaDe(viagem?.pontos).filter(ehPonto);
+  if (pontos.length === 0) return [];
+
+  const t = grampear01(de === undefined ? viagem?.progresso : de);
+  return partirNoProgresso(pontos, t).restante;
 }
 
 /**

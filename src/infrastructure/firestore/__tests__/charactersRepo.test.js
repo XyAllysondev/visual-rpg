@@ -85,3 +85,52 @@ describe("charactersRepo.remove", () => {
     await expect(charactersRepo.remove("u1", { id: "c1" })).rejects.toThrow("denied");
   });
 });
+
+/* ════════════════════════════════════════════════
+ *  FRONTEIRA VALIDADA — spec 0032 AC-6
+ * ════════════════════════════════════════════════ */
+
+describe("charactersRepo — validação de fronteira (AC-6)", () => {
+  it("ficha ÍNTEGRA sai idêntica, sem log", async () => {
+    const aviso = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const ficha = { id: "c1", systemId: "ordemParanormal", form: { personagem: "Ana" } };
+    getDocs.mockResolvedValue({ docs: [{ id: "c1", data: () => ({ ...ficha }) }] });
+
+    await expect(charactersRepo.listBySystem("u1", "ordemParanormal")).resolves.toEqual([ficha]);
+    expect(aviso).not.toHaveBeenCalled();
+  });
+
+  it("`form` de tipo errado não chega à borda — toda a tela da ficha o indexa sem guarda", async () => {
+    const aviso = jest.spyOn(console, "warn").mockImplementation(() => {});
+    getDocs.mockResolvedValue({
+      docs: [{ id: "c1", data: () => ({ id: "c1", systemId: "op", form: "Ana, 3º nível" }) }],
+    });
+
+    const [ficha] = await charactersRepo.listBySystem("u1", "op");
+
+    expect(ficha.form).toEqual({});
+    expect(() => ficha.form.personagem).not.toThrow();
+    expect(aviso.mock.calls[0][0]).toContain("[charactersRepo.saida]");
+  });
+
+  it("ficha LEGADA sem `id` (identificada pelo `createdAt`) atravessa intocada", async () => {
+    /* A identidade da ficha antiga é `characterKey` (domínio), que já trata a ausência de
+       `id`. Descartá-la aqui tiraria do usuário o acesso à própria ficha. */
+    const aviso = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const legada = { createdAt: 1700000000000, systemId: "op", form: { personagem: "Velho" } };
+    getDocs.mockResolvedValue({ docs: [{ id: "1700000000000", data: () => ({ ...legada }) }] });
+
+    await expect(charactersRepo.listBySystem("u1", "op")).resolves.toEqual([legada]);
+    expect(aviso).not.toHaveBeenCalled();
+  });
+
+  it("documento com corpo não-objeto é descartado em vez de virar ficha vazia", async () => {
+    const erro = jest.spyOn(console, "error").mockImplementation(() => {});
+    getDocs.mockResolvedValue({
+      docs: [{ id: "ok", data: () => ({ id: "ok" }) }, { id: "fantasma", data: () => undefined }],
+    });
+
+    await expect(charactersRepo.listBySystem("u1", "op")).resolves.toEqual([{ id: "ok" }]);
+    expect(erro.mock.calls[0][0]).toContain("fantasma");
+  });
+});

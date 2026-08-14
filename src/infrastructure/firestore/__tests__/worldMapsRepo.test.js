@@ -28,6 +28,9 @@ const docOf = (id, data = {}) => ({
 });
 const snapOf = (docs) => ({ docs, size: docs.length, empty: docs.length === 0 });
 const docExistente = (data) => ({ exists: () => true, id: "x", data: () => data });
+
+/** `Timestamp` do SDK como ele chega num snapshot ao vivo — objeto com `.toMillis()`. */
+const tsSdk = (ms) => ({ toMillis: () => ms, toDate: () => new Date(ms) });
 const docAusente = { exists: () => false, id: "x", data: () => ({}) };
 
 /** Todos os lotes criados na chamada, com as operações que receberam. */
@@ -163,10 +166,19 @@ describe("worldMapsRepo.atualizarMapa / tocarMapa", () => {
 });
 
 describe("worldMapsRepo.lerMapa", () => {
-  it("junta o id do documento aos dados", async () => {
-    getDoc.mockResolvedValue({ exists: () => true, id: "m1", data: () => ({ name: "Aurora" }) });
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5): a leitura avulsa também devolvia o documento cru.
+     Se só `observarMapas` normalizasse, o mesmo mapa teria `updatedAt` numérico na grade e
+     `Timestamp` ao ser aberto — duas formas do mesmo campo na mesma feature. */
+  it("junta o id do documento aos dados e sai com as datas em epoch-ms", async () => {
+    getDoc.mockResolvedValue({
+      exists: () => true,
+      id: "m1",
+      data: () => ({ name: "Aurora", createdAt: tsSdk(1000), updatedAt: tsSdk(2000) }),
+    });
 
-    await expect(repo.lerMapa("u1", "m1")).resolves.toEqual({ id: "m1", name: "Aurora" });
+    await expect(repo.lerMapa("u1", "m1")).resolves.toEqual({
+      id: "m1", name: "Aurora", createdAt: 1000, updatedAt: 2000,
+    });
     expect(fs().doc).toHaveBeenCalledWith({}, "users", "u1", "worldmaps", "m1");
   });
 
@@ -231,15 +243,41 @@ describe("worldMapsRepo.apagarMapaEmCascata", () => {
 });
 
 describe("worldMapsRepo.observarMapas", () => {
-  it("assina a coleção do ateliê ordenada por `updatedAt` e junta o id", () => {
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5).
+     Este teste ASSEVERAVA o molde saindo do repo exatamente como veio do `data()` — com uma
+     data no documento, isso era o `Timestamp` do SDK atravessando a fronteira (dívida aceita
+     no ADR-0010). A grade do ateliê só não quebrava porque `WorldMap/Atelier/ui.js` já aceitava
+     as duas formas no `tempoRelativo`. Agora o contrato é um só: epoch-ms NUMÉRICO. A
+     ordenação por `updatedAt`, que o teste sempre cobriu, continua idêntica. */
+  it("assina a coleção do ateliê ordenada por `updatedAt`, junta o id e sai com data em epoch-ms", () => {
     let entregue;
-    onSnapshot.mockImplementation((_q, next) => { next(snapOf([docOf("m1", { name: "Aurora" })])); return () => {}; });
+    onSnapshot.mockImplementation((_q, next) => {
+      next(snapOf([docOf("m1", { name: "Aurora", createdAt: tsSdk(1000), updatedAt: tsSdk(2000) })]));
+      return () => {};
+    });
 
     repo.observarMapas("u1", (lista) => { entregue = lista; });
 
-    expect(entregue).toEqual([{ id: "m1", name: "Aurora" }]);
+    expect(entregue).toEqual([{ id: "m1", name: "Aurora", createdAt: 1000, updatedAt: 2000 }]);
+    // Nenhuma primitiva do SDK sobrevive à borda.
+    expect(typeof entregue[0].updatedAt).toBe("number");
     expect(orderBy).toHaveBeenCalledWith("updatedAt", "desc");
     expect(query).toHaveBeenCalledWith({ path: "users/u1/worldmaps" }, "orderBy:updatedAt:desc");
+  });
+
+  /* Molde antigo, gravado antes de o repositório carimbar data: o campo não existe, e
+     normalizar NÃO pode inventá-lo — `{updatedAt: null}` faria a grade mostrar "—" onde hoje
+     ela não mostra nada, e mudaria o `toEqual` de quem testa a borda. */
+  it("mapa sem carimbo não ganha um `updatedAt` que ele não tinha", () => {
+    let entregue;
+    onSnapshot.mockImplementation((_q, next) => {
+      next(snapOf([docOf("m-antigo", { name: "Sem carimbo" })]));
+      return () => {};
+    });
+
+    repo.observarMapas("u1", (lista) => { entregue = lista; });
+    expect(entregue).toEqual([{ id: "m-antigo", name: "Sem carimbo" }]);
+    expect("updatedAt" in entregue[0]).toBe(false);
   });
 
   it("pede a estimativa local do carimbo do servidor", () => {
@@ -588,12 +626,18 @@ describe("worldMapsRepo.observarNos / observarTrilhas", () => {
     expect(query).not.toHaveBeenCalled();
   });
 
-  it("entregam a lista com o id do documento e repassam o erro", () => {
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5): o nó saía cru, com `createdAt`/`updatedAt` em
+     `Timestamp` do SDK. Nós, trilhas e eventos passam pelo MESMO `paraLista` do molde — se só
+     o molde normalizasse, a mesma tela do ateliê misturaria número e `Timestamp`. */
+  it("entregam a lista com o id do documento, datas em epoch-ms, e repassam o erro", () => {
     let nos;
     const erro = new Error("denied");
-    onSnapshot.mockImplementationOnce((_ref, next) => { next(snapOf([docOf("n1", { x: 1 })])); return () => {}; });
+    onSnapshot.mockImplementationOnce((_ref, next) => {
+      next(snapOf([docOf("n1", { x: 1, createdAt: tsSdk(10), updatedAt: tsSdk(20) })]));
+      return () => {};
+    });
     repo.observarNos("u1", "m1", (l) => { nos = l; });
-    expect(nos).toEqual([{ id: "n1", x: 1 }]);
+    expect(nos).toEqual([{ id: "n1", x: 1, createdAt: 10, updatedAt: 20 }]);
 
     const onError = jest.fn();
     onSnapshot.mockImplementationOnce((_ref, _next, onErr) => { onErr(erro); return () => {}; });

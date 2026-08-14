@@ -7,15 +7,17 @@
  * `serverTimestamp`, `Timestamp`, `writeBatch` e `startAfter` não saem daqui (spec 0029 AC-3).
  * O cursor de paginação é OPACO para quem chama.
  *
- * NOTA (dívida do ADR-0010): o campo `timestamp` que volta nas mensagens ainda é o
- * `Timestamp` do SDK — a UI lê `msg.timestamp.seconds` em vários pontos e normalizar aqui
- * mudaria comportamento. Normalização entra na onda 3.
+ * DÍVIDA QUITADA (spec 0032 AC-5): `timestamp` e `updatedAt` saem daqui como **epoch-ms
+ * numérico**, nunca mais como `Timestamp` do SDK. Era a última primitiva do SDK a atravessar
+ * a fronteira — estava registrada como aceita no ADR-0010. Documento ainda sem carimbo do
+ * servidor (escrita otimista) sai com o campo `null`; ver `paraEpochMs` em `client.js`.
  */
 import {
   addDoc, setDoc, getDocs, onSnapshot, writeBatch,
   query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp,
 } from "firebase/firestore";
-import { db, docAt, colAt, silent, NOOP_UNSUBSCRIBE } from "./client";
+import { db, docAt, colAt, silent, comDatasEmMs, NOOP_UNSUBSCRIBE } from "./client";
+import { criarNormalizador, texto, naoDescartado } from "./schema";
 import { messagesCol, typingCol, typingDoc } from "./paths";
 
 /** Mensagens somem depois de 24 h — regra de RETENÇÃO do dado, por isso vive no repo. */
@@ -27,7 +29,37 @@ const ttlCutoff = () => Timestamp.fromMillis(Date.now() - MESSAGE_TTL_MS);
 /** Epoch-ms do corte, para os filtros em memória de quem já recebeu as mensagens. */
 export const ttlCutoffMillis = () => Date.now() - MESSAGE_TTL_MS;
 
-const withId = (d) => ({ id: d.id, ...d.data() });
+/** Campos de data deste agregado: `timestamp` nas mensagens, `updatedAt` no "está digitando". */
+const CAMPOS_DE_DATA = ["timestamp", "updatedAt"];
+
+/**
+ * Tipos que a fronteira garante (spec 0032 AC-6).
+ *
+ * `content` é o campo caro: uma mensagem cujo `content` foi gravado como objeto derruba a
+ * árvore inteira do React com "Objects are not valid as a React child" — a bolha some, o chat
+ * some, e o rastro aponta para o componente, não para o documento. Coagir para `""` deixa a
+ * bolha vazia e o log com o ID da mensagem.
+ *
+ * `rollData` NÃO entra: a UI já a lê com encadeamento opcional, e o formato dela varia por
+ * sistema de RPG — descrevê-lo aqui seria a fronteira opinando sobre regra de jogo.
+ */
+const normalizar = criarNormalizador("messagesRepo.saida", {
+  content: texto,
+  type: texto,
+  userName: texto,
+  userId: texto,
+  userPhoto: texto,
+});
+
+/**
+ * Achata o documento, valida os tipos (AC-6) e normaliza as datas (AC-5) — é o único ponto de
+ * saída do repo, então basta ele para garantir que nem `Timestamp` do SDK nem campo de tipo
+ * inesperado cheguem à UI. `null` quando o documento é para descartar.
+ */
+const withId = (d) => {
+  const dados = normalizar(d.data(), d.id);
+  return dados && { id: d.id, ...comDatasEmMs(dados, CAMPOS_DE_DATA) };
+};
 
 /**
  * Envia uma mensagem da mesa.
@@ -82,7 +114,7 @@ export function watchRecent(campaignId, pageSize, onChange, onError) {
   return onSnapshot(
     q,
     (snap) => onChange({
-      messages: snap.docs.map(withId).reverse(),
+      messages: snap.docs.map(withId).filter(naoDescartado).reverse(),
       cursor: snap.docs[snap.docs.length - 1] || null,
       hasMore: snap.docs.length === pageSize,
     }),
@@ -107,7 +139,7 @@ export async function loadOlder(campaignId, cursor, pageSize) {
     limit(pageSize)
   ));
   return {
-    messages: snap.docs.map(withId).reverse(),
+    messages: snap.docs.map(withId).filter(naoDescartado).reverse(),
     cursor: snap.docs[snap.docs.length - 1] || null,
   };
 }
@@ -118,16 +150,25 @@ export async function loadOlder(campaignId, cursor, pageSize) {
  */
 export function watchRolls(campaignId, maxItems, onChange) {
   if (!campaignId) return NOOP_UNSUBSCRIBE;
-  // SEM `orderBy` de propósito — é o comportamento herdado (AC-7). Consequência real: o
-  // Firestore ordena por ID de documento, então o corte de `maxItems` traz rolagens
-  // ARBITRÁRIAS, não as mais recentes. As duas telas que consomem isto reordenam e cortam
-  // em memória, o que mascara o problema enquanto a campanha tem menos de `maxItems`
-  // rolagens no período. Ordenar aqui exigiria índice composto e mudaria o que o usuário vê
-  // — vira decisão da onda 3, não desta spec.
-  const q = query(colAt(messagesCol(campaignId)), where("type", "==", "roll"), limit(maxItems));
+  /* `orderBy` ADICIONADO na spec 0032 (Q2). Sem ele — como era até a spec 0031 — o Firestore
+     ordena por ID de documento, e o `limit` cortava rolagens ARBITRÁRIAS em vez das mais
+     recentes. As telas reordenam em memória, o que escondia o defeito enquanto a campanha
+     tinha menos de `maxItems` rolagens no período; passando disso, o mestre simplesmente não
+     via as últimas jogadas da mesa.
+
+     ⚠ DEPENDE DE ÍNDICE COMPOSTO (`messages`: type ASC + timestamp DESC), declarado em
+     `firestore.indexes.json`. O índice tem de estar NO AR ANTES deste código — senão a
+     assinatura falha e o feed fica vazio. Ordem de deploy:
+     `firebase deploy --only firestore:indexes` e só depois o build. */
+  const q = query(
+    colAt(messagesCol(campaignId)),
+    where("type", "==", "roll"),
+    orderBy("timestamp", "desc"),
+    limit(maxItems)
+  );
   return onSnapshot(
     q,
-    (snap) => onChange(snap.docs.map(withId)),
+    (snap) => onChange(snap.docs.map(withId).filter(naoDescartado)),
     (e) => console.error("[messagesRepo.watchRolls] falhou:", e)
   );
 }
@@ -171,7 +212,7 @@ export function watchTyping(campaignId, onChange) {
   if (!campaignId) return NOOP_UNSUBSCRIBE;
   return onSnapshot(
     query(colAt(typingCol(campaignId))),
-    (snap) => onChange(snap.docs.map(withId)),
+    (snap) => onChange(snap.docs.map(withId).filter(naoDescartado)),
     (e) => console.error("[messagesRepo.watchTyping] falhou:", e)
   );
 }

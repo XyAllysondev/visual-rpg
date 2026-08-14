@@ -16,6 +16,8 @@ const docOf = (id, data) => ({ id, ref: `ref/${id}`, data: () => data });
 const snapOf = (data) => ({ exists: () => data != null, data: () => data });
 /** Snapshot de coleção, com o metadado que a mesa usa para ignorar o próprio eco. */
 const querySnapOf = (docs, hasPendingWrites = false) => ({ docs, metadata: { hasPendingWrites } });
+/** `Timestamp` do SDK como ele chega num snapshot ao vivo — objeto com `.toMillis()`. */
+const tsSdk = (ms) => ({ toMillis: () => ms, toDate: () => new Date(ms) });
 
 let batch;
 
@@ -40,14 +42,22 @@ beforeEach(() => {
 /* ── Assinaturas ────────────────────────────────────────────────────────── */
 
 describe("mapSyncRepo.watchState", () => {
-  it("assina o ponteiro da cena ativa em `map/state`", () => {
-    onSnapshot.mockImplementation((_ref, next) => { next(snapOf({ v: 2 })); return () => {}; });
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5): o `state` saía do repo exatamente como veio do
+     `data()` — e `saveState` carimba `updatedAt` com `serverTimestamp()`, então era o
+     `Timestamp` do SDK atravessando a fronteira (dívida aceita no ADR-0010). Agora sai em
+     epoch-ms NUMÉRICO. O `null` da mesa não migrada continua sendo `null`. */
+  it("assina o ponteiro da cena ativa em `map/state`, com `updatedAt` em epoch-ms", () => {
+    onSnapshot.mockImplementation((_ref, next) => {
+      next(snapOf({ v: 2, updatedAt: tsSdk(2000) }));
+      return () => {};
+    });
     let recebido;
 
     mapSyncRepo.watchState("c1", (s) => { recebido = s; });
 
     expect(onSnapshot.mock.calls[0][0]).toEqual({ path: "campaigns/c1/map/state" });
-    expect(recebido).toEqual({ v: 2 });
+    expect(recebido).toEqual({ v: 2, updatedAt: 2000 });
+    expect(typeof recebido.updatedAt).toBe("number");
   });
 
   it("mesa ainda não migrada entrega `null`, não um objeto vazio", () => {
@@ -79,19 +89,38 @@ describe("mapSyncRepo.watchScenes", () => {
     expect(where).toHaveBeenCalledWith("kind", "==", "scene");
   });
 
-  it("junta o id do documento ao meta e entrega `hasPendingWrites` como booleano", () => {
-    // Só o booleano atravessa a fronteira — o `SnapshotMetadata` é primitiva do SDK. É por
-    // ele que a mesa ignora o eco otimista da própria escrita.
+  /* VIRADA DE CONTRATO — spec 0032 (AC-5): o meta da cena saía cru, com o `updatedAt` que
+     `saveSceneMeta` carimba em `serverTimestamp()`. Agora sai em epoch-ms. O `id` DEPOIS do
+     spread e o `hasPendingWrites`, que este teste sempre cobriu, continuam iguais — é por eles
+     que a mesa ignora o eco otimista da própria escrita. */
+  it("junta o id do documento ao meta, entrega `hasPendingWrites` como booleano e `updatedAt` em epoch-ms", () => {
+    // Só o booleano atravessa a fronteira — o `SnapshotMetadata` é primitiva do SDK.
     onSnapshot.mockImplementation((_q, next) => {
-      next(querySnapOf([docOf("s1", { kind: "scene", name: "Cripta" })], true));
+      next(querySnapOf([docOf("s1", { kind: "scene", name: "Cripta", updatedAt: tsSdk(2000) })], true));
       return () => {};
     });
     let metas, fromSelf;
 
     mapSyncRepo.watchScenes("c1", (m, f) => { metas = m; fromSelf = f; });
 
-    expect(metas).toEqual([{ kind: "scene", name: "Cripta", id: "s1" }]);
+    expect(metas).toEqual([{ kind: "scene", name: "Cripta", updatedAt: 2000, id: "s1" }]);
     expect(fromSelf).toBe(true);
+  });
+
+  /* Cena antiga, gravada antes do carimbo: normalizar não pode INVENTAR `updatedAt: null` —
+     o `elementDiff` e o autosave de meta comparam o objeto inteiro, e uma chave a mais faria
+     a mesa achar que a cena mudou e republicar tudo. */
+  it("cena sem carimbo não ganha um `updatedAt` que ela não tinha", () => {
+    onSnapshot.mockImplementation((_q, next) => {
+      next(querySnapOf([docOf("s1", { kind: "scene", name: "Cripta" })]));
+      return () => {};
+    });
+    let metas;
+
+    mapSyncRepo.watchScenes("c1", (m) => { metas = m; });
+
+    expect(metas).toEqual([{ kind: "scene", name: "Cripta", id: "s1" }]);
+    expect("updatedAt" in metas[0]).toBe(false);
   });
 
   it("sem campaignId, devolve um unsubscribe inerte e não assina nada", () => {
@@ -167,12 +196,17 @@ describe("mapSyncRepo.watchLive", () => {
 
 describe("mapSyncRepo — leituras da migração", () => {
   it("`readState` lê `map/state`; `readLegacyScene` lê o doc v1 `map/scene`", async () => {
-    getDoc.mockResolvedValueOnce(snapOf({ v: 2, activeSceneId: "s1" }));
-    await expect(mapSyncRepo.readState("c1")).resolves.toEqual({ v: 2, activeSceneId: "s1" });
+    /* VIRADA DE CONTRATO — spec 0032 (AC-5): as duas leituras devolviam o documento cru. Se só
+       o `watchState` normalizasse, a migração leria `Timestamp` e a assinatura leria número
+       para o MESMO documento. */
+    getDoc.mockResolvedValueOnce(snapOf({ v: 2, activeSceneId: "s1", updatedAt: tsSdk(2000) }));
+    await expect(mapSyncRepo.readState("c1"))
+      .resolves.toEqual({ v: 2, activeSceneId: "s1", updatedAt: 2000 });
     expect(getDoc).toHaveBeenCalledWith({ path: "campaigns/c1/map/state" });
 
-    getDoc.mockResolvedValueOnce(snapOf({ scene: { elements: [] } }));
-    await expect(mapSyncRepo.readLegacyScene("c1")).resolves.toEqual({ scene: { elements: [] } });
+    getDoc.mockResolvedValueOnce(snapOf({ scene: { elements: [] }, updatedAt: tsSdk(1000) }));
+    await expect(mapSyncRepo.readLegacyScene("c1"))
+      .resolves.toEqual({ scene: { elements: [] }, updatedAt: 1000 });
     expect(getDoc).toHaveBeenLastCalledWith({ path: "campaigns/c1/map/scene" });
   });
 
@@ -292,10 +326,13 @@ describe("mapSyncRepo.saveSceneMeta", () => {
     );
   });
 
-  it("@policy silent — autosave de meta que falha não interrompe a edição", async () => {
+  /* VIRADA DA ONDA 3 (spec 0032 Q4/AC-4). Até a onda 2 este teste provava o contrário:
+     `@policy silent`, resolvia `undefined` e só logava. Era metade do bug — o autosave
+     avançava `lastMetaRef` sobre uma escrita que não aconteceu, e `createScene` devolvia o
+     id de uma cena inexistente. Agora REJEITA e quem chama decide. */
+  it("@policy strict — meta que não grava REJEITA (antes era engolida)", async () => {
     setDoc.mockRejectedValue(new Error("denied"));
-    await expect(mapSyncRepo.saveSceneMeta("c1", "s1", {}, "u1")).resolves.toBeUndefined();
-    expect(console.error).toHaveBeenCalledWith("[mapSyncRepo.saveSceneMeta] falhou:", expect.any(Error));
+    await expect(mapSyncRepo.saveSceneMeta("c1", "s1", {}, "u1")).rejects.toThrow("denied");
   });
 });
 
@@ -451,27 +488,19 @@ describe("mapSyncRepo.commitBatch", () => {
   });
 });
 
-describe("mapSyncRepo.commitBatchSilent", () => {
-  it("escreve igual ao lote strict", async () => {
-    await mapSyncRepo.commitBatchSilent([
-      { op: "set", path: ["campaigns", "c1", "map", "s1", "elements", "el_1"], data: { x: 1 } },
-    ]);
-    expect(batch.set).toHaveBeenCalledWith({ path: "campaigns/c1/map/s1/elements/el_1" }, { x: 1 });
-    expect(batch.commit).toHaveBeenCalled();
-  });
-
-  it("@policy silent — PERDA DE DADOS CONHECIDA: a falha é engolida, só loga", async () => {
-    // Preservado de propósito (AC-7). Combinado com o autosave do `MapEditor/index.jsx`,
-    // que avança a baseline ANTES de publicar, a alteração perdida nunca mais entra num
-    // diff. Consertar exige política de retry — escopo da onda 3.
-    batch.commit.mockRejectedValue(new Error("resource-exhausted"));
-
-    await expect(mapSyncRepo.commitBatchSilent([
-      { op: "set", path: ["campaigns", "c1", "map", "s1", "elements", "el_1"], data: { x: 1 } },
-    ])).resolves.toBeUndefined();
-    expect(console.error).toHaveBeenCalledWith(
-      "[mapSyncRepo.commitBatchSilent] falhou:", expect.any(Error)
-    );
+/* VIRADA DA ONDA 3 (spec 0032 Q4/AC-4).
+ *
+ * Aqui existia `describe("mapSyncRepo.commitBatchSilent")`, com um teste que TRAVAVA a perda
+ * de dados: `@policy silent — PERDA DE DADOS CONHECIDA: a falha é engolida, só loga`. Ele
+ * estava certo para o que a onda 1.5 se propunha (preservar comportamento, AC-7), e errado
+ * para o usuário: com o autosave avançando a baseline antes de publicar, uma escrita falha
+ * sumia do diff para sempre.
+ *
+ * A onda 3 decidiu a política — o erro PROPAGA e a baseline só avança quando confirma — e a
+ * função deixou de existir. O teste vira a asserção oposta: ela não pode voltar por engano. */
+describe("mapSyncRepo.commitBatchSilent — removido na onda 3", () => {
+  it("não existe mais: publicar elementos usa `commitBatch` (strict) e propaga a falha", () => {
+    expect(mapSyncRepo.commitBatchSilent).toBeUndefined();
   });
 });
 

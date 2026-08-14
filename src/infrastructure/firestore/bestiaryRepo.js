@@ -13,10 +13,39 @@
  * é só o prefixo do log, que passa a ser `[bestiaryRepo.<op>]` (AC-4).
  */
 import { addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp } from "firebase/firestore";
-import { docAt, colAt, silent, NOOP_UNSUBSCRIBE } from "./client";
+import { docAt, colAt, silent, comDatasEmMs, NOOP_UNSUBSCRIBE } from "./client";
+import { criarNormalizador, texto, naoDescartado } from "./schema";
 import { bestiaryCol, bestiaryDoc } from "./paths";
 
-const withId = (d) => ({ id: d.id, ...d.data() });
+/** Campo de data deste agregado: quando a criatura entrou no bestiário. */
+const CAMPOS_DE_DATA = ["createdAt"];
+
+/**
+ * Tipos que a fronteira garante (spec 0032 AC-6). Só os textuais.
+ *
+ * **`hpMax`/`hpCurrent` ficam de fora DE PROPÓSITO** — e essa é a decisão que mais importa
+ * neste agregado. O formulário do bestiário grava PV como STRING LIVRE: `"18 (2d8+4)"` é dado
+ * VÁLIDO e comum nas 77 fichas já cadastradas. Coagir para número transformaria a nota de
+ * rolagem do mestre em `18` (ou em `null`) e apagaria informação que ele digitou de propósito.
+ * A régua do PV é `domain/creature.js`, que é total sobre lixo (`toInt` tolerante) e já
+ * devolve número para quem precisa de número. Uma segunda régua aqui só criaria divergência.
+ *
+ * `name`/`system` entram porque são TEXTO e são usados como texto: a busca do bestiário faz
+ * `.toLowerCase()` no nome, e um nome numérico (criatura chamada "13") derruba a busca inteira.
+ */
+const normalizar = criarNormalizador("bestiaryRepo.saida", {
+  name: texto,
+  system: texto,
+  description: texto,
+});
+
+/* Ponto único de saída: valida os tipos (AC-6) e normaliza `createdAt` para epoch-ms (AC-5).
+   Nenhuma tela lê a data hoje — ela existe para a ordenação, que roda no servidor —, mas
+   deixá-la crua manteria uma via aberta para o `Timestamp` do SDK atravessar a fronteira. */
+const withId = (d) => {
+  const dados = normalizar(d.data(), d.id);
+  return dados && { id: d.id, ...comDatasEmMs(dados, CAMPOS_DE_DATA) };
+};
 
 /**
  * Assina o bestiário da campanha, da criatura mais nova para a mais velha.
@@ -29,7 +58,7 @@ export function watchByCampaign(campaignId, onChange) {
   if (!campaignId) return NOOP_UNSUBSCRIBE;
   return onSnapshot(
     query(colAt(bestiaryCol(campaignId)), orderBy("createdAt", "desc")),
-    (snap) => onChange(snap.docs.map(withId)),
+    (snap) => onChange(snap.docs.map(withId).filter(naoDescartado)),
     (e) => console.error("[bestiaryRepo.watchByCampaign] falhou:", e)
   );
 }

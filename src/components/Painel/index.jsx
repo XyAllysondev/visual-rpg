@@ -280,6 +280,11 @@ function Numero({ valor, teto, legenda, dica, onClick, atraso }) {
 export default function Painel({
   system, characters = [], campaigns = [], sessions = [], uid = "",
   userPlans = [], onCreateChar, onSelectChar, onNav, onOpenCampaign, onShowUpgrade,
+  /* Merge de 2026-08-14: chegou da linha do SDD. `{ charId: [{campaignId,
+     sheetId}] }` — quais fichas suas estão abertas ao vivo numa mesa agora.
+     O Painel desta linha não tinha esse sinal; o Dashboard da outra tinha, e
+     ele entra em "Precisa de você" abaixo para não se perder no merge. */
+  liveSheets = {},
 }) {
   const { t: sT } = useLocale();
   const acento = system?.accent || "var(--gold)";
@@ -344,6 +349,23 @@ export default function Painel({
      linha já não é urgência, é lista. */
   const pendencias = useMemo(() => {
     const lista = [];
+    /* Ficha ao vivo primeiro: é o único item que descreve algo acontecendo
+       AGORA, na mesa, com outras pessoas olhando. Vaga aberta e cota podem
+       esperar; uma ficha ao vivo não. Lógica espelhada do NeedsYou.jsx da
+       linha do SDD, que é de onde este sinal veio. */
+    Object.entries(liveSheets || {}).forEach(([charId, coords]) => {
+      if (!Array.isArray(coords) || coords.length === 0) return;
+      const ficha = characters.find((c) => String(c.id || c.createdAt) === String(charId));
+      const nome  = ficha?.form?.personagem || ficha?.name || "Sua ficha";
+      const mesa  = campaigns.find((c) => c.id === coords[0]?.campaignId);
+      lista.push({
+        id: `live-${charId}`, vivo: true,
+        texto: mesa
+          ? <>“{nome}” está ao vivo na mesa de <b style={{ color: "var(--gold2)", fontWeight: 400 }}>{mesa.name}</b></>
+          : <>“{nome}” está ao vivo numa mesa</>,
+        acao: "Abrir", ir: () => (mesa ? onOpenCampaign?.(mesa) : onSelectChar?.(ficha)),
+      });
+    });
     mestrando.forEach((c) => {
       const vagas = (c.maxPlayers || LOTACAO_PADRAO) - (c.members?.length || 0);
       if (vagas > 0) {
@@ -370,6 +392,7 @@ export default function Painel({
     }
     return lista.slice(0, 3);
   }, [mestrando, noLimite, assinante, cotaFichas, fichas.length, system?.name,
+      liveSheets, characters, campaigns, onSelectChar,
       onOpenCampaign, onShowUpgrade, onCreateChar]);
 
   const hora = new Date().getHours();

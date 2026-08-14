@@ -88,7 +88,13 @@ describe("getCardAccent — single source of truth (AC-6)", () => {
 describe("PLAN_DEFS não reintroduz cor de sistema escrita à mão (AC-6)", () => {
   const fs = require("fs");
   const path = require("path");
-  const fonte = fs.readFileSync(path.join(__dirname, "..", "..", "App.jsx"), "utf8");
+  /* Merge de 2026-08-14: o bloco saiu do App.jsx monolítico e hoje vive em
+     features/monetizacao/PlansScreen.jsx (spec 0031). Este teste seguia
+     lendo o App.jsx e por isso NÃO era mais um guarda — virou o detector da
+     regressão do próprio merge, que reintroduziu os três literais. O caminho
+     abaixo é o lar novo; o primeiro `it` continua garantindo que ele existe. */
+  const fonte = fs.readFileSync(
+    path.join(__dirname, "..", "..", "features", "monetizacao", "PlansScreen.jsx"), "utf8");
   const ini = fonte.indexOf("const PLAN_DEFS");
   const bruto = fonte.slice(ini, fonte.indexOf("function PlansScreen", ini));
   /* Tira os comentários ANTES de checar: o guarda olha CÓDIGO, não prosa. O

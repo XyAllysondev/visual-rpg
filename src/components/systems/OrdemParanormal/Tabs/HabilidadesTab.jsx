@@ -7,6 +7,7 @@ import {
 } from "./shared/modalStyles";
 import { CLASS_POWERS, CLASS_TRAILS, TRAIL_ABILITIES, CLASSES_OP } from "../rules";
 import PODERES_PARANORMAIS from "../../../../data/ordemParanormal/poderes-paranormais.json";
+import { sanitizarHtml } from "../../../../lib/sanitizarHtml";
 
 /* ── image downscale ── */
 const downscale = (file, max = 360) => new Promise((res) => {
@@ -441,7 +442,7 @@ function HabilidadeCard({ hab, onEdit, onRemove, onRoll }) {
             <div>
               {hab.imagem_url && <img src={hab.imagem_url} alt="" style={{ width:"100%", maxHeight: 150, objectFit:"cover", borderRadius: 4, marginBottom: 10 }} />}
               {hab.descricao ? (
-                <div className="op-rich-render" style={{ ...tBody, fontFamily:"Inter,system-ui,sans-serif", fontSize: 14, fontStyle:"normal", lineHeight: 1.7 }} dangerouslySetInnerHTML={{ __html: hab.descricao }} />
+                <div className="op-rich-render" style={{ ...tBody, fontFamily:"Inter,system-ui,sans-serif", fontSize: 14, fontStyle:"normal", lineHeight: 1.7 }} dangerouslySetInnerHTML={{ __html: sanitizarHtml(hab.descricao) }} />
               ) : (
                 <div style={{ ...tEmpty, fontFamily:"Inter,system-ui,sans-serif", fontSize: 13 }}>Sem descrição.</div>
               )}

@@ -165,6 +165,65 @@ export function pontoNaFracao(pontos, t) {
 }
 
 /**
+ * Parte a polilinha no progresso `t`, medido no **comprimento real** — a mesma
+ * régua de `pontoNaFracao`, e por isso o corte cai exatamente onde o marcador
+ * do grupo está desenhado.
+ *
+ * Serve à rota bicolor da spec 0035 (AC-1): o trecho já andado é pintado numa
+ * cor e o que falta em outra. As duas metades **compartilham o ponto de corte**
+ * — ele é o último de `percorrido` e o primeiro de `restante` —, senão sobra um
+ * vão de meio pixel na junção, bem embaixo do marcador, que é justamente onde o
+ * olho está.
+ *
+ * O corte é **interpolado dentro do segmento**, nunca arredondado para o vértice
+ * mais próximo: com as 32 amostras do padrão, arredondar faz a junção pular de
+ * vértice em vértice enquanto o marcador desliza contínuo (AC-2).
+ *
+ * @param {Array<{x:number,y:number}>} pontos polilinha (de `pontosDaCurva`).
+ * @param {number} t fração do comprimento; fora de [0,1] é grampeado, inválido vira 0.
+ * @returns {{percorrido:Array<{x:number,y:number}>, restante:Array<{x:number,y:number}>}}
+ *   Nunca lança e nunca devolve `undefined`: lista vazia entra, duas listas
+ *   vazias saem.
+ */
+export function partirNoProgresso(pontos, t) {
+  const pts = (Array.isArray(pontos) ? pontos : []).filter(ehPonto).map((p) => ({ x: p.x, y: p.y }));
+  if (pts.length === 0) return { percorrido: [], restante: [] };
+  if (pts.length === 1) return { percorrido: [{ ...pts[0] }], restante: [{ ...pts[0] }] };
+
+  const f = Number.isFinite(t) ? Math.min(1, Math.max(0, t)) : 0;
+  const total = comprimentoDaCurva(pts);
+
+  // Curva degenerada (todos os pontos no mesmo lugar): não há o que partir, e
+  // dividir pelo comprimento zero adiante daria NaN.
+  if (total === 0) return { percorrido: [{ ...pts[0] }], restante: pts.map((p) => ({ ...p })) };
+  if (f <= 0) return { percorrido: [{ ...pts[0] }], restante: pts.map((p) => ({ ...p })) };
+  if (f >= 1) return { percorrido: pts.map((p) => ({ ...p })), restante: [{ ...pts[pts.length - 1] }] };
+
+  const alvo = total * f;
+  let percorridoAte = 0;
+
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i - 1];
+    const q = pts[i];
+    const seg = Math.hypot(q.x - p.x, q.y - p.y);
+
+    if (percorridoAte + seg >= alvo) {
+      const k = seg === 0 ? 0 : Math.min(1, Math.max(0, (alvo - percorridoAte) / seg));
+      const corte = { x: p.x + (q.x - p.x) * k, y: p.y + (q.y - p.y) * k };
+      return {
+        percorrido: [...pts.slice(0, i), corte],
+        restante: [{ ...corte }, ...pts.slice(i)],
+      };
+    }
+    percorridoAte += seg;
+  }
+
+  // Inalcançável com `f < 1` e `total > 0`, mas o resíduo de ponto flutuante
+  // não pode virar um retorno vazio na tela do jogador.
+  return { percorrido: pts.map((p) => ({ ...p })), restante: [{ ...pts[pts.length - 1] }] };
+}
+
+/**
  * Menor distância de um ponto a um segmento (projeção grampeada nas pontas).
  * @returns {number}
  */

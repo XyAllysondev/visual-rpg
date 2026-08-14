@@ -6,6 +6,7 @@ import {
 } from "./shared/modalStyles";
 import { patenteForPrestigio, cargaMaxima, cargaTeto } from "../rules";
 import ITENS_OFICIAIS from "../../../../data/ordemParanormal/itens-oficiais.json";
+import { sanitizarHtml } from "../../../../lib/sanitizarHtml";
 
 const TIPOS = [
   { id: "arma", label: "Arma" },
@@ -286,7 +287,7 @@ function ItemCard({ it, onEdit, onRemove, onToggleEquip, onRollDano }) {
               {it.melhorias.map((m, i) => <span key={i} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 3, background: "rgba(255,255,255,0.05)", border: "1px solid var(--border)", color: "var(--muted2)" }}>{m}</span>)}
             </div>
           )}
-          {it.descricao && <div className="op-rich-render" style={tBody} dangerouslySetInnerHTML={{ __html: it.descricao }} />}
+          {it.descricao && <div className="op-rich-render" style={tBody} dangerouslySetInnerHTML={{ __html: sanitizarHtml(it.descricao) }} />}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
             <button onClick={onRemove} style={{ ...btnGhost, fontSize: 11, color: "var(--danger-text,#d85a5a)", borderColor: "var(--danger-text,#d85a5a)" }}>Remover</button>
             {isArma && it.dano && <button onClick={() => onRollDano(it.nome, it.dano)} style={{ ...btnGhost, fontSize: 11 }}>🎲 Rolar Dano</button>}
@@ -329,7 +330,20 @@ export default function InventarioTab({ inventario, setInventario, onRollDados, 
   const filtered = itens.filter((it) => it.nome?.toLowerCase().includes(busca.toLowerCase()));
 
   const addItem = (it) => setItens((arr) => [...arr, { ...it, id: Date.now() + Math.random(), is_homebrew: it.is_homebrew ?? false }]);
-  const novoItem = (tipo) => { const it = blankItem(tipo); setItens((arr) => [...arr, { ...it, is_homebrew: true }]); setEditing(it); };
+  /* O item que entra na lista e o item que vai para o modal têm de ser o MESMO
+   * objeto: `saveItem` substitui a entrada inteira pelo que o modal devolve, e
+   * mandar para lá uma cópia sem `is_homebrew` fazia o item recém-criado sumir
+   * de "Meus Itens" assim que era salvo pela primeira vez.
+   *
+   * O teto de homebrew é o mesmo que a aba de Rituais já aplica — lá o botão de
+   * criar desliga ao bater no limite. Aqui o "x/50" era exibido e NUNCA cobrado. */
+  const noLimite = homebrew.length >= HOMEBREW_LIMIT;
+  const novoItem = (tipo) => {
+    if (noLimite) return;
+    const it = { ...blankItem(tipo), is_homebrew: true };
+    setItens((arr) => [...arr, it]);
+    setEditing(it);
+  };
   const saveItem = (it) => setItens((arr) => arr.map((x) => x.id === it.id ? it : x));
   const removeItem = (id) => setItens((arr) => arr.filter((x) => x.id !== id));
   const toggleEquip = (id) => setItens((arr) => arr.map((x) => x.id === id ? { ...x, is_equipado: !x.is_equipado } : x));
@@ -407,7 +421,16 @@ export default function InventarioTab({ inventario, setInventario, onRollDados, 
         })()}
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--border)", alignItems: "center" }}>
           <span style={{ ...tLabel, fontSize: 9, color: "var(--muted)", marginRight: 4 }}>Novo:</span>
-          {TIPOS.map((t) => <button key={t.id} onClick={() => novoItem(t.id)} style={{ ...chip(false), fontSize: 10 }}>{t.label}</button>)}
+          {TIPOS.map((t) => (
+            <button key={t.id} onClick={() => novoItem(t.id)} disabled={noLimite}
+              title={noLimite ? `Limite de ${HOMEBREW_LIMIT} itens próprios atingido` : `Criar ${t.label.toLowerCase()}`}
+              style={{ ...chip(false), fontSize: 10, opacity: noLimite ? 0.4 : 1, cursor: noLimite ? "not-allowed" : "pointer" }}>
+              {t.label}
+            </button>
+          ))}
+          <span style={{ ...tSubtext, fontSize: 9, marginLeft: "auto", color: noLimite ? "#e53935" : "var(--muted)" }}>
+            {homebrew.length}/{HOMEBREW_LIMIT} próprios
+          </span>
         </div>
       </div>
 

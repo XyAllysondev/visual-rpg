@@ -19,6 +19,12 @@
  * - `QuerySnapshot` não sai daqui: toda leitura devolve `{ id, ...campos }`.
  * - `watch*` devolve sempre uma função de cancelamento (idempotente).
  *
+ * DÍVIDA QUITADA (spec 0032 AC-5): `createdAt` e `updatedAt` saem daqui como **epoch-ms
+ * numérico**, nunca mais como `Timestamp` do SDK — era a última primitiva do SDK a atravessar
+ * a fronteira (aceita no ADR-0010). A normalização acontece no ponto único onde o documento é
+ * achatado ({@link comId} / {@link comIdEstimado}), então toda leitura e toda assinatura do
+ * repositório saem normalizadas de graça. Campo AUSENTE continua ausente.
+ *
  * ## Política de erro
  * Tudo é `@policy strict`. É o comportamento herdado (AC-7): o store declara
  * "nada falha em silêncio" e os hooks expõem a falha no campo `error`. Engolir
@@ -30,7 +36,7 @@ import {
   doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, onSnapshot,
   query, where, orderBy, serverTimestamp, writeBatch,
 } from "firebase/firestore";
-import { db, docAt, colAt, NOOP_UNSUBSCRIBE } from "./client";
+import { db, docAt, colAt, comDatasEmMs, NOOP_UNSUBSCRIBE } from "./client";
 import {
   worldsCol, worldDoc, worldSubCol,
   worldEntitiesCol, worldEntityDoc,
@@ -71,8 +77,14 @@ function comCarimbos(data) {
   return saida;
 }
 
+/**
+ * Campos de data do agregado Mundo — os mesmos no documento raiz e nas três subcoleções
+ * (`entities`, `connections`, `folders`), porque `comCarimbos` só carimba topo de documento.
+ */
+const CAMPOS_DE_DATA = ["createdAt", "updatedAt"];
+
 /** Documento cru → objeto plano. Leitura avulsa: sem estimativa de carimbo. */
-const comId = (d) => ({ id: d.id, ...d.data() });
+const comId = (d) => ({ id: d.id, ...comDatasEmMs(d.data(), CAMPOS_DE_DATA) });
 
 /**
  * Mesma coisa, para os `watch*`.
@@ -81,8 +93,16 @@ const comId = (d) => ({ id: d.id, ...d.data() });
  * o servidor confirmar — o que jogaria o doc recém-escrito para o FIM de
  * "recentes" e mostraria "—" no tempo relativo. `serverTimestamps:"estimate"`
  * entrega uma estimativa local no lugar do `null`, corrigida no snapshot seguinte.
+ *
+ * O `serverTimestamps:"estimate"` continua AQUI de propósito depois da spec 0032 AC-5:
+ * a normalização para epoch-ms roda DEPOIS dele, sobre a estimativa. Tirá-lo faria o campo
+ * voltar a ser `null` no snapshot otimista e mudaria o que a Forja mostra logo após criar
+ * um mundo — a normalização preserva o valor, ela não o substitui.
  */
-const comIdEstimado = (d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) });
+const comIdEstimado = (d) => ({
+  id: d.id,
+  ...comDatasEmMs(d.data({ serverTimestamps: "estimate" }), CAMPOS_DE_DATA),
+});
 
 /**
  * Mesma leitura de `comIdEstimado`, mais o estado de confirmação de CADA mundo.

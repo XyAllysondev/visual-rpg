@@ -14,15 +14,22 @@
  * `serverTimestamp` não sai daqui (AC-4).
  */
 import { onSnapshot, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
-import { docAt, colAt, silent, NOOP_UNSUBSCRIBE } from "./client";
+import { docAt, colAt, silent, comDatasEmMs, NOOP_UNSUBSCRIBE } from "./client";
 import { assetsCol, assetDoc } from "./paths";
+
+/**
+ * O único campo de data do asset. DÍVIDA QUITADA (spec 0032 AC-5): sai como **epoch-ms
+ * numérico**, nunca mais como `Timestamp` do SDK. Asset antigo sem carimbo continua sem o
+ * campo — `comDatasEmMs` não cria chave que não existia.
+ */
+const CAMPOS_DE_DATA = ["updatedAt"];
 
 /**
  * O `id` vem DEPOIS do spread de propósito: o id do documento é a verdade, e um campo `id`
  * divergente no corpo (asset copiado à mão, importação antiga) apontaria a UI para um
  * documento que não existe. É o que o `subscribeAssets` original já fazia.
  */
-const withId = (d) => ({ ...d.data(), id: d.id });
+const withId = (d) => ({ ...comDatasEmMs(d.data(), CAMPOS_DE_DATA), id: d.id });
 
 /**
  * Assina a biblioteca inteira do usuário.

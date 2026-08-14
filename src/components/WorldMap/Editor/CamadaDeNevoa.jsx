@@ -51,9 +51,10 @@
  *      `deriva` (design §5.4: "nada anima enquanto o mestre edita no ateliê").
  * ════════════════════════════════════════════════════════════════════ */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMovimentoReduzido } from "./animacao";
 import { CICLO_DA_DERIVA } from "./nevoaStyles";
+import { franjaDaMascara } from "../model/franja";
 
 /** As opacidades do AC-5, num lugar só. */
 export const OPACIDADE = {
@@ -155,8 +156,11 @@ export function raioDoDesfoque(escala, scale) {
  *   teste inspeciona sem precisar de pixels.
  */
 export function pintarNevoa(ctx, opcoes = {}) {
+  /* `mascaraAtual` e `papel` seguem chegando no objeto de opções (o chamador os
+     passa junto), mas quem os LÊ é o `construirPixels` — desestruturá-los aqui
+     só criava dois nomes mortos. O contrato de entrada não muda. */
   const {
-    mascara = null, mascaraAtual = null, papel = "mestre",
+    mascara = null,
     largura = 0, altura = 0, dpr = 1, pan = { x: 0, y: 0 }, scale = 1,
     offscreen = null,
   } = opcoes;
@@ -194,7 +198,69 @@ export function pintarNevoa(ctx, opcoes = {}) {
   } finally {
     if ("filter" in ctx) ctx.filter = "none";
   }
+
+  /* ── A franja de tinta (spec 0035 · AC-4) ──────────────────────────────
+     Vai DEPOIS do desfoque e com o filtro já desligado: ela é o traço nítido
+     que o desfoque não deve comer. É o que troca "borda de software" por
+     "até aqui o cartógrafo desenhou". */
+  resultado.franja = pintarFranja(ctx, {
+    tracos: opcoes.franja, pan: { x: px, y: py }, scale: s,
+    cor: opcoes.corDaFranja,
+  });
+
   return resultado;
+}
+
+/** Tinta da franja: o creme de pena sobre pergaminho, não o branco puro. */
+export const COR_DA_FRANJA = "rgba(238,228,205,0.72)";
+
+/**
+ * Risca os traços da franja no contexto 2D, em px de tela.
+ *
+ * Separada de `pintarNevoa` para poder ser medida sozinha, e porque ela é a
+ * única parte da névoa que **não** passa pelo offscreen da grade: traço fino
+ * desenhado num bitmap de 600×400 e depois esticado viraria borrão.
+ *
+ * @param {CanvasRenderingContext2D|null} ctx `null` é no-op (jsdom).
+ * @param {object} opcoes
+ * @param {Array<{x1,y1,x2,y2}>} [opcoes.tracos] saída de `franjaDaMascara`.
+ * @param {{x:number,y:number}} [opcoes.pan]
+ * @param {number} [opcoes.scale]
+ * @param {string} [opcoes.cor]
+ * @returns {number} quantos traços foram riscados.
+ */
+export function pintarFranja(ctx, opcoes = {}) {
+  const tracos = Array.isArray(opcoes.tracos) ? opcoes.tracos : [];
+  if (!ctx || typeof ctx.beginPath !== "function" || tracos.length === 0) return 0;
+
+  const s = Number.isFinite(opcoes.scale) && opcoes.scale > 0 ? opcoes.scale : 1;
+  const px = Number.isFinite(opcoes.pan?.x) ? opcoes.pan.x : 0;
+  const py = Number.isFinite(opcoes.pan?.y) ? opcoes.pan.y : 0;
+
+  ctx.save?.();
+  if (typeof ctx.setLineDash === "function") ctx.setLineDash([]);
+  ctx.lineCap = "round";
+  ctx.strokeStyle = opcoes.cor || COR_DA_FRANJA;
+  /* A pena tem espessura de pena: não engrossa junto com o zoom além de um
+     fio, senão vira cerca em volta do revelado. */
+  ctx.lineWidth = Math.max(0.8, Math.min(2.4, 1.1 * s));
+
+  let riscados = 0;
+  ctx.beginPath();
+  for (let i = 0; i < tracos.length; i += 1) {
+    const t = tracos[i];
+    if (!t) continue;
+    if (![t.x1, t.y1, t.x2, t.y2].every(Number.isFinite)) continue;
+    ctx.moveTo(t.x1 * s + px, t.y1 * s + py);
+    ctx.lineTo(t.x2 * s + px, t.y2 * s + py);
+    riscados += 1;
+  }
+  /* Um `stroke` só para milhares de traços: abrir e fechar caminho por traço
+     é o que derrubaria o quadro numa grade grande. */
+  if (riscados > 0) ctx.stroke();
+  ctx.restore?.();
+
+  return riscados;
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -229,6 +295,17 @@ export default function CamadaDeNevoa({
 
   const revisao = mascara?.revisao || 0;
   const revisaoAtual = mascaraAtual?.revisao || 0;
+
+  /* ── A franja de tinta (spec 0035 · AC-4) ──────────────────────────────
+     Recalculada só quando a máscara MUDA — `revisao` é o contador que a
+     `fogMask` incrementa a cada revelação. Varrer a grade a cada quadro (600×400
+     = 240 000 células) derrubaria a mesa; varrer por revelação custa nada,
+     porque revelação acontece algumas vezes por segundo, não sessenta. */
+  const franja = useMemo(
+    () => franjaDaMascara(mascara),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mascara, revisao],
+  );
 
   /* Reativo: quem liga "reduzir movimento" no sistema com o mapa aberto vê a
      deriva sumir do DOM na hora, sem recarregar (ver `Editor/animacao.js`). */
@@ -282,8 +359,9 @@ export default function CamadaDeNevoa({
     pintarNevoa(ctx, {
       mascara, mascaraAtual, papel, largura, altura, dpr, pan, scale,
       offscreen: offscreenRef.current,
+      franja,
     });
-  }, [mascara, revisao, mascaraAtual, revisaoAtual, papel, pan, scale, largura, altura]);
+  }, [mascara, revisao, mascaraAtual, revisaoAtual, papel, pan, scale, largura, altura, franja]);
 
   if (!mascara) return null;
 

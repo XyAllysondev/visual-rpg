@@ -430,8 +430,54 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
   const loadedRef   = useRef(false);      // 1ª carga da cena ativa concluída (libera autosave)
   const uploadedRef = useRef(new Set());  // imagens já persistidas (evita re-upload/eco)
   const fetchingRef = useRef(new Set());  // imagens em download (getDoc on-demand)
-  const lastPubRef  = useRef({});         // último byId publicado (base do diff)
-  const lastMetaRef = useRef('');         // último meta JSON salvo (evita write por drag)
+  const lastPubRef  = useRef({});         // último byId CONFIRMADO no servidor (base do diff)
+  const lastMetaRef = useRef('');         // último meta JSON CONFIRMADO (evita write por drag)
+  const uploadingRef = useRef(new Set()); // imagens com upload em voo (não re-disparar)
+  const pubSeqRef   = useRef(0);          // ordem das publicações em voo (ver autosave)
+
+  /* ── spec 0032 AC-4: o autosave não perde alteração em silêncio ──────────────
+   * Política (decidida na spec 0032, o bug estava aberto no STATE.md desde 2026-07-25):
+   *
+   *  1. A baseline (`lastPubRef` / `lastMetaRef` / `uploadedRef`) só avança quando a escrita
+   *     CONFIRMA. Falhou → a baseline fica onde está, a alteração continua entrando no
+   *     próximo diff e é reenviada naturalmente.
+   *  2. O reenvio é o PRÓPRIO efeito de autosave rodando de novo: a falha agenda um tique
+   *     (`syncRetry`) com backoff exponencial, e o tique é dependência do efeito. Sem
+   *     agendador novo e sem laço apertado.
+   *  3. Depois de `SYNC_WARN_AFTER` falhas seguidas o usuário vê um aviso discreto, que some
+   *     sozinho quando uma escrita volta a passar.
+   *
+   * O trabalho local nunca é revertido: a cena na tela continua íntegra: o que fica pendente
+   * é só a publicação. */
+  const SYNC_WARN_AFTER = 3;
+  const syncFailsRef  = useRef(0);        // falhas seguidas de publicação
+  const retryTimerRef = useRef(null);
+  const [syncRetry,  setSyncRetry]  = useState(0);   // tique de reenvio (dep dos autosaves)
+  const [syncFailed, setSyncFailed] = useState(false); // aviso visível ao mestre
+
+  /* 1s, 2s, 4s… com teto de 30s — o autosave é de fundo, não vale martelar a rede. */
+  const syncBackoffMs = (falhas) => Math.min(30000, 1000 * 2 ** Math.max(0, falhas - 1));
+
+  /** Registra falha de publicação. `retry:false` para o que não deve ser reagendado por
+   *  tique (upload de imagem — ele volta sozinho na próxima mudança do store). */
+  function noteSyncFailure(e, { retry = true } = {}) {
+    console.error('[mesa] publicação falhou — alteração continua pendente:', e);
+    const n = (syncFailsRef.current += 1);
+    if (n >= SYNC_WARN_AFTER) setSyncFailed(true);
+    if (!retry) return;
+    clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = setTimeout(() => setSyncRetry(v => v + 1), syncBackoffMs(n));
+  }
+
+  /** Uma escrita passou: zera o contador e apaga o aviso. */
+  function noteSyncOk() {
+    if (syncFailsRef.current === 0) return;
+    syncFailsRef.current = 0;
+    clearTimeout(retryTimerRef.current);
+    setSyncFailed(false);
+  }
+
+  useEffect(() => () => clearTimeout(retryTimerRef.current), []);
 
   /* migração lazy (mestre) + assinaturas de state e metas de cena */
   useEffect(() => {
@@ -494,12 +540,15 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
       const { elements: _e, ...meta } = sc;
       const json = JSON.stringify(meta);
       if (json === lastMetaRef.current) return;
-      lastMetaRef.current = json;
-      saveSceneMeta(db, campaignId, uid, sc);
+      /* AC-4: `lastMetaRef` (a baseline do meta) só avança DEPOIS da confirmação. Se falhar,
+         o meta continua diferente da baseline e o próximo ciclo o reenvia. */
+      saveSceneMeta(db, campaignId, uid, sc)
+        .then(() => { lastMetaRef.current = json; noteSyncOk(); })
+        .catch(noteSyncFailure);
     }, 1000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scenes, activeScene]);
+  }, [scenes, activeScene, syncRetry]);
 
   /* mestre: autosave v2 — elementos por diff batcheado (debounce 300ms) */
   useEffect(() => {
@@ -509,21 +558,46 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
       if (!sc) return;
       const next = byId(sc.elements);
       const prev = lastPubRef.current;
-      lastPubRef.current = next;
-      publishElements(db, campaignId, sc.id, prev, next);
+      /* AC-4: a baseline só avança quando o commit CONFIRMA. Antes ela avançava aqui, antes
+         da publicação e sem `await` — uma escrita falha sumia do diff para sempre.
+         O `seq` evita que uma publicação lenta que chega atrasada empurre a baseline por
+         cima de uma mais nova: ficar para trás só custa reenvio, adiantar-se perde dado. */
+      const seq = ++pubSeqRef.current;
+      publishElements(db, campaignId, sc.id, prev, next)
+        .then(() => {
+          if (pubSeqRef.current === seq) lastPubRef.current = next;
+          noteSyncOk();
+        })
+        .catch(noteSyncFailure);
     }, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scenes, activeScene]);
+  }, [scenes, activeScene, syncRetry]);
 
   /* mestre: sobe imagens novas (reduzidas) e alinha o store local ao que foi salvo */
   useEffect(() => {
     if (!campaignMode || !isMaster || !db) return;
     Object.entries(imageStore).forEach(([id, data]) => {
-      if (!id.startsWith('img_') || uploadedRef.current.has(id)) return;
-      uploadedRef.current.add(id);
+      if (!id.startsWith('img_') || uploadedRef.current.has(id) || uploadingRef.current.has(id)) return;
+      /* AC-4: `uploadingRef` só evita disparar o mesmo upload duas vezes; quem marca a
+         imagem como ENVIADA é o `uploadedRef`, e ele só recebe o id quando o `saveImage`
+         confirma. Antes o id entrava em `uploadedRef` antes da escrita: uma imagem que não
+         subia nunca era tentada de novo, e a mesa via um token sem textura. */
+      uploadingRef.current.add(id);
       saveImage(db, campaignId, id, data).then((r) => {
-        if (r && r.data !== data) setImageStore((prev) => ({ ...prev, [id]: r.data }));
+        uploadingRef.current.delete(id);
+        if (!r) {
+          /* `retry: false` — reenviar imagem por tique repetiria o `alert` do arquivo grande
+             demais a cada backoff. O próximo mexer no store já tenta de novo. */
+          noteSyncFailure(new Error(`imagem ${id} não subiu`), { retry: false });
+          return;
+        }
+        uploadedRef.current.add(id);
+        noteSyncOk();
+        if (r.data !== data) setImageStore((prev) => ({ ...prev, [id]: r.data }));
+      }).catch((e) => {
+        uploadingRef.current.delete(id);
+        noteSyncFailure(e, { retry: false });
       });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -797,8 +871,16 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
      (metas em campScenes) e a ativa é o ponteiro map/state. */
   async function addScene() {
     if (campaignMode) {
-      const id = await fsCreateScene(db, campaignId, uid, 'Cena ' + (campScenes.length + 1));
-      await fsSetActiveScene(db, campaignId, uid, id);
+      /* AC-4: `fsCreateScene` REJEITA quando a cena não é gravada. Sem este try, o
+         `fsSetActiveScene` apontaria a mesa para um documento inexistente. */
+      try {
+        const id = await fsCreateScene(db, campaignId, uid, 'Cena ' + (campScenes.length + 1));
+        await fsSetActiveScene(db, campaignId, uid, id);
+        noteSyncOk();
+      } catch (e) {
+        noteSyncFailure(e, { retry: false });
+        showFlash('⚠ Não foi possível criar a cena — verifique a conexão e tente de novo.');
+      }
       return;
     }
     const id = 's' + Date.now();
@@ -825,7 +907,17 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
     const res = await askPrompt('Renomear cena', [{ key: 'name', label: 'Nome da cena', value: sc?.name || 'Cena' }]);
     const n = res?.name;
     if (!n?.trim()) return;
-    if (campaignMode && id !== activeScene) { saveSceneMeta(db, campaignId, uid, { ...sc, name: n.trim() }); return; }
+    if (campaignMode && id !== activeScene) {
+      /* Cena que não é a ativa não passa pelo autosave (ele só olha a cena ativa), então não
+         há ciclo seguinte para reenviar: o jeito honesto é avisar na hora. */
+      saveSceneMeta(db, campaignId, uid, { ...sc, name: n.trim() })
+        .then(noteSyncOk)
+        .catch((e) => {
+          noteSyncFailure(e, { retry: false });
+          showFlash('⚠ Não foi possível renomear a cena — verifique a conexão.');
+        });
+      return;
+    }
     dispatch({ type: 'RENAME_SCENE', sceneId: id, name: n.trim() });
   }
   function switchScene(id) {
@@ -1849,6 +1941,17 @@ export default function MapEditor({ onBack, campaignId, uid, isMaster, db }) {
           {/* Aviso temporário (spec 0019 AC-1/AC-10): camada travada, quota cheia… */}
           {flash && (
             <div style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 400, background: 'rgba(29,29,40,0.96)', border: '1px solid rgba(251,191,36,0.4)', color: '#fde68a', borderRadius: 10, padding: '9px 18px', fontSize: 12.5, fontFamily: 'Inter,system-ui,sans-serif', boxShadow: '0 8px 30px rgba(0,0,0,0.6)', pointerEvents: 'none', maxWidth: '80%', textAlign: 'center' }}>{flash}</div>
+          )}
+
+          {/* spec 0032 AC-4 — aviso de sincronização travada. Discreto e não bloqueante: o
+              trabalho local está íntegro e o autosave continua reenviando sozinho; o que o
+              mestre precisa saber é que a mesa ainda não recebeu. Some quando uma escrita
+              volta a passar (`noteSyncOk`). */}
+          {campaignMode && isMaster && syncFailed && (
+            <div role="status" data-testid="mesa-sync-falha"
+              style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 401, background: 'rgba(60,20,20,0.96)', border: '1px solid rgba(248,113,113,0.55)', color: '#fecaca', borderRadius: 10, padding: '7px 14px', fontSize: 12, fontFamily: 'Inter,system-ui,sans-serif', boxShadow: '0 8px 30px rgba(0,0,0,0.6)', pointerEvents: 'none', maxWidth: '80%', textAlign: 'center' }}>
+              ⚠ Alterações não chegaram à mesa — tentando reenviar…
+            </div>
           )}
         </div>
 

@@ -12,7 +12,7 @@ import {
   readState, readLegacyScene, getImageData, imageExists, getCampaignDoc, listElementIds,
   saveImage as repoSaveImage, saveSceneMeta as repoSaveSceneMeta, saveState,
   updateElementPos as repoUpdateElementPos,
-  commitBatch, commitBatchSilent, elementPath, mapDocPath, SERVER_TIME,
+  commitBatch, elementPath, mapDocPath, SERVER_TIME,
 } from '../../../infrastructure/firestore/mapSyncRepo';
 import { diffElements, chunkOps } from './elementDiff';
 import { newScene, newSceneId } from '../schema';
@@ -104,7 +104,10 @@ export async function saveImage(db, cid, imageId, dataUrl) {
 
 /* ── Escrita de cena/elementos (mestre) ──────────────────────────────────── */
 
-/* Meta da cena (sem elements). */
+/* Meta da cena (sem elements).
+ *
+ * REJEITA se a escrita falhar (onda 3, spec 0032 AC-4 — antes era engolida). Quem chama
+ * decide: o autosave não avança `lastMetaRef` e reagenda; `createScene` não devolve id. */
 export function saveSceneMeta(db, cid, uid, scene) {
   const { elements: _e, ...meta } = scene;
   return repoSaveSceneMeta(cid, scene.id, clean(meta), uid);
@@ -112,11 +115,14 @@ export function saveSceneMeta(db, cid, uid, scene) {
 
 /* Publica só o diff de elementos em batches. Devolve true se algo foi escrito.
  *
- * ATENÇÃO — perda de dados silenciosa CONHECIDA e preservada (AC-7): `commitBatchSilent`
- * engole a falha do commit, e o autosave do `index.jsx` avança a baseline
- * (`lastPubRef.current = next`) ANTES de chamar esta função. Se a escrita falha, a
- * alteração nunca mais entra num diff. O conserto exige decidir política de retry e é
- * escopo da onda 3 — o problema está documentado no JSDoc do `mapSyncRepo`. */
+ * REJEITA se qualquer lote falhar (onda 3, spec 0032 AC-4). Era `commitBatchSilent` — a
+ * falha era engolida e o autosave do `index.jsx` já tinha avançado a baseline, então a
+ * alteração nunca mais entrava num diff. Agora o autosave só avança `lastPubRef` DEPOIS
+ * desta Promise resolver, e reenvia o mesmo diff no ciclo seguinte quando ela rejeita.
+ *
+ * Um lote pode ter ido e outro não (não há atomicidade entre lotes): quem chama mantém a
+ * baseline inteira, e o reenvio reescreve os elementos que já subiram — `set` por id é
+ * idempotente, então custa escrita repetida, não corrupção. */
 export async function publishElements(db, cid, sceneId, prevById, nextById) {
   const { adds, updates, deletes } = diffElements(prevById, nextById);
   if (!adds.length && !updates.length && !deletes.length) return false;
@@ -127,7 +133,7 @@ export async function publishElements(db, cid, sceneId, prevById, nextById) {
     ...deletes.map(id => ({ op: 'delete', path: elementPath(cid, sceneId, id) })),
   ];
   /* Fatia pelo teto de 500 ops/batch do Firestore antes de entregar ao repositório. */
-  for (const chunk of chunkOps(ops)) await commitBatchSilent(chunk);
+  for (const chunk of chunkOps(ops)) await commitBatch(chunk);
   return true;
 }
 
@@ -147,6 +153,11 @@ export function setActiveScene(db, cid, uid, sceneId) {
   return saveState(cid, { v: 2, activeSceneId: sceneId, updatedBy: uid });
 }
 
+/* Cria a cena e só então devolve o id.
+ *
+ * O `await` REJEITA quando a gravação falha (onda 3, spec 0032 AC-4): antes o
+ * `saveSceneMeta` era silencioso e esta função devolvia o id de qualquer jeito, deixando o
+ * ponteiro `map/state` apontando para um documento que não existe. */
 export async function createScene(db, cid, uid, name) {
   const sc = newScene(name || 'Nova cena', newSceneId());
   await saveSceneMeta(db, cid, uid, sc);

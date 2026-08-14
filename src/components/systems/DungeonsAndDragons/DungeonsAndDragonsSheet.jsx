@@ -377,23 +377,19 @@ function DiceOverlay({ roll, onClose }) {
   return (
     <div className="dnd-overlay" onClick={onClose}>
       <div className={`dnd-roll-card${isCrit?" crit":""}`} onClick={e=>e.stopPropagation()}>
-        {/* SVG corners */}
-        {[[" top:-1px;left:-1px;border-top:2px solid;border-left:2px solid",
-           " top:-1px;right:-1px;border-top:2px solid;border-right:2px solid",
-           " bottom:-1px;left:-1px;border-bottom:2px solid;border-left:2px solid",
-           " bottom:-1px;right:-1px;border-bottom:2px solid;border-right:2px solid"]].map(()=>
-          [["top:-1px","left:-1px","borderTop:`2px solid ${GOLD}`","borderLeft:`2px solid ${GOLD}`"],
-           ["top:-1px","right:-1px","borderTop:`2px solid ${GOLD}`","borderRight:`2px solid ${GOLD}`"],
-           ["bottom:-1px","left:-1px","borderBottom:`2px solid ${GOLD}`","borderLeft:`2px solid ${GOLD}`"],
-           ["bottom:-1px","right:-1px","borderBottom:`2px solid ${GOLD}`","borderRight:`2px solid ${GOLD}`"]
-          ].map((_,ci)=>(
-            <span key={ci} style={{ position:"absolute",width:14,height:14,pointerEvents:"none",
-              ...(ci===0?{top:-1,left:-1,borderTop:`2px solid ${GOLD}`,borderLeft:`2px solid ${GOLD}`}:
-                 ci===1?{top:-1,right:-1,borderTop:`2px solid ${GOLD}`,borderRight:`2px solid ${GOLD}`}:
-                 ci===2?{bottom:-1,left:-1,borderBottom:`2px solid ${GOLD}`,borderLeft:`2px solid ${GOLD}`}:
-                        {bottom:-1,right:-1,borderBottom:`2px solid ${GOLD}`,borderRight:`2px solid ${GOLD}`}) }}/>
-          ))
-        )}
+        {/* Cantos dourados do cartão. Eram dois `map` aninhados sobre arrays de
+            strings que ninguém lia — inclusive strings com `${GOLD}` LITERAL
+            dentro de aspas comuns, que nunca interpolaram nada. Só o índice era
+            usado; o estilo real sempre veio do ternário. Aqui está a mesma
+            renderização, com as quatro posições ditas uma única vez. */}
+        {[
+          { top:-1,    left:-1,  borderTop:`2px solid ${GOLD}`,    borderLeft:`2px solid ${GOLD}` },
+          { top:-1,    right:-1, borderTop:`2px solid ${GOLD}`,    borderRight:`2px solid ${GOLD}` },
+          { bottom:-1, left:-1,  borderBottom:`2px solid ${GOLD}`, borderLeft:`2px solid ${GOLD}` },
+          { bottom:-1, right:-1, borderBottom:`2px solid ${GOLD}`, borderRight:`2px solid ${GOLD}` },
+        ].map((canto,ci)=>(
+          <span key={ci} style={{ position:"absolute", width:14, height:14, pointerEvents:"none", ...canto }}/>
+        ))}
 
         {isCrit&&<div className="dnd-crit-badge">⚔ ACERTO CRÍTICO ⚔</div>}
         {isFail&&<div style={{ textAlign:"center",fontFamily:"Cinzel,serif",fontSize:11,
@@ -575,7 +571,12 @@ export default function DungeonsAndDragonsSheet({ character, onBack, onUpdate, o
     clearTimeout(saveTimer.current);
     saveTimer.current=setTimeout(()=>{ onUpdate?.(latest.current); dirtyRef.current=false; setDirty(false); setSavedAt(Date.now()); },900);
     return()=>clearTimeout(saveTimer.current);
+    // `onUpdate` fica fora: costuma ser lambda inline do pai, e listá-la
+    // reagendaria o autosave a cada render. O ref `latest` já leva o estado novo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   },[snapshot]);
+  // idem no unmount — a lista vazia é o que garante UMA descarga só, no fim.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(()=>()=>{ clearTimeout(saveTimer.current); if(dirtyRef.current) onUpdate?.(latest.current); },[]);
   const handleBack=()=>{ clearTimeout(saveTimer.current); if(dirtyRef.current) onUpdate?.(latest.current); onBack?.(); };
 
@@ -607,6 +608,9 @@ export default function DungeonsAndDragonsSheet({ character, onBack, onUpdate, o
       else if(e.key==="e"||e.key==="E") setEditMode(v=>!v);
       else if(["1","2","3","4","5","6"].includes(e.key)) rollAttr(ATTR_KEYS[+e.key-1]); };
     window.addEventListener("keydown",h); return()=>window.removeEventListener("keydown",h);
+    // `rollAttr` é recriada a cada render; o que o atalho precisa é dos atributos
+    // atuais, e é `attrs` que muda quando eles mudam.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   },[attrs]);
 
   const filteredSpells=useMemo(()=>(magiasData.magias||[]).filter(s=>{

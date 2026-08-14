@@ -15,11 +15,40 @@ import {
   getDocs, addDoc, updateDoc, onSnapshot,
   query, where, serverTimestamp, arrayUnion, arrayRemove,
 } from "firebase/firestore";
-import { docAt, colAt, NOOP_UNSUBSCRIBE } from "./client";
+import { docAt, colAt, comDatasEmMs, NOOP_UNSUBSCRIBE } from "./client";
+import { criarNormalizador, lista, mapa, texto, numero, naoDescartado } from "./schema";
 import { campaignDoc, campaignsCol } from "./paths";
 import { normalizeInviteCode, isActiveCampaign, systemOf } from "../../domain/campaign";
 
-const withId = (d) => ({ id: d.id, ...d.data() });
+/** Campo de data deste agregado: quando a campanha foi criada. */
+const CAMPOS_DE_DATA = ["createdAt"];
+
+/**
+ * Tipos que a fronteira garante (spec 0032 AC-6). São os campos cujo tipo errado quebra tela:
+ * `members`/`admins` são percorridos com `.includes`/`.length` (e `useCampaign.entrarNaCampanha`
+ * faz `camp.members.includes(uid)` SEM guarda), `memberNames` é indexado por uid, e `maxPlayers`
+ * entra numa comparação numérica vindo de um `<input>`, que grava string.
+ *
+ * `isActive` NÃO está aqui de propósito: a régua é `isActiveCampaign` (domínio), que já trata
+ * ausência como "ativa" — coagi-lo aqui criaria uma segunda régua para a mesma pergunta.
+ */
+const normalizar = criarNormalizador("campaignsRepo.saida", {
+  members: lista,
+  admins: lista,
+  memberNames: mapa,
+  maxPlayers: numero,
+  name: texto,
+  system: texto,
+  inviteCode: texto,
+});
+
+/* Ponto único de saída: valida os tipos (AC-6) e normaliza `createdAt` para epoch-ms (AC-5) —
+   é o que fecha a última via de vazamento do `Timestamp` do SDK neste agregado.
+   Devolve `null` no documento a descartar; quem chama filtra com `naoDescartado`. */
+const withId = (d) => {
+  const dados = normalizar(d.data(), d.id);
+  return dados && { id: d.id, ...comDatasEmMs(dados, CAMPOS_DE_DATA) };
+};
 const byMember = (uid) => query(colAt(campaignsCol()), where("members", "array-contains", uid));
 
 /**
@@ -34,7 +63,7 @@ export function watchByMember(uid, onChange, onError) {
   if (!uid) return NOOP_UNSUBSCRIBE;
   return onSnapshot(
     byMember(uid),
-    (snap) => onChange(snap.docs.map(withId)),
+    (snap) => onChange(snap.docs.map(withId).filter(naoDescartado)),
     (e) => {
       console.error("[campaignsRepo.watchByMember] falhou:", e);
       if (onError) onError(e);
@@ -46,19 +75,23 @@ export function watchByMember(uid, onChange, onError) {
 export async function listByMember(uid) {
   if (!uid) return [];
   const snap = await getDocs(byMember(uid));
-  return snap.docs.map(withId);
+  return snap.docs.map(withId).filter(naoDescartado);
 }
 
 /**
  * Quantas campanhas ATIVAS o usuário MESTRA num sistema. Só conta — a comparação com o
  * teto é do hook.
  *
- * ATENÇÃO — assimetria HERDADA em relação a `countActiveByMemberAndSystem`: aqui
- * `isActive` vai NA QUERY, lá é filtrado em memória. Campanha antiga sem o campo é
- * invisível para esta contagem e visível para a outra, então um mestre com campanhas
- * legadas fura o teto ao CRIAR e é barrado ao ENTRAR por convite.
- * É exatamente o que o código original fazia (`useCampaign.js` antes da spec 0029) e o
- * AC-7 manda preservar. Uniformizar muda o que o usuário pode fazer — decisão da onda 3.
+ * **CORRIGIDO na spec 0032 (Q1).** Até a spec 0031 esta função punha
+ * `where("isActive","==",true)` NA QUERY, e documento sem o campo não casa com essa
+ * comparação — campanha criada antes de `isActive` existir sumia da contagem. Como a irmã
+ * `countActiveByMemberAndSystem` sempre filtrou em memória, o mesmo mestre **furava o teto
+ * ao CRIAR e era barrado ao ENTRAR** pelo código de convite. Duas funções vizinhas diziam
+ * coisas opostas sobre o mesmo usuário.
+ *
+ * Agora as duas filtram em memória, com `isActiveCampaign` (que trata ausência do campo como
+ * ativa) — a mesma regra de domínio nos dois lados. A query mantém só os filtros que TODO
+ * documento tem, e por isso não depende de índice novo.
  *
  * @policy strict @returns {Promise<number>}
  */
@@ -68,11 +101,10 @@ export async function countActiveByMasterAndSystem(uid, system) {
     query(
       colAt(campaignsCol()),
       where("masterId", "==", uid),
-      where("system", "==", system),
-      where("isActive", "==", true)
+      where("system", "==", system)
     )
   );
-  return snap.size;
+  return snap.docs.filter((d) => isActiveCampaign(d.data())).length;
 }
 
 /**

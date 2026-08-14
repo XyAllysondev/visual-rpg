@@ -17,27 +17,41 @@
  * traduz. Os `path` vêm de `elementPath`/`mapDocPath`, que reexportam `paths.js`: o módulo
  * de UI nunca digita um segmento de coleção.
  *
- * ## PERDA DE DADOS SILENCIOSA CONHECIDA — documentada, não consertada
- * `commitBatchSilent` engole a falha do commit. É o que o `publishElements` sempre fez, e
- * combinado com o autosave do `MapEditor/index.jsx` — que avança a baseline
- * (`lastPubRef.current = next`) ANTES de publicar, sem `await` — produz este bug real:
+ * ## PERDA DE DADOS SILENCIOSA — CONSERTADA na onda 3 (spec 0032 Q4/AC-4)
+ * Até a onda 2 existia aqui um `commitBatchSilent` que engolia a falha do commit. Combinado
+ * com o autosave do `MapEditor/index.jsx` — que avançava a baseline (`lastPubRef.current =
+ * next`) ANTES de publicar, sem `await` — produzia este bug real:
  *
  *   > se a escrita falha, a alteração nunca mais entra num diff, porque a baseline já
  *   > considera que ela foi publicada. O mestre vê o elemento na tela dele; a mesa nunca o
  *   > recebe, e nenhum erro aparece.
  *
- * Está registrado no `docs/STATE.md`. Consertar exige decidir política de retry (repetir?
- * reverter a baseline? avisar o mestre?) — é escopo da ONDA 3. A onda 1.5 só move o acesso
- * a dados, e concentra a falha AQUI para que ela fique visível num lugar só (AC-7).
+ * A política decidida na spec 0032 é: **a escrita da mesa PROPAGA a falha**, e quem chama
+ * (o autosave) só avança a baseline quando o commit confirma. Por isso `commitBatchSilent`
+ * foi REMOVIDO e `publishElements` passou a usar `commitBatch` (strict) — o mesmo vale para
+ * `saveSceneMeta`, que virou strict para que `createScene` não devolva id de cena que não
+ * foi gravada.
  */
 import {
   onSnapshot, getDoc, getDocs, setDoc, deleteDoc, writeBatch,
   query, where, serverTimestamp,
 } from "firebase/firestore";
-import { db, docAt, colAt, silent, NOOP_UNSUBSCRIBE } from "./client";
+import { db, docAt, colAt, silent, comDatasEmMs, NOOP_UNSUBSCRIBE } from "./client";
 import {
   campaignDoc, mapScenesCol, mapElementsCol, mapElementDoc, mapLiveDoc, mapDoc,
 } from "./paths";
+
+/**
+ * O único campo de data desta mesa: `updatedAt`, carimbado na cena, na imagem e no `state`.
+ *
+ * DÍVIDA QUITADA (spec 0032 AC-5): ele sai daqui como **epoch-ms numérico**, nunca mais como
+ * `Timestamp` do SDK. Campo AUSENTE continua ausente — cena antiga sem carimbo não ganha um
+ * `updatedAt: null` que não tinha.
+ *
+ * Os ELEMENTOS não entram: eles não têm campo de data (o `elementDiff` compara conteúdo), e
+ * o `at` da presença ao vivo é o relógio do CLIENTE — já nasce número e nunca foi `Timestamp`.
+ */
+const CAMPOS_DE_DATA = ["updatedAt"];
 
 /** Documento avulso que guarda o ponteiro da cena ativa (`map/state`). */
 const STATE_DOC_ID = "state";
@@ -93,7 +107,7 @@ export function watchState(campaignId, onChange) {
   if (!campaignId) return NOOP_UNSUBSCRIBE;
   return onSnapshot(
     docAt(mapDoc(campaignId, STATE_DOC_ID)),
-    (snap) => onChange(snap.exists() ? snap.data() : null),
+    (snap) => onChange(snap.exists() ? comDatasEmMs(snap.data(), CAMPOS_DE_DATA) : null),
     (e) => console.error("[mapSyncRepo.watchState] falhou:", e)
   );
 }
@@ -114,7 +128,7 @@ export function watchScenes(campaignId, onChange) {
   return onSnapshot(
     query(colAt(mapScenesCol(campaignId)), where("kind", "==", "scene")),
     (snap) => onChange(
-      snap.docs.map((d) => ({ ...d.data(), id: d.id })),
+      snap.docs.map((d) => ({ ...comDatasEmMs(d.data(), CAMPOS_DE_DATA), id: d.id })),
       snap.metadata.hasPendingWrites
     ),
     (e) => console.error("[mapSyncRepo.watchScenes] falhou:", e)
@@ -164,7 +178,7 @@ export function watchLive(campaignId, onChange) {
 export async function readState(campaignId) {
   try {
     const snap = await getDoc(docAt(mapDoc(campaignId, STATE_DOC_ID)));
-    return snap.exists() ? snap.data() : null;
+    return snap.exists() ? comDatasEmMs(snap.data(), CAMPOS_DE_DATA) : null;
   } catch {
     return null;
   }
@@ -178,7 +192,7 @@ export async function readState(campaignId) {
 export async function readLegacyScene(campaignId) {
   try {
     const snap = await getDoc(docAt(mapDoc(campaignId, LEGACY_SCENE_DOC_ID)));
-    return snap.exists() ? snap.data() : null;
+    return snap.exists() ? comDatasEmMs(snap.data(), CAMPOS_DE_DATA) : null;
   } catch {
     return null;
   }
@@ -263,14 +277,16 @@ export async function saveImage(campaignId, imageId, data) {
 /**
  * Grava os metadados da cena (sem os elementos — eles são documentos próprios).
  * @param {object} meta já sem `elements` e já sem `undefined` (o módulo limpa).
- * @policy silent — autosave de meta que falha nunca interrompeu a edição. Herdado.
+ * @policy strict — era `silent` até a onda 2. Virou strict na onda 3 (spec 0032 AC-4) por
+ *   dois motivos: o autosave de meta precisa saber se gravou para não avançar
+ *   `lastMetaRef` em cima de uma escrita que não aconteceu, e `createScene` precisa NÃO
+ *   devolver o id quando o `setDoc` falha — senão a mesa passa a apontar para um documento
+ *   inexistente. Quem chama decide se avisa o usuário.
  */
 export async function saveSceneMeta(campaignId, sceneId, meta, uid) {
-  return silent("mapSyncRepo.saveSceneMeta", undefined, () =>
-    setDoc(docAt(mapDoc(campaignId, sceneId)), {
-      kind: "scene", ...meta, updatedAt: serverTimestamp(), updatedBy: uid,
-    })
-  );
+  return setDoc(docAt(mapDoc(campaignId, sceneId)), {
+    kind: "scene", ...meta, updatedAt: serverTimestamp(), updatedBy: uid,
+  });
 }
 
 /**
@@ -371,16 +387,6 @@ export async function commitBatch(ops) {
   return runBatch(ops);
 }
 
-/**
- * Idem, mas engolindo a falha.
- *
- * @policy silent — **é a perda de dados silenciosa documentada no topo deste arquivo.**
- *   Existe só para o `publishElements`, cujo autosave avança a baseline antes de publicar:
- *   se este commit falha, a alteração não volta em nenhum diff futuro. Preservado
- *   deliberadamente (AC-7) — a política de retry é decisão da onda 3. **Não use em código
- *   novo.**
- * @param {BatchOp[]} ops
- */
-export async function commitBatchSilent(ops) {
-  return silent("mapSyncRepo.commitBatchSilent", undefined, () => runBatch(ops));
-}
+/* `commitBatchSilent` existia aqui até a onda 2 e foi REMOVIDO na onda 3 (spec 0032 AC-4):
+   era a perda de dados silenciosa documentada no topo deste arquivo. Publicar elementos usa
+   `commitBatch` (strict) e a baseline do autosave só avança quando o commit confirma. */

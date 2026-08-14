@@ -41,6 +41,12 @@
  *  · `carimbar: ["updatedAt"]` — o relógio do servidor é pedido por NOME de campo;
  *    o `serverTimestamp()` nunca é montado pela borda.
  *
+ * ── DÍVIDA QUITADA (spec 0032 AC-5) ─────────────────────────────────────────
+ * `createdAt`, `updatedAt` e `syncedAt` saem daqui como **epoch-ms numérico**, nunca mais
+ * como `Timestamp` do SDK — era a última primitiva do SDK a atravessar a fronteira (aceita
+ * no ADR-0010). A normalização acontece nos pontos únicos onde o documento é achatado
+ * (`listaComId`, `docComId`, `lerMoldeDoAtelie`, `transacionar`, `watchNevoa`).
+ *
  * ── Política de erro (AC-7) ─────────────────────────────────────────────────
  * Tudo é `strict` menos `listarNevoa`, porque era o único ponto onde o legado engolia a
  * falha (`getDocs(fogCol(...)).catch(() => ({docs: []}))`, em `limparProgresso`).
@@ -53,7 +59,7 @@ import {
   getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot,
   query, where, serverTimestamp, writeBatch, runTransaction,
 } from "firebase/firestore";
-import { db, docAt, colAt, silent, NOOP_UNSUBSCRIBE } from "./client";
+import { db, docAt, colAt, silent, comDatasEmMs, NOOP_UNSUBSCRIBE } from "./client";
 import {
   campaignsCol, atelieMapDoc, atelieSubCol,
   mesaMapsCol, mesaMapDoc, mesaRevealedCol, mesaRevealedDoc,
@@ -120,17 +126,34 @@ function comCarimbo(dados, carimbar) {
 }
 
 /**
+ * Os campos que `comCarimbo` grava com o relógio do servidor — e, por isso, exatamente os que
+ * voltam como `Timestamp` do SDK. `syncedAt` entra na lista porque a ressincronização do molde
+ * o pede (`carimbar: ["syncedAt", "updatedAt"]` no `mesaStore`).
+ *
+ * DÍVIDA QUITADA (spec 0032 AC-5): eles saem daqui como epoch-ms NUMÉRICO. Campo AUSENTE
+ * continua ausente — o que importa nesta mesa, onde o segredo vaza pela DIFERENÇA: criar
+ * `updatedAt: null` num documento revelado que nunca o teve mudaria o que o jogador enxerga.
+ */
+const CAMPOS_DE_DATA = ["createdAt", "updatedAt", "syncedAt"];
+
+/**
  * Snapshot de coleção → lista de objetos planos, com o id junto.
  *
  * `serverTimestamps: "estimate"` é herdado do `snapToList` do store: sem ele, um
  * documento acabado de gravar chega com `updatedAt: null` até o servidor confirmar.
+ * Ele continua AQUI depois da spec 0032 (AC-5): a normalização para epoch-ms roda sobre a
+ * estimativa, não no lugar dela.
  */
 const listaComId = (snap) =>
-  snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) }));
+  snap.docs.map((d) => ({
+    id: d.id,
+    ...comDatasEmMs(d.data({ serverTimestamps: "estimate" }), CAMPOS_DE_DATA),
+  }));
 
 /** Documento único → objeto plano com o id, ou `null` quando não existe. */
-const docComId = (snap) =>
-  (snap.exists() ? { id: snap.id, ...snap.data({ serverTimestamps: "estimate" }) } : null);
+const docComId = (snap) => (snap.exists()
+  ? { id: snap.id, ...comDatasEmMs(snap.data({ serverTimestamps: "estimate" }), CAMPOS_DE_DATA) }
+  : null);
 
 /* ════════════════════════════════════════════════════════════════════
  *  LEITURAS PONTUAIS
@@ -154,14 +177,16 @@ export async function existeInstancia(campaignId, instanceId) {
  * O documento raiz do MOLDE, no ateliê privado do mestre.
  *
  * Sem `serverTimestamps: "estimate"` — é o que o legado fazia (`raiz.data()` cru), e o
- * molde não tem campo de tempo que a tela leia.
+ * molde não tem campo de tempo que a tela leia. As datas passam pelo normalizador da spec
+ * 0032 (AC-5) mesmo assim: o molde TEM `createdAt`/`updatedAt` gravados pelo `worldMapsRepo`,
+ * e a regra é da fronteira, não de quem a lê hoje.
  *
  * @policy strict @returns {Promise<object|null>} `null` quando o molde não existe mais.
  */
 export async function lerMoldeDoAtelie(uid, mapId) {
   if (!uid || !mapId) return null;
   const snap = await getDoc(docAt(atelieMapDoc(uid, mapId)));
-  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  return snap.exists() ? { id: snap.id, ...comDatasEmMs(snap.data(), CAMPOS_DE_DATA) } : null;
 }
 
 /**
@@ -364,7 +389,11 @@ export function transacionar(campaignId, instanceId, alvo, decidir) {
   const ref = docAt(caminhoDoAlvo(campaignId, instanceId, { alvo }));
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
-    const decisao = (await decidir(snap.exists() ? snap.data() : null)) || {};
+    // Datas em epoch-ms também aqui (spec 0032 AC-5): `decidir` é código do store, do outro
+    // lado da fronteira. O que ele devolve em `gravar` é montado do zero — nenhuma decisão
+    // repassa o documento lido —, então normalizar a leitura não muda o que é escrito.
+    const atual = snap.exists() ? comDatasEmMs(snap.data(), CAMPOS_DE_DATA) : null;
+    const decisao = (await decidir(atual)) || {};
     if (decisao.gravar) {
       tx.set(ref, comCarimbo(decisao.gravar, decisao.carimbar || ["updatedAt"]), { merge: true });
     }
@@ -449,7 +478,9 @@ export function watchNevoa(campaignId, instanceId, onChange, onError) {
   return onSnapshot(
     colAt(mesaFogCol(campaignId, instanceId)),
     (snap) => onChange({
-      docs: snap.docs.map((d) => ({ id: d.id, dados: d.data() })),
+      // `dados` também sai com a data em epoch-ms (spec 0032 AC-5) — o payload do bitmap
+      // segue cru, que é o que `model/fogMask.js` desserializa.
+      docs: snap.docs.map((d) => ({ id: d.id, dados: comDatasEmMs(d.data(), CAMPOS_DE_DATA) })),
       local: !!snap.metadata?.hasPendingWrites,
     }),
     aoFalhar("watchNevoa", onError),
