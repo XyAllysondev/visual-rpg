@@ -32,6 +32,10 @@ import { useLocale } from "../../i18n/useLocale";
 import { contarMapas } from "../../infrastructure/firestore/worldMapsRepo";
 import { watchWorldsByOwner } from "../../infrastructure/firestore/worldsRepo";
 import { DEMO_ON, CONTAGENS_DEMO } from "../../demo/demoMode";
+/* Registry dos sistemas — a fonte de verdade da arte de cada casa. Importado
+   do módulo e NÃO do barril `features/sistemas`, que arrastaria a vitrine
+   inteira (SystemSelect, carrossel, backdrop) para dentro do Painel. */
+import SYSTEMS from "../../features/sistemas/systems";
 
 /* Teto de mesas que um mestre pode manter ativas — o MESMO número que a tela
    de Campanhas mostra (App.jsx, CampaignList). Não é constante nova. */
@@ -157,6 +161,51 @@ const marcas = (qtd, raio, comprimento) =>
       x2: 280 + cos * (raio + comprimento), y2: 280 + sen * (raio + comprimento),
     };
   });
+
+/* ── Brasão da casa ──────────────────────────────────────────────────────
+   O que o Painel mostra atrás do título. ANTES era o `Sigilo` abaixo: um
+   selo bonito, mas GENÉRICO — o mesmo desenho no Painel de Ordem Paranormal,
+   de D&D e de Tormenta, mudando só a cor. Pedido do Andre (2026-08-14): que
+   o símbolo diga QUAL casa é.
+
+   A arte vem do registry (`SYSTEMS`) e não do objeto `system` recebido: o
+   `activeSystem` viaja pelo localStorage e algumas origens o entregam
+   incompleto — o `SISTEMA_DEMO` do modo demo, por exemplo, não tem `idle`.
+   Buscar por `id` no registry é a única fonte que sempre sabe.
+
+   Sistema sem arte própria (3D&T, Call of Cthulhu) cai no `Sigilo` genérico
+   de propósito: melhor o selo neutro do que um buraco no herói. */
+function BrasaoDaCasa({ systemId }) {
+  const casa = SYSTEMS.find((s) => s.id === systemId);
+  if (!casa?.idle) return <Sigilo />;
+
+  return (
+    <div className="px-armila" aria-hidden="true">
+      <video
+        muted loop autoPlay playsInline preload="auto" poster={casa.emblem}
+        style={{
+          width: "100%", height: "100%", objectFit: "contain",
+          /* Mesmo tratamento do carrossel da vitrine: `screen` apaga o preto
+             chapado do vídeo, e a máscara radial dissolve a borda da caixa
+             antes que ela desenhe um retângulo sobre o herói. */
+          mixBlendMode: "screen",
+          maskImage: "radial-gradient(circle at 50% 50%, #000 46%, transparent 68%)",
+          WebkitMaskImage: "radial-gradient(circle at 50% 50%, #000 46%, transparent 68%)",
+          /* A opacidade de `.px-armila` (.62) foi calibrada para as LINHAS
+             FINAS do Sigilo SVG. O brasão é chapa sólida e acesa: no mesmo
+             valor ele domina o herói e o título perde a briga. Este 0.5 em
+             cima do .62 do container dá ~0.31 — a mesma presença de marca
+             d'água que o carrossel da vitrine usa. */
+          opacity: 0.5,
+          filter: "saturate(1.05)",
+        }}
+      >
+        <source src={`${casa.idle}.webm`} type="video/webm" />
+        <source src={`${casa.idle}.mp4`} type="video/mp4" />
+      </video>
+    </div>
+  );
+}
 
 function Sigilo() {
   const OURO = "var(--gold)";
@@ -417,7 +466,7 @@ export default function Painel({
         {["tl", "tr", "bl", "br"].map((c) => (
           <span key={c} className={`px-hero-canto ${c}`} aria-hidden="true" />
         ))}
-        <Sigilo />
+        <BrasaoDaCasa systemId={system?.id} />
         <div className="px-aura" aria-hidden="true">
           <i style={{ right: "4%", top: "18%", width: 440, height: 440, background: acento, opacity: 0.34 }} />
           <i style={{ left: "6%",  top: "8%",  width: 360, height: 360, background: "var(--gold)", opacity: 0.22, animationDelay: "-11s" }} />

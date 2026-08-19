@@ -515,12 +515,17 @@ export function usePausaSeOculto() {
  * cima. Fica atrás de todo o conteúdo (`z-index:0`, `pointer-events:none`) e
  * congela inteiro quando a aba some (ver `usePausaSeOculto`).
  */
-export function HeraldicAmbience() {
+export function HeraldicAmbience({ semSigilo = false } = {}) {
   const ref = usePausaSeOculto();
 
   return (
     <div className="h-amb" ref={ref} aria-hidden="true">
       <div className="h-amb-aurora"><i /><i /><i /></div>
+      {/* `semSigilo`: a vitrine de sistemas troca este hexagrama genérico pelo
+          brasão da casa (features/sistemas/CarrosselDeBrasoes). Dois sigilos
+          girando um sobre o outro viraria sopa — quem tem brasão próprio não
+          precisa do ornamento neutro. */}
+      {semSigilo ? null : (
       <div className="h-amb-sigilo">
         <svg viewBox="0 0 400 400" fill="none">
           <g stroke="var(--brasao2)" strokeWidth="1">
@@ -542,6 +547,7 @@ export function HeraldicAmbience() {
           </g>
         </svg>
       </div>
+      )}
       <div className="h-amb-nevoa" />
       <div className="h-amb-veu" />
       <div className="h-amb-lamina" />

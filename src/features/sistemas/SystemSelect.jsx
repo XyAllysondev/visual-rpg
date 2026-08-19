@@ -7,6 +7,8 @@ import AmbientBackdrop from "../../ui/AmbientBackdrop";
 /* Névoa da repaginação heráldica — acompanha o AmbientBackdrop em toda tela
    que o monta (merge de 2026-08-14, vinha do App.jsx monolítico). */
 import { HeraldicAmbience } from "../../themes/heraldica";
+/* Fundo desta tela: os três brasões animados, um de cada vez. */
+import CarrosselDeBrasoes from "./CarrosselDeBrasoes";
 import Deco from "../../ui/Deco";
 
 /* ═══════════════════════════════
@@ -26,7 +28,9 @@ function SystemSelect({ onSelect, onLogout }) {
   return (
     <div style={{minHeight:"100vh", background:"var(--bg)", display:"flex", flexDirection:"column", position:"relative", overflow:"hidden"}}>
       <AmbientBackdrop />
-      <HeraldicAmbience/>
+      {/* Sem o hexagrama genérico: aqui o fundo é o brasão da casa. */}
+      <HeraldicAmbience semSigilo/>
+      <CarrosselDeBrasoes sistemas={SYSTEMS} focado={hovered}/>
       <Deco/>
 
       {/* Ambient glow */}
