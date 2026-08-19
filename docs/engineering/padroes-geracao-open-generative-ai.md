@@ -1,3 +1,9 @@
+---
+name: padroes-geracao-open-generative-ai
+description: Catálogo de padrões de UX e estado para geração assíncrona (imagem, vídeo, lip sync), extraídos do Open-Generative-AI. Puxe ao desenhar tela que dispara job demorado e precisa de fila, progresso e retomada.
+alwaysApply: false
+---
+
 # Padrões extraídos do Open-Generative-AI
 
 Fonte: `Desktop/Nexus RPG/Open-Generative-AI` (MIT, Anil-matcha). É um front-end de estúdio
