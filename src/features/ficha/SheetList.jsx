@@ -1,8 +1,5 @@
 import { useState, useEffect } from "react";
 import { getActiveAvatar } from "../../domain/character";
-/* quick 007 — mesma função que o dossiê usa por dentro, para a aba da pasta
-   e a folha de rosto nunca divergirem de número. */
-import { numeroDeProcesso } from "../../components/systems/OrdemParanormal/dossie";
 
 /* ═══════════════════════════════
    SHEET LIST — Agent Grid
@@ -92,13 +89,6 @@ function SheetList({ characters, system, onCreateChar, onSelectChar, onDeleteCha
             }}
               onMouseEnter={e=>{e.currentTarget.style.borderColor="rgba(176,48,216,0.5)"; e.currentTarget.style.transform="translateY(-3px)"; e.currentTarget.style.boxShadow="0 12px 40px rgba(176,48,216,0.18)"}}
               onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255,255,255,0.07)"; e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="none"}}>
-
-              {/* quick 007 — a aba da pasta carrega o MESMO nº de processo que o
-                  dossiê mostra por dentro (mesma função, mesmo id ⇒ mesmo
-                  número). Veio do App.jsx monolítico no merge de 2026-08-14. */}
-              {numeroDeProcesso(String(c.id || c.createdAt || "")) && (
-                <span className="h-pasta-aba" aria-hidden="true">OP-{numeroDeProcesso(String(c.id || c.createdAt || ""))}</span>
-              )}
 
               {/* Gear + menu */}
               <div style={{position:"absolute", top:12, right:14, zIndex:3}}>

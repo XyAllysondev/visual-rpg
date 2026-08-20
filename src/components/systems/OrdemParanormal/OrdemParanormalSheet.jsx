@@ -16,7 +16,6 @@ import { useLocale } from "../../../i18n/useLocale";
 import AttrConstellation from "./AttrConstellation";
 import VitalSign from "./VitalSign";
 import { OrdemSheetStyles } from "./ordemStyles";
-import { DossieStyles, numeroDeProcesso } from "./dossie";
 import { getElementTheme, ELEMENT_UNLOCK_NEX } from "./elementos";
 import ElementoSymbol from "./ElementoSymbol";
 import ElementoAfinidadeModal from "./ElementoAfinidadeModal";
@@ -339,9 +338,6 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
   const [reviewIdx, setReviewIdx] = useState(0);
   const [selectedDiffs, setSelectedDiffs] = useState({});
   const isPublic = !!character.public;
-  /* spec 0035 AC-3. Derivado do id, então é estável entre renders — calcular
-     no JSX chamaria a função duas vezes por render sem necessidade. */
-  const processo = numeroDeProcesso(charId);
   const editToken = character.editToken || null;
 
   // Auto-load pending edits when sheet opens (if public)
@@ -795,9 +791,6 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
   return (
     <div className={`op-sheet op-fill op-grain fade ${breach ? "op-breach" : ""}`} style={rootVars} data-elemento={elementoAfinidade || "ordem"}>
       <OrdemSheetStyles />
-      {/* DEPOIS do OrdemSheetStyles de propósito: o material do dossiê
-          sobrescreve `.op-ink` (spec 0035 AC-1). A ordem é o mecanismo. */}
-      <DossieStyles />
       <div className={`op-vignette ${wounded ? "on" : ""}`} />
       <div className={`op-outrolado ${breach ? "on" : ""}`} />
       {breach && <div className="op-outrolado-glyphs on">{"ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛏᛒᛖᛗ".repeat(120)}</div>}
@@ -808,11 +801,6 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <button className="btn-ghost" onClick={handleBack} aria-label="Voltar">← {t("common.back")}</button>
           <div style={{ flex: 1, minWidth: 0 }}>
-            {/* O timbre completo (processo + classificação) vive na FOLHA DE
-                ROSTO da coluna esquerda desde a quick 006 — aqui ficou só a
-                sobrancelha. Duplicar o número no sticky punha duas tarjas
-                CONFIDENCIAL na mesma dobra de tela: documento repete carimbo
-                por FOLHA, não duas vezes na mesma vista. */}
             <div className="op-label" style={{ marginBottom: 2 }}>{t("op.sheet.subtitle")}</div>
             {editMode ? (
               <input className="op-name-input" value={form.personagem ?? character.name ?? ""}
@@ -956,59 +944,21 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
 
         {/* ── LEFT ── */}
         <div className={`op-col op-stagger${mobileSec !== "ficha" ? " op-mobile-hidden" : ""}`} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {/* quick 006 — FOLHA DE ROSTO do processo. Tudo aqui ou deriva de
-              dado real (processo ← charId, data ← createdAt; sem o dado, a
-              linha SOME — regra do AC-3 da 0035) ou é ornamento aria-hidden
-              que não afirma dado nenhum (tarja, censura, rubrica). */}
-          <div className="op-ink dos-rosto" style={{ position: "relative", padding: "11px 14px 10px 30px", background: "rgba(0,0,0,0.25)" }}>
-            <span className="dos-furo" style={{ top: "20%" }} aria-hidden="true" />
-            <span className="dos-furo" style={{ top: "64%" }} aria-hidden="true" />
-            <div className="dos-agencia">Ordem Paranormal — Operações</div>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
-              {processo && (
-                <div style={{ minWidth: 0 }}>
-                  <div className="op-label" style={{ fontSize: 8, letterSpacing: "0.22em" }}>Processo</div>
-                  <div className="dos-processo-hero">OP-{processo}</div>
-                </div>
-              )}
-              <span className="dos-tarja" aria-hidden="true">Confidencial</span>
-            </div>
-            {character.createdAt && (
-              <div className="dos-campo" style={{ marginTop: 8 }}>
-                <span className="dos-campo-rotulo">Aberto em</span>
-                <span className="dos-campo-guia" aria-hidden="true" />
-                <span className="dos-campo-valor">{character.createdAt}</span>
-              </div>
-            )}
-            <div className="dos-campo" style={{ marginTop: 3 }} aria-hidden="true">
-              <span className="dos-campo-rotulo">Operação</span>
-              <span className="dos-campo-guia" />
-              <span className="dos-campo-valor"><span className="dos-censura" style={{ width: "9ch" }} /></span>
-            </div>
-            <div className="dos-rodape" aria-hidden="true">FL. 01 · Rubrica <span className="dos-rubrica" /></div>
-          </div>
-
           {/* portrait + identity */}
-          <div className="op-ink op-photo-frame dos-foto" style={{ position: "relative", height: 220, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+          <div className="op-ink op-photo-frame" style={{ position: "relative", height: 220, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
             role="button" tabIndex={0} aria-label="Retrato do agente" onClick={() => setShowUpload(true)}
             onKeyDown={(e) => e.key === "Enter" && setShowUpload(true)}
             onMouseEnter={(e) => { e.currentTarget.style.boxShadow = `0 0 26px ${theme.accent}66`; }}
-            /* string vazia (não "none"): devolve a sombra de papel que a
-               camada do dossiê dá a todo .op-ink — "none" a matava para
-               sempre no primeiro mouseout (quick 006) */
-            onMouseLeave={(e) => { e.currentTarget.style.boxShadow = ""; }}>
+            onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "none"; }}>
             {shownAvatar ? (
               <img src={shownAvatar} alt={charName} style={{ width: "100%", height: "100%", objectFit: "cover", filter: "sepia(0.42) contrast(1.06) brightness(0.95) saturate(0.85)" }} />
             ) : (
-              /* quick 006 — estado vazio como campo de formulário de arquivo:
-                 a área demarcada onde a fotografia deveria estar presa */
-              <div className="dos-foto-vazia">
-                <div className="op-label" style={{ letterSpacing: "0.2em" }}>Fotografia não anexada</div>
-                <div className="op-data" style={{ fontSize: 10, color: "var(--gold)" }}>clique para enviar</div>
+              <div style={{ textAlign: "center", color: "var(--muted)" }}>
+                <div style={{ fontSize: 42, opacity: 0.5 }}>◈</div>
+                <div className="op-label" style={{ marginTop: 6 }}>Sem Retrato</div>
+                <div className="op-data" style={{ fontSize: 10, marginTop: 4, color: "var(--gold)" }}>clique para enviar</div>
               </div>
             )}
-            <span className="dos-cantos" aria-hidden="true" />
-            <span className="dos-anexo" aria-hidden="true">Anexo I · 3×4</span>
             {faseAtiva && <span className="op-data" style={{ position: "absolute", bottom: 6, left: 6, fontSize: 9, padding: "2px 6px", background: "rgba(0,0,0,0.65)", border: "1px solid var(--border2)", borderRadius: 3, color: "var(--gold2)" }}>{faseAtiva.label}</span>}
             <span style={{ position: "absolute", inset: 0, pointerEvents: "none", boxShadow: "inset 0 0 38px rgba(0,0,0,0.92)" }} />
           </div>
@@ -1021,12 +971,6 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
               <Badge accent>{({ combatente: "⚔️", especialista: "🔬", ocultista: "🌑" }[classe?.id] || "◈")} {classe?.name || "Mundano"}</Badge>
               <Badge>Ordem Paranormal</Badge>
             </div>
-            {/* spec 0035 T6 — carimbo. Texto FIXO por decisão do Andre
-                (2026-08-08): refletir PV/SAN inventaria vocabulário de estado
-                que nenhuma spec do sistema define. aria-hidden porque é
-                ornamento de material, não informação — quem usa leitor de tela
-                não ganha nada com um carimbo que diz sempre a mesma coisa. */}
-            <span className="dos-carimbo" aria-hidden="true">Ativo</span>
           </div>
 
           {/* O aviso da Licença vive agora no FIM desta coluna (redesign de layout 2026-08-02) —
@@ -1218,10 +1162,6 @@ export default function OrdemParanormalSheet({ character, charId, onBack, onUpda
 
         {/* ── CENTER: perícias ── */}
         <div className={`op-ink op-col-panel${mobileSec !== "pericias" ? " op-mobile-hidden" : ""}`} data-edit={editMode ? "true" : "false"} style={{ display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden", background: "rgba(0,0,0,0.22)" }}>
-          {/* quick 006 — marca d'água. UMA vez na ficha inteira, no maior
-              painel: repetida viraria papel de parede. pointer-events:none
-              no CSS; não intercepta nenhum clique da tabela. */}
-          <div className="dos-marca" aria-hidden="true">Ordem Paranormal</div>
           <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border2)", display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span className="op-label" style={{ color: "var(--el-glow)" }}>{t("op.sheet.skills.title")}</span>
@@ -2072,20 +2012,14 @@ function BancaDeModificadores({ mods, setMods }) {
 /* ════════════════════════════════════════════════════════════════════════
  *  SMALL PARTS
  * ════════════════════════════════════════════════════════════════════════ */
-/* spec 0035 AC-2: rótulo · pontilhado · valor numa linha só. Era rótulo em
-   cima e valor embaixo — dois <span> empilhados, que é o que fazia a ficha
-   ler como LISTA renderizada em vez de formulário preenchido. O guia
-   pontilhado no meio é o que prova que ali havia um vão a preencher. */
 function Field({ label, value, editMode, onChange, placeholder }) {
   return (
-    <div className="dos-campo">
-      <span className="dos-campo-rotulo">{label}</span>
-      <span className="dos-campo-guia" aria-hidden="true" />
+    <div>
+      <div className="op-label" style={{ marginBottom: 2 }}>{label}</div>
       {editMode ? (
-        <input className="dos-campo-entrada" value={value === "—" ? "" : value} placeholder={placeholder}
-          aria-label={label} onChange={(e) => onChange?.(e.target.value)} />
+        <input value={value === "—" ? "" : value} placeholder={placeholder} onChange={(e) => onChange?.(e.target.value)} style={{ padding: "4px 7px", fontSize: 13 }} />
       ) : (
-        <span className="dos-campo-valor">{value || "—"}</span>
+        <div style={{ fontFamily: "var(--font-body,'IM Fell English',serif)", fontSize: 14, color: "var(--text)" }}>{value || "—"}</div>
       )}
     </div>
   );
@@ -2119,22 +2053,12 @@ function MiniBtn({ children, onClick, style }) {
 function Empty({ children }) {
   return <div className="op-data" style={{ fontSize: 11, color: "var(--muted)", padding: "14px 0", fontStyle: "italic" }}>{children}</div>;
 }
-/* spec 0035 AC-2: era rótulo em cima e valor embaixo — o padrão exato que o
-   AC chama de LISTA. Agora usa a gramática de formulário do dossiê. O valor
-   mantém o corpo de destaque (é um mostrador, não um campo de texto), mas
-   herda o algarismo tabular de `.dos-campo-valor`, que é o que faz PD,
-   Deslocamento e Classe alinharem dígito na vertical.
-   O ouro do fundo saiu de rgba(201,168,76,0.06) para token: era o mesmo
-   literal da paleta velha que a varredura do AC-5 tirou do ordemStyles. */
 function Readout({ label, value, note, onStep }) {
   return (
-    <div className="op-ink" style={{ flex: "1 1 150px", padding: "9px 12px", display: "flex", alignItems: "center", gap: 12, background: "linear-gradient(90deg, var(--gold-dim), transparent)" }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="dos-campo">
-          <span className="dos-campo-rotulo">{label}</span>
-          <span className="dos-campo-guia" aria-hidden="true" />
-          <span className="dos-campo-valor" style={{ fontFamily: "var(--font-display,'Cinzel Decorative',serif)", fontSize: 18, color: "var(--el-glow)", lineHeight: 1.1 }}>{value}</span>
-        </div>
+    <div className="op-ink" style={{ flex: "1 1 150px", padding: "9px 12px", display: "flex", alignItems: "center", gap: 12, background: "linear-gradient(90deg, rgba(201,168,76,0.06), transparent)" }}>
+      <div style={{ flex: 1 }}>
+        <div className="op-label">{label}</div>
+        <div style={{ fontFamily: "var(--font-display,'Cinzel Decorative',serif)", fontSize: 18, color: "var(--el-glow)", lineHeight: 1.1 }}>{value}</div>
         {note && <div className="op-data" style={{ fontSize: 9, color: "var(--muted)" }}>{note}</div>}
       </div>
       {onStep && <div style={{ display: "flex", flexDirection: "column", gap: 3 }}><MiniBtn onClick={() => onStep(1)}>+</MiniBtn><MiniBtn onClick={() => onStep(-1)}>−</MiniBtn></div>}
